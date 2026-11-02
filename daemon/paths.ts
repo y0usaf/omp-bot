@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -8,4 +8,7 @@ export const SOCKET = process.env.OMP_BOT_SOCKET || join(STATE, "botd.sock");
 export const ROSTER = join(STATE, "bots.json");
 
 mkdirSync(STATE, { recursive: true });
-if (!existsSync(ROSTER)) copyFileSync(join(ROOT, "bots.json"), ROSTER);
+if (!existsSync(ROSTER)) {
+	copyFileSync(join(ROOT, "bots.json"), ROSTER);
+	chmodSync(ROSTER, 0o644);
+}

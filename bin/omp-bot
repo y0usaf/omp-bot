@@ -15,14 +15,15 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
 [ ! -r "$config" ] || . "$config"
 state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
 mkdir -p "$state"
-[ -e "$state/bots.json" ] || cp "$root/bots.json" "$state/bots.json"
+[ -e "$state/bots.json" ] || { cp "$root/bots.json" "$state/bots.json" && chmod 644 "$state/bots.json"; }
 if [ -n "$tint" ]; then
 	(
 		flock 9
 		jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null && exit 0
 		tmp=$(mktemp "$state/bots.json.XXXXXX")
 		jq --arg n "$name" --arg t "$tint" '. + [{name: $n, role: "Assistant", tint: $t, cwd: "~"}]' "$state/bots.json" >"$tmp"
-		mv "$tmp" "$state/bots.json"
+		chmod 644 "$tmp"
+		mv -f "$tmp" "$state/bots.json"
 	) 9>"$state/bots.lock"
 fi
 bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json") || { echo "omp-bot: no bot named $name in $state/bots.json" >&2; exit 1; }
