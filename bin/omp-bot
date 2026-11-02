@@ -30,7 +30,9 @@ cd "${cwd:-$HOME}"
 export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
-set -- --no-extensions -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" --continue "$@"
+set -- --continue "$@"
+[ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
+set -- --no-extensions -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
 	exec flock -n "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
