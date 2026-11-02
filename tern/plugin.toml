@@ -4,4 +4,4 @@ name = "omp bots"
 version = "0.1.0"
 description = "Bot mode for omp: a flat chat, a roster rail with mini orbs, and commands to open bots from bots.json."
 window = "window.luau"
-styles = ["flat.css", "rail.css", "bot.css"]
+styles = ["rail.css", "bot.css"]
