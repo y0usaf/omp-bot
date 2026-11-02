@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+[ $# -ge 1 ] || { echo "usage: omp-bot NAME [omp args...]" >&2; exit 2; }
+root=$(cd "$(dirname "$0")/.." && pwd)
+name=$1
+shift
+bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$root/bots.json") || { echo "omp-bot: no bot named $name in $root/bots.json" >&2; exit 1; }
+field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
+cwd=$(field cwd)
+case $cwd in "~") cwd=$HOME ;; "~/"*) cwd=$HOME/${cwd#"~/"} ;; esac
+cd "${cwd:-$HOME}"
+export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)"
+persona=$(field persona)
+[ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
+exec "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" --no-extensions --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" "$@"

@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+root=$(cd -P "$(dirname "$0")/.." && pwd)
+xdg_state=${XDG_STATE_HOME:-$HOME/.local/state}
+state=$xdg_state/omp-bot-demo
+sock=$state/ctl.sock
+export TERN_CONFIG_DIR="$state/config" TERN_DAEMON_SOCKET="$state/daemon.sock" TMPDIR="$state/tmp"
+export XDG_STATE_HOME="$state/xdg/state" XDG_CACHE_HOME="$state/xdg/cache" XDG_DATA_HOME="$state/xdg/data"
+ctl() { tern ctl --control "$sock" "$@" >/dev/null; }
+opened() { tern ctl --control "$sock" state | jq -e '.tabs | any(.color)' >/dev/null; }
+wait_for() {
+	tries=0
+	until ctl $1 2>/dev/null && ${3:-true}; do
+		tries=$((tries + 1))
+		[ "$tries" -lt 100 ] || { echo "omp-bot-demo: $2, see $state/tern.log" >&2; exit 1; }
+		sleep 0.2
+	done
+}
+
+case ${1:-} in
+--stop)
+	ctl quit 2>/dev/null || true
+	pkill -f "daemon --socket $TERN_DAEMON_SOCKET" || true
+	rm -f "$sock"
+	exit 0
+	;;
+--headless | "") ;;
+*)
+	echo "usage: omp-bot-demo [--headless | --stop]" >&2
+	exit 2
+	;;
+esac
+
+mkdir -p "$TERN_CONFIG_DIR/plugins" "$TMPDIR" "$XDG_STATE_HOME/tern" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+ln -sfn "$xdg_state/tern/secrets" "$XDG_STATE_HOME/tern/secrets"
+printf '%s\n' "$root/tern" >"$TERN_CONFIG_DIR/plugins/omp-bot.path"
+[ -e "$TERN_CONFIG_DIR/settings.json" ] ||
+	printf '%s\n' '{"theme": "Light", "theme_light": "light", "theme_dark": "graphite", "layout": "Rail", "material": "Solid", "status_bar": false, "pane_headers": "Never"}' >"$TERN_CONFIG_DIR/settings.json"
+
+if ! ctl state 2>/dev/null; then
+	rm -f "$sock"
+	if [ "${1:-}" = --headless ]; then
+		fixtures=$state/fixtures/crates
+		mkdir -p "$fixtures/tern" "$fixtures/plugins"
+		ln -sfn "$root" "$fixtures/plugins/fixtures"
+		STENCIL_FIXTURE_ROOT="$fixtures/tern" setsid -f tern serve --control "$sock" --out "$state/shots" >"$state/tern.log" 2>&1
+	else
+		setsid -f tern --control "$sock" >"$state/tern.log" 2>&1
+	fi
+	wait_for state "Tern did not start"
+	[ "${1:-}" != --headless ] || ctl plugins fixtures
+fi
+wait_for "plugins run plugin.omp-bot.stage" "the omp-bot plugin did not open the bots" opened
+echo "$sock"

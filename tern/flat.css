@@ -1,0 +1,77 @@
+html.tn-themed .tn-pane,
+html.tn-themed .tn-stage,
+html.tn-themed #panel {
+	box-shadow: none !important;
+	border-color: transparent !important;
+}
+
+[data-surface='omp.session'] [data-role='omp.welcome'],
+[data-surface='omp.session'] [data-role='omp.welcome'] + .sf-spacer + .sf-col,
+[data-surface='omp.session'] [data-role='omp.thinking'],
+[data-surface='omp.session'] [data-role='omp.thinking.live'],
+[data-surface='omp.session'] [data-role='omp.composer.context'] {
+	display: none !important;
+}
+
+[data-surface='omp.session'] [data-role='omp.user'] > .sf-card-body {
+	max-width: 72%;
+	padding: 9px 16px !important;
+	border: none !important;
+	border-radius: 20px !important;
+	background: light-dark(#111113, #ececee) !important;
+	color: light-dark(#ffffff, #111113);
+	box-shadow: none !important;
+}
+
+[data-surface='omp.session'] [data-role='omp.user'] .md,
+[data-surface='omp.session'] [data-role='omp.user'] .md * {
+	color: light-dark(#ffffff, #111113);
+}
+
+[data-surface='omp.session'] [data-role='omp.assistant'] > .sf-md {
+	align-self: flex-start;
+	max-width: 82%;
+	padding: 9px 16px;
+	border-radius: 20px;
+	background: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.075));
+	color: light-dark(#111113, #ececee);
+}
+
+[data-surface='omp.session'] [data-role='omp.user.tools'],
+[data-surface='omp.session'] [data-role='omp.turn.usage'] {
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+[data-surface='omp.session'] [data-role='omp.user']:hover [data-role='omp.user.tools'],
+[data-surface='omp.session'] [data-role='omp.assistant']:hover [data-role='omp.turn.usage'] {
+	opacity: 0.6;
+}
+
+[data-surface='omp.session'] [data-role='omp.editor'] {
+	border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1)) !important;
+	border-radius: 26px !important;
+	background: light-dark(#ffffff, rgba(255, 255, 255, 0.04)) !important;
+	box-shadow: none !important;
+}
+
+[data-surface='omp.session'] [data-role='omp.composer.model'],
+[data-surface='omp.session'] [data-role='omp.composer.extras'],
+[data-surface='omp.session'] [data-role='omp.composer.usage'] {
+	opacity: 0.45;
+	transition: opacity 0.15s;
+}
+
+[data-surface='omp.session'] [data-role='omp.composer.model']:hover,
+[data-surface='omp.session'] [data-role='omp.composer.extras']:hover,
+[data-surface='omp.session'] [data-role='omp.composer.usage']:hover {
+	opacity: 1;
+}
+
+[data-surface='omp.session'] [data-role='omp.editor']::before,
+[data-surface='omp.session'] [data-role='omp.editor']::after { display: none !important; }
+
+[data-surface='omp.session'] [data-role='omp.assistant'] > .sf-md .md > :last-child,
+[data-surface='omp.session'] [data-role='omp.user'] .md > :last-child {
+	margin-bottom: 0;
+}
