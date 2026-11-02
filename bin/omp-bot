@@ -7,9 +7,11 @@ name=$1
 shift
 headless=0
 [ "${1:-}" != --headless ] || { headless=1; shift; }
-bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$root/bots.json") || { echo "omp-bot: no bot named $name in $root/bots.json" >&2; exit 1; }
-field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
 state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+mkdir -p "$state"
+[ -e "$state/bots.json" ] || cp "$root/bots.json" "$state/bots.json"
+bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json") || { echo "omp-bot: no bot named $name in $state/bots.json" >&2; exit 1; }
+field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
 dir=$state/bots/$name
 mkdir -p "$dir/sessions"
 cwd=$(field cwd)

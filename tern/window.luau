@@ -1,7 +1,8 @@
 --!strict
 
 local ROOT = tern.plugin.dir .. "/.."
-local ROSTER = ROOT .. "/bots.json"
+local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or ((tern.getenv("HOME") or "") .. "/.local/state")) .. "/omp-bot")
+local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local FIELDS = { "name", "role", "tint", "cwd", "persona" }
 
@@ -12,7 +13,7 @@ local function quote(s: string): string
 end
 
 local function roster(): { Bot }
-	return tern.json.decode(tern.fs.read(ROSTER))
+	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
 end
 
 local function save(bots: { Bot })

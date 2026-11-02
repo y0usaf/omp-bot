@@ -6,10 +6,10 @@ Needs Tern, omp, bun, jq and flock on `PATH` (`OMP_BIN` picks another omp, `OMP_
 
 - `bin/omp-botd` is the supervisor that queues tasks and runs bots. finix runs it as the `omp-botd` service.
 - `bin/omp-bot-ctl task BOT TEXT [--key KEY] [--origin ORIGIN]` queues a task. `inbox` lists finished and failed tasks you haven't acknowledged, `ack ID` acknowledges one, `tasks` lists recent ones and `status` shows which bots are awake.
-- `bin/omp-bot NAME` opens the bot `NAME` from `bots.json` in any terminal. `bin/omp-bot-demo` opens a Tern window with one tab per bot, a flat chat and a roster rail; `--stop` closes it.
-- In Tern, the palette's **Bots: Open all** opens every bot not yet open; **Bots: New bot** opens one, or names a new one and adds it to `bots.json`.
+- `bin/omp-bot NAME` opens the bot `NAME` from the roster in any terminal. `bin/omp-bot-demo` opens a Tern window with one tab per bot, a flat chat and a roster rail; `--stop` closes it.
+- In Tern, the palette's **Bots: Open all** opens every bot not yet open; **Bots: New bot** opens one, or names a new one and adds it to the roster.
 
-Add a bot by adding a line to `bots.json`: `name`, a one-line `role`, a `tint` (red, orange, yellow, green, teal, blue, purple or pink), the `cwd` it starts in, and optionally a `persona` with extra instructions.
+The roster is `bots.json` in the state folder below, copied from this repo's `bots.json` the first time anything runs. Add a bot by adding a line to it: `name`, a one-line `role`, a `tint` (red, orange, yellow, green, teal, blue, purple or pink), the `cwd` it starts in, and optionally a `persona` with extra instructions.
 
 ## How it works
 
@@ -28,7 +28,7 @@ flowchart LR
 - **Attention.** A bot that has nothing worth your attention replies exactly "Nothing to report.", and that result skips the inbox.
 - **Sleep.** A background bot stops after 5 idle minutes (`OMP_BOT_IDLE_EXIT_MS`). A bot is never killed mid-task to sleep.
 
-State lives in `${OMP_BOT_STATE:-${XDG_STATE_HOME:-~/.local/state}/omp-bot}`: `tasks.db`, `bots/NAME/`, `logs/NAME.log` for background runs and `botd.sock`.
+State lives in `${OMP_BOT_STATE:-${XDG_STATE_HOME:-~/.local/state}/omp-bot}`: `bots.json`, `tasks.db`, `bots/NAME/`, `logs/NAME.log` for background runs and `botd.sock`.
 
 ## Not built yet
 
