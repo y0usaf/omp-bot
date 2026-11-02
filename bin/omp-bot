@@ -1,17 +1,25 @@
 #!/bin/sh
 set -eu
-usage="usage: omp-bot NAME [--headless] [omp args...]"
+usage="usage: omp-bot NAME [--headless | --create TINT] [omp args...]"
 [ $# -ge 1 ] || { echo "$usage" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd)
 name=$1
 shift
 headless=0
-[ "${1:-}" != --headless ] || { headless=1; shift; }
+tint=
+case ${1:-} in
+--headless) headless=1; shift ;;
+--create) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; tint=$2; shift 2 ;;
+esac
 config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
 [ ! -r "$config" ] || . "$config"
 state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
 mkdir -p "$state"
 [ -e "$state/bots.json" ] || cp "$root/bots.json" "$state/bots.json"
+if [ -n "$tint" ] && ! jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null; then
+	jq --arg n "$name" --arg t "$tint" '. + [{name: $n, role: "Assistant", tint: $t, cwd: "~"}]' "$state/bots.json" >"$state/bots.json.tmp"
+	mv "$state/bots.json.tmp" "$state/bots.json"
+fi
 bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json") || { echo "omp-bot: no bot named $name in $state/bots.json" >&2; exit 1; }
 field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
 dir=$state/bots/$name

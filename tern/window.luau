@@ -4,7 +4,6 @@ local ROOT = tern.plugin.dir .. "/.."
 local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or ((tern.getenv("HOME") or "") .. "/.local/state")) .. "/omp-bot")
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
-local FIELDS = { "name", "role", "tint", "cwd", "persona" }
 
 type Bot = { name: string, role: string?, tint: string?, cwd: string?, persona: string? }
 
@@ -14,21 +13,6 @@ end
 
 local function roster(): { Bot }
 	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
-end
-
-local function save(bots: { Bot })
-	local lines = {}
-	for _, bot in ipairs(bots) do
-		local parts = {}
-		for _, key in ipairs(FIELDS) do
-			local value = (bot :: any)[key]
-			if value then
-				parts[#parts + 1] = tern.json.encode(key) .. ": " .. tern.json.encode(value)
-			end
-		end
-		lines[#lines + 1] = "  {" .. table.concat(parts, ", ") .. "}"
-	end
-	tern.fs.write(ROSTER, "[\n" .. table.concat(lines, ",\n") .. "\n]\n")
 end
 
 local function show_roles(bots: { Bot })
@@ -52,7 +36,7 @@ local function open_names(cx: WindowCx): { [string]: number }
 	return names
 end
 
-local function command(name: string): string
+local function command(name: string, tint: string?): string
 	local env = {}
 	for _, key in ipairs({ "OMP_BIN", "OMP_BOT_MODEL" }) do
 		local value = tern.getenv(key)
@@ -61,11 +45,12 @@ local function command(name: string): string
 		end
 	end
 	local prefix = #env > 0 and "env " .. table.concat(env, " ") .. " " or ""
-	return prefix .. quote(ROOT .. "/bin/omp-bot") .. " " .. quote(name)
+	local create = tint and " --create " .. quote(tint) or ""
+	return prefix .. quote(ROOT .. "/bin/omp-bot") .. " " .. quote(name) .. create
 end
 
-local function open(cx: WindowCx, bot: Bot)
-	local id = cx.layout:new_tab({ command = command(bot.name) })
+local function open(cx: WindowCx, bot: Bot, new: boolean?)
+	local id = cx.layout:new_tab({ command = command(bot.name, new and bot.tint or nil) })
 	if not id then
 		cx:toast("error", "Could not open " .. bot.name)
 		return
@@ -133,9 +118,8 @@ local function create(cx: WindowCx, bots: { Bot })
 		end
 		local bot = { name = name, role = "Assistant", tint = tint, cwd = "~" }
 		bots[#bots + 1] = bot
-		save(bots)
 		show_roles(bots)
-		open(cx2, bot)
+		open(cx2, bot, true)
 	end)
 end
 
