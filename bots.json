@@ -1,0 +1,6 @@
+[
+  {"name": "Pip", "role": "Chief of staff", "tint": "purple", "cwd": "~"},
+  {"name": "Nova", "role": "Research", "tint": "teal", "cwd": "~"},
+  {"name": "Mote", "role": "Infra & deploys", "tint": "orange", "cwd": "~/finix"},
+  {"name": "Kiki", "role": "Inbox triage", "tint": "pink", "cwd": "~"}
+]

@@ -1,0 +1,309 @@
+[data-role='omp.bot.idle'],
+[data-role='omp.bot.thinking'],
+[data-role='omp.bot.working'],
+[data-role='omp.bot.talking'],
+[data-role='omp.bot.happy'],
+[data-role='omp.bot.error'],
+[data-role='omp.bot.waiting'] {
+	padding: 6px 4px 16px 6px;
+}
+
+[data-role^='omp.bot.'].sf-void {
+	display: block !important;
+}
+
+[data-role='omp.bot.face'].sf-void {
+	display: flex !important;
+}
+
+[data-role^='omp.bot.orb.'] {
+	--c1: #6d7bff;
+	--c2: #ff5fa8;
+	--c3: #46b4ff;
+	--spin: 1;
+	position: relative;
+	isolation: isolate;
+	flex: none;
+	width: 48px;
+	height: 48px;
+	min-width: 48px;
+	border-radius: 50%;
+	background:
+		radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 38%),
+		radial-gradient(circle at 50% 58%, var(--c1), rgb(from var(--c1) r g b / 35%) 62%, rgb(from var(--c1) r g b / 0%) 72%);
+	box-shadow:
+		0 0 22px -4px rgb(from var(--c1) r g b / 70%),
+		0 6px 18px -8px rgb(from var(--c2) r g b / 60%),
+		inset 0 0 0 1.25px rgba(255, 255, 255, 0.2);
+	animation: botBreathe 4.2s ease-in-out infinite;
+}
+
+[data-role='omp.bot.glow'] {
+	position: absolute;
+	inset: -10px;
+	z-index: -1;
+	border-radius: 50%;
+	background:
+		radial-gradient(40% 40% at 70% 70%, rgb(from var(--c2) r g b / 45%), rgba(0, 0, 0, 0) 70%),
+		radial-gradient(40% 40% at 25% 30%, rgb(from var(--c3) r g b / 40%), rgba(0, 0, 0, 0) 70%);
+	animation: botDrift 7s steps(140) infinite alternate;
+}
+
+[data-role='omp.bot.ring.a'],
+[data-role='omp.bot.ring.b'],
+[data-role='omp.bot.ring.c'] {
+	position: absolute;
+	inset: 6px;
+	border: 1.5px solid;
+	border-radius: 50%;
+	pointer-events: none;
+}
+
+[data-role='omp.bot.ring.a'] {
+	border-color: rgb(from var(--c2) r g b / 95%);
+	transform: rotate(-30deg) scaleY(0.36);
+	animation: botOrbitA 7s steps(140) infinite;
+}
+
+[data-role='omp.bot.ring.b'] {
+	border-color: rgb(from var(--c3) r g b / 95%);
+	transform: rotate(30deg) scaleY(0.36);
+	animation: botOrbitB 9s steps(180) infinite reverse;
+}
+
+[data-role='omp.bot.ring.c'] {
+	border-color: rgb(from var(--c1) r g b / 90%);
+	transform: rotate(90deg) scaleY(0.36);
+	animation: botOrbitC 12s steps(240) infinite;
+}
+
+[data-role='omp.bot.core'] {
+	position: absolute;
+	inset: 13px;
+	border-radius: 50%;
+	background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.95), rgb(from var(--c1) r g b / 90%) 55%, rgb(from var(--c1) r g b / 60%));
+	box-shadow: 0 0 12px rgb(from var(--c1) r g b / 80%);
+}
+
+[data-role='omp.bot.face'] {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 16px;
+	height: 10px;
+	margin: -5px 0 0 -8px;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 0;
+	animation: botLook 9s ease-in-out infinite;
+}
+
+[data-role='omp.bot.eye.l'],
+[data-role='omp.bot.eye.r'] {
+	width: 4px;
+	height: 8px;
+	min-height: 0;
+	border-radius: 3px;
+	background: #1a1730;
+	animation: botBlink 4.6s steps(1) infinite;
+}
+
+[data-role='omp.bot.words'] {
+	padding: 6px 14px 7px 14px;
+	border-radius: 16px;
+	background: rgb(from var(--accent) r g b / 8%);
+	box-shadow: inset 0 0 0 1px rgb(from var(--accent) r g b / 16%);
+	min-width: 0;
+}
+
+[data-role='omp.bot.name'] {
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+[data-role^='omp.bot.mood.'] {
+	padding: 0 7px;
+	border-radius: 9px;
+	font-size: 0.8em;
+	line-height: 1.5;
+	color: #fff;
+	background: #6d7bff;
+}
+
+[data-role='omp.bot.mood.thinking'] { background: #9b5cff; }
+[data-role='omp.bot.mood.working'] { background: #1f8fff; }
+[data-role='omp.bot.mood.talking'] { background: #12a88a; }
+[data-role='omp.bot.mood.happy'] { background: #22b357; }
+[data-role='omp.bot.mood.error'] { background: #e5484d; }
+[data-role='omp.bot.mood.waiting'] { background: #e08a00; }
+
+[data-role='omp.bot.steps'] {
+	opacity: 0.6;
+}
+
+[data-role='omp.bot.orb.thinking'] {
+	--c1: #9b5cff;
+	--c2: #ff4f9a;
+	--c3: #6d7bff;
+	animation: botBreathe 1.8s ease-in-out infinite;
+}
+[data-role='omp.bot.orb.thinking'] [data-role='omp.bot.face'] {
+	animation: botPonder 2.4s ease-in-out infinite;
+}
+[data-role='omp.bot.orb.thinking'] [data-role='omp.bot.ring.a'] { animation-duration: 2.8s; animation-timing-function: steps(56); }
+[data-role='omp.bot.orb.thinking'] [data-role='omp.bot.ring.b'] { animation-duration: 3.6s; animation-timing-function: steps(72); }
+[data-role='omp.bot.orb.thinking'] [data-role='omp.bot.ring.c'] { animation-duration: 4.8s; animation-timing-function: steps(96); }
+
+[data-role='omp.bot.orb.working'] {
+	--c1: #1f8fff;
+	--c2: #00e0c6;
+	--c3: #7b5cff;
+	animation: botBob 0.9s ease-in-out infinite;
+}
+[data-role='omp.bot.orb.working'] [data-role='omp.bot.ring.a'] { animation-duration: 1.2s; animation-timing-function: steps(36); }
+[data-role='omp.bot.orb.working'] [data-role='omp.bot.ring.b'] { animation-duration: 1.6s; animation-timing-function: steps(48); }
+[data-role='omp.bot.orb.working'] [data-role='omp.bot.ring.c'] { animation-duration: 2s; animation-timing-function: steps(60); }
+[data-role='omp.bot.orb.working'] [data-role='omp.bot.eye.l'],
+[data-role='omp.bot.orb.working'] [data-role='omp.bot.eye.r'] {
+	height: 5px;
+	border-radius: 2px;
+}
+
+[data-role='omp.bot.orb.talking'] {
+	--c1: #12b39a;
+	--c2: #7bf1a8;
+	--c3: #46b4ff;
+	animation: botTalk 0.42s ease-in-out infinite alternate;
+}
+
+[data-role='omp.bot.orb.happy'] {
+	--c1: #22b357;
+	--c2: #ffd166;
+	--c3: #46b4ff;
+	animation: botHop 0.7s ease-out 3;
+}
+[data-role='omp.bot.orb.happy'] [data-role='omp.bot.eye.l'],
+[data-role='omp.bot.orb.happy'] [data-role='omp.bot.eye.r'] {
+	width: 6px;
+	height: 4px;
+	background: none;
+	border: 2px solid #1a1730;
+	border-bottom: 0;
+	border-radius: 6px 6px 0 0;
+	animation: none;
+}
+
+[data-role='omp.bot.orb.error'] {
+	--c1: #e5484d;
+	--c2: #ff9f43;
+	--c3: #ff5fa8;
+	animation: botShake 0.5s ease-in-out 2;
+}
+[data-role='omp.bot.orb.error'] [data-role='omp.bot.eye.l'],
+[data-role='omp.bot.orb.error'] [data-role='omp.bot.eye.r'] {
+	height: 2px;
+	width: 6px;
+	animation: none;
+}
+
+[data-role='omp.bot.orb.waiting'] {
+	--c1: #f0a020;
+	--c2: #ff5fa8;
+	--c3: #ffd166;
+	animation: botSway 2.6s ease-in-out infinite;
+}
+[data-role='omp.bot.orb.waiting'] [data-role='omp.bot.face'] {
+	animation: none;
+	transform: translate(0, 3px);
+}
+
+@keyframes botBreathe {
+	0%, 100% { transform: scale(1); }
+	50% { transform: scale(1.05); }
+}
+
+@keyframes botDrift {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
+@keyframes botOrbitA {
+	from { transform: rotate(-30deg) scaleY(0.36); }
+	to { transform: rotate(330deg) scaleY(0.36); }
+}
+
+@keyframes botOrbitB {
+	from { transform: rotate(30deg) scaleY(0.36); }
+	to { transform: rotate(390deg) scaleY(0.36); }
+}
+
+@keyframes botOrbitC {
+	from { transform: rotate(90deg) scaleY(0.36); }
+	to { transform: rotate(450deg) scaleY(0.36); }
+}
+
+@keyframes botBlink {
+	0%, 93% { transform: scaleY(1); }
+	94%, 97% { transform: scaleY(0.12); }
+	98%, 100% { transform: scaleY(1); }
+}
+
+@keyframes botLook {
+	0%, 30%, 100% { transform: translate(0, 0); }
+	38%, 52% { transform: translate(3px, -1px); }
+	60%, 74% { transform: translate(-3px, 0); }
+}
+
+@keyframes botPonder {
+	0%, 100% { transform: translate(2px, -3px); }
+	50% { transform: translate(-2px, -3px); }
+}
+
+@keyframes botBob {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-3px); }
+}
+
+@keyframes botTalk {
+	from { transform: scale(1); }
+	to { transform: scale(1.07, 0.95); }
+}
+
+@keyframes botHop {
+	0% { transform: translateY(0) scale(1.08, 0.9); }
+	35% { transform: translateY(-12px) scale(0.95, 1.06); }
+	70% { transform: translateY(0) scale(1.06, 0.93); }
+	100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes botShake {
+	0%, 100% { transform: translateX(0); }
+	20%, 60% { transform: translateX(-4px); }
+	40%, 80% { transform: translateX(4px); }
+}
+
+@keyframes botSway {
+	0%, 100% { transform: rotate(-6deg); }
+	50% { transform: rotate(6deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	[data-role^='omp.bot.orb.'],
+	[data-role^='omp.bot.orb.'] * {
+		animation: none !important;
+	}
+}
+
+[data-role='omp.bot.stop'] {
+	margin-left: 6px;
+	padding: 0 6px;
+	border-radius: 8px;
+	font-size: 0.85em;
+	opacity: 0.7;
+	cursor: pointer;
+}
+[data-role='omp.bot.stop']:hover {
+	opacity: 1;
+	background: rgb(from var(--accent) r g b / 12%);
+}
