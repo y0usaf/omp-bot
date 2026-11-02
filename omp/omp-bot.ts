@@ -403,8 +403,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const extra = process.env.OMP_BOT_PERSONA ? `\n${process.env.OMP_BOT_PERSONA}\n` : "";
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb. Your job: ${bot.role}. Tool cards are compressed; /bot reveals them. Use short, plain tool titles where the tool schema supports them. Speak as ${bot.name}: warm, curious, brief.\n${extra}`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb. Tool cards are compressed; /bot reveals them. Use short, plain tool titles where the tool schema supports them. Speak as ${bot.name}: warm, curious, brief.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };

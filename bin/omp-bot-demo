@@ -3,6 +3,7 @@ set -eu
 root=$(cd -P "$(dirname "$0")/.." && pwd)
 xdg_state=${XDG_STATE_HOME:-$HOME/.local/state}
 state=$xdg_state/omp-bot-demo
+export OMP_BOT_STATE="${OMP_BOT_STATE:-$xdg_state/omp-bot}"
 sock=$state/ctl.sock
 export TERN_CONFIG_DIR="$state/config" TERN_DAEMON_SOCKET="$state/daemon.sock" TMPDIR="$state/tmp"
 export XDG_STATE_HOME="$state/xdg/state" XDG_CACHE_HOME="$state/xdg/cache" XDG_DATA_HOME="$state/xdg/data"

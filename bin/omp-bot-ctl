@@ -1,0 +1,2 @@
+#!/bin/sh
+exec bun "$(cd "$(dirname "$0")/.." && pwd)/daemon/ctl.ts" "$@"

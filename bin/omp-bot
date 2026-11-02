@@ -1,15 +1,30 @@
 #!/bin/sh
 set -eu
-[ $# -ge 1 ] || { echo "usage: omp-bot NAME [omp args...]" >&2; exit 2; }
+usage="usage: omp-bot NAME [--headless] [omp args...]"
+[ $# -ge 1 ] || { echo "$usage" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd)
 name=$1
 shift
+headless=0
+[ "${1:-}" != --headless ] || { headless=1; shift; }
 bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$root/bots.json") || { echo "omp-bot: no bot named $name in $root/bots.json" >&2; exit 1; }
 field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
+state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+dir=$state/bots/$name
+mkdir -p "$dir/sessions"
 cwd=$(field cwd)
 case $cwd in "~") cwd=$HOME ;; "~/"*) cwd=$HOME/${cwd#"~/"} ;; esac
 cd "${cwd:-$HOME}"
-export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
+export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
-exec "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" --no-extensions --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" "$@"
+set -- --no-extensions -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" --continue "$@"
+if [ "$headless" = 1 ]; then
+	export OMP_BOT_HEADLESS=1
+	exec flock -n "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
+fi
+"$root/bin/omp-bot-ctl" claim "$name" || true
+code=0
+flock -w 30 -E 75 "$dir/lock" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" "$@" || code=$?
+[ "$code" != 75 ] || echo "omp-bot: $name is already open somewhere else" >&2
+exit "$code"
