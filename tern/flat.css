@@ -75,3 +75,7 @@ html.tn-themed #panel {
 [data-surface='omp.session'] [data-role='omp.user'] .md > :last-child {
 	margin-bottom: 0;
 }
+
+[data-surface='omp.session'] [data-role='omp.toast.status'] {
+	display: none !important;
+}
