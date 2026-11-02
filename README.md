@@ -6,8 +6,9 @@ Needs Tern, omp, bun, jq and flock on `PATH` (`OMP_BIN` picks another omp, `OMP_
 
 - `bin/omp-botd` is the supervisor that queues tasks and runs bots. finix runs it as the `omp-botd` service.
 - `bin/omp-bot-ctl task BOT TEXT [--key KEY] [--origin ORIGIN]` queues a task. `inbox` lists finished and failed tasks you haven't acknowledged, `ack ID` acknowledges one, `tasks` lists recent ones and `status` shows which bots are awake.
-- `bin/omp-bot NAME` opens the bot `NAME` from the roster in any terminal. `bin/omp-bot-demo` opens a Tern window with one tab per bot, a flat chat and a roster rail; `--stop` closes it.
-- In Tern, the palette's **Bots: Open all** opens every bot not yet open; **Bots: New bot** opens one, or names a new one and adds it to the roster.
+- In Tern, the palette's **Bots: Open all** opens every bot in a locked **Bots** session, one tab each, with an orb in the rail. **Bots: Open bot** opens or focuses one, or names a new one and adds it to the roster. Bot tabs get the flat chat; other omp tabs keep their look.
+- `bin/omp-bot NAME` opens the bot `NAME` in any terminal. `bin/omp-bot-demo` opens a separate Tern window with only the bots; `--stop` closes it.
+- `~/.config/omp-bot/env`, when present, is read as shell before a bot starts; finix sets `OMP_BIN` there to omp outside omp-box.
 
 The roster is `bots.json` in the state folder below, copied from this repo's `bots.json` the first time anything runs. Add a bot by adding a line to it: `name`, a one-line `role`, a `tint` (red, orange, yellow, green, teal, blue, purple or pink), the `cwd` it starts in, and optionally a `persona` with extra instructions.
 

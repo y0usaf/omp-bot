@@ -3,6 +3,7 @@
 local ROOT = tern.plugin.dir .. "/.."
 local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or ((tern.getenv("HOME") or "") .. "/.local/state")) .. "/omp-bot")
 local ROSTER = STATE .. "/bots.json"
+local SESSION = "Bots"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local FIELDS = { "name", "role", "tint", "cwd", "persona" }
 
@@ -42,14 +43,38 @@ local function show_roles(bots: { Bot })
 	tern.css("roles", table.concat(rules, "\n"))
 end
 
-local function open_names(cx: WindowCx): { [string]: boolean }
+local function open_names(cx: WindowCx): { [string]: number }
 	local names = {}
 	for _, tab in ipairs(cx.session:tabs()) do
 		if tab.name then
-			names[tab.name] = true
+			names[tab.name] = tab.pane
 		end
 	end
 	return names
+end
+
+local function to_bots_session(cx: WindowCx): { number }?
+	for _, session in ipairs(cx.sessions:list()) do
+		if session.name == SESSION then
+			if not session.current then
+				cx.sessions:switch(session.id)
+			end
+			return nil
+		end
+	end
+	cx.sessions:create({ name = SESSION })
+	cx.sessions:lock(nil)
+	local fresh = {}
+	for _, tab in ipairs(cx.session:tabs()) do
+		fresh[#fresh + 1] = tab.pane
+	end
+	return fresh
+end
+
+local function close_all(cx: WindowCx, panes: { number }?)
+	for _, pane in ipairs(panes or {}) do
+		cx.layout:close(pane)
+	end
 end
 
 local function command(name: string): string
@@ -78,17 +103,23 @@ local function open(cx: WindowCx, bot: Bot)
 end
 
 local function open_all(cx: WindowCx)
+	local fresh = to_bots_session(cx)
 	local names = open_names(cx)
 	for _, bot in ipairs(roster()) do
 		if not names[bot.name] then
 			open(cx, bot)
 		end
 	end
+	close_all(cx, fresh)
 end
 
 local function stage(cx: WindowCx)
 	local config = tern.getenv("TERN_CONFIG_DIR")
-	if config and tern.fs.exists(config .. "/settings.json") then
+	if not (config and config:find("omp-bot-demo", 1, true)) then
+		cx:toast("error", "Bots: Stage demo only runs in the omp-bot-demo window")
+		return
+	end
+	if tern.fs.exists(config .. "/settings.json") then
 		cx.settings:set_many(tern.json.decode(tern.fs.read(config .. "/settings.json")))
 	end
 	open_all(cx)
@@ -101,10 +132,9 @@ local function stage(cx: WindowCx)
 			cx.layout:close(tab.pane)
 		end
 	end
-	cx.layout:rename_session(cx.sessions:current().id, "Bots")
 end
 
-local function create(cx: WindowCx, bots: { Bot })
+local function create(cx: WindowCx, bots: { Bot }, fresh: { number }?)
 	cx:prompt({ placeholder = "Name your bot", icon = "sparkle", action = "create" }):next(function(name, _, cx2)
 		name = name and name:match("^%s*(.-)%s*$")
 		if not name or name == "" or not cx2 then
@@ -113,6 +143,7 @@ local function create(cx: WindowCx, bots: { Bot })
 		for _, bot in ipairs(bots) do
 			if bot.name == name then
 				open(cx2, bot)
+				close_all(cx2, fresh)
 				return
 			end
 		end
@@ -132,36 +163,37 @@ local function create(cx: WindowCx, bots: { Bot })
 		save(bots)
 		show_roles(bots)
 		open(cx2, bot)
+		close_all(cx2, fresh)
 	end)
 end
 
 local function new_bot(cx: WindowCx)
 	local bots = roster()
-	local names = open_names(cx)
 	local items = {}
 	for _, bot in ipairs(bots) do
-		if not names[bot.name] then
-			items[#items + 1] = { label = bot.name, detail = bot.role, icon = "sparkle", bot = bot }
-		end
-	end
-	if #items == 0 then
-		create(cx, bots)
-		return
+		items[#items + 1] = { label = bot.name, detail = bot.role, icon = "sparkle", bot = bot }
 	end
 	items[#items + 1] = { label = "Someone new…", icon = "plus" }
 	cx:pick({ items = items, placeholder = "Which bot?", icon = "sparkle", action = "open" }):next(function(item, _, cx2)
 		if not item or not cx2 then
 			return
 		end
+		local fresh = to_bots_session(cx2)
 		if item.bot then
-			open(cx2, item.bot)
+			local pane = open_names(cx2)[item.bot.name]
+			if pane then
+				cx2.layout:focus(pane)
+			else
+				open(cx2, item.bot)
+			end
+			close_all(cx2, fresh)
 		else
-			create(cx2, bots)
+			create(cx2, bots, fresh)
 		end
 	end)
 end
 
-tern.command({ id = "new", title = "Bots: New bot", icon = "sparkle", run = new_bot })
+tern.command({ id = "new", title = "Bots: Open bot", icon = "sparkle", run = new_bot })
 tern.command({ id = "open_all", title = "Bots: Open all", icon = "sparkle", run = open_all })
 tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false
