@@ -1,2 +1,6 @@
 advisor:
   enabled: false
+personality: none
+startup:
+  quiet: true
+hideThinkingBlock: true

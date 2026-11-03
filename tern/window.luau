@@ -5,7 +5,30 @@ local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 
+local EYES = { "pill", "round", "visor", "lids", "dots" }
+local RAIL_EYES = {
+	round = "left: 5.2px; top: 6.8px; width: 2.8px; height: 2.8px; border-radius: 50%; box-shadow: 4.8px 0 0 #1a1730;",
+	visor = "left: 5px; top: 7.4px; width: 8px; height: 2.2px; border-radius: 1.1px; box-shadow: none;",
+	lids = "left: 5.1px; top: 6.6px; width: 2.8px; height: 3.2px; border-radius: 0.6px 0.6px 1.6px 1.6px; box-shadow: 4.8px 0 0 #1a1730;",
+	dots = "left: 5px; top: 7.4px; width: 2px; height: 2px; border-radius: 50%; box-shadow: 6px 0 0 #1a1730;",
+}
+
 type Bot = { name: string, role: string?, tint: string?, cwd: string?, persona: string? }
+
+local function mul32(a: number, b: number): number
+	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
+end
+
+local function eyes(name: string): string
+	local h = 0x811cb697
+	for i = 1, #name do
+		h = mul32(bit32.bxor(h, string.byte(name, i)), 0x01000193)
+	end
+	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x85ebca6b)
+	h = mul32(bit32.bxor(h, bit32.rshift(h, 13)), 0xc2b2ae35)
+	h = bit32.bxor(h, bit32.rshift(h, 16))
+	return EYES[h % #EYES + 1]
+end
 
 local function quote(s: string): string
 	return "'" .. s:gsub("'", "'\\''") .. "'"
@@ -21,6 +44,10 @@ local function show_roles(bots: { Bot })
 		if bot.tint and bot.role then
 			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode(bot.role) .. "; }"
+		end
+		local look = bot.tint and RAIL_EYES[eyes(bot.name)]
+		if look then
+			rules[#rules + 1] = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c::after { " .. look .. " }"
 		end
 	end
 	tern.css("roles", table.concat(rules, "\n"))
@@ -38,7 +65,7 @@ end
 
 local function command(name: string, tint: string?): string
 	local env = {}
-	for _, key in ipairs({ "OMP_BIN", "OMP_BOT_MODEL" }) do
+	for _, key in ipairs({ "OMP_BIN", "OMP_BOT_MODEL", "OMP_BOT_STATE", "OMP_BOT_NO_TOOLS" }) do
 		local value = tern.getenv(key)
 		if value and value ~= "" then
 			env[#env + 1] = key .. "=" .. quote(value)

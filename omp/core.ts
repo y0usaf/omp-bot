@@ -1,7 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { SOCKET } from "../daemon/paths";
-
-const SILENT = "Nothing to report.";
+import { identity } from "./prompt";
 
 function prompt(task) {
 	const lines = [`[omp-bot task ${task.id}, attempt ${task.attempt}${task.origin ? `, from ${task.origin}` : ""}]`, "", task.text];
@@ -108,17 +107,9 @@ export default function core(pi) {
 
 	pi.on("before_agent_start", async (event, c) => {
 		if (c.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const identity = [
-			"",
-			`# You are ${name}`,
-			`You are ${name}, one of the user's persistent bots. Your job: ${role}.${persona ? ` ${persona}` : ""}`,
-			"This conversation is yours and carries on across restarts.",
-			`Some messages are tasks, starting with "[omp-bot task ID, attempt N]". Do them without checking in unless a decision truly belongs to the user. Your final reply goes to the user's inbox: lead with the result, or with the decision you need. If nothing deserves their attention, reply exactly "${SILENT}"`,
-			'Tag anything you post outside this conversation, such as comments, commits or messages, with "omp-bot:ID" so a retry can find it.',
-			"",
-		].join("\n");
+		const text = identity({ name, role, persona, mode });
 		const systemPrompt = [...event.systemPrompt];
-		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${identity}`;
+		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${text}`;
 		return { systemPrompt };
 	});
 

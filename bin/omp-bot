@@ -38,6 +38,7 @@ persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
+[ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
 set -- --no-extensions -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1

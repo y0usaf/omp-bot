@@ -1,7 +1,18 @@
-import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
-import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
-import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
+import { CollabPromptMessageComponent } from "@oh-my-pi/pi-tui/chat/collab-prompt-message";
+import {
+	BranchSummaryMessageComponent,
+	CompactionSummaryMessageComponent,
+	HandoffSummaryMessageComponent,
+} from "@oh-my-pi/pi-tui/chat/compaction-summary-message";
+import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
+import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
+import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
+import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
+import { col, elapsed, node, row, span, text } from "@oh-my-pi/pi-tui/native/describe";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 
@@ -13,9 +24,45 @@ const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
 const THINKING = ["Thinking…", "Hmm, let me see…", "Mulling it over…", "Working it out…"];
+const SEED = 0x811cb697;
+const TRAITS = [
+	["eyes", ["pill", "round", "visor", "lids", "dots"]],
+	["rings", ["atom", "saturn", "twin", "orbit"]],
+	["gear", ["antenna", "sprout", "halo", "ears", "moon"]],
+	["glow", ["drift", "pulse", "flare"]],
+	["tempo", ["calm", "even", "brisk"]],
+	["tint", TINTS],
+];
+const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
+const TOOLS = [ToolExecutionComponent, ReadToolGroupComponent];
+const INITIATORS = [
+	UserMessageComponent,
+	CollapsedSyntheticMessageComponent,
+	SkillMessageComponent,
+	CollabPromptMessageComponent,
+	BashExecutionComponent,
+	EvalExecutionComponent,
+	CompactionSummaryMessageComponent,
+	HandoffSummaryMessageComponent,
+	BranchSummaryMessageComponent,
+];
 
 function pick(list, seed) {
 	return list[Math.abs(seed) % list.length];
+}
+
+function traits(name) {
+	let h = SEED;
+	for (const byte of new TextEncoder().encode(name)) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
+	h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+	h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+	h = (h ^ (h >>> 16)) >>> 0;
+	const look = {};
+	for (const [key, list] of TRAITS) {
+		look[key] = list[h % list.length];
+		h = Math.floor(h / list.length);
+	}
+	return look;
 }
 
 function base(path) {
@@ -79,11 +126,33 @@ function clock(ms) {
 	return `${m}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
+function steps(n) {
+	return `${n} step${n === 1 ? "" : "s"}`;
+}
+
+function same(a, b) {
+	return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+function isTool(block) {
+	return TOOLS.some(kind => block instanceof kind);
+}
+
+function isInitiator(block) {
+	return INITIATORS.some(kind => block instanceof kind);
+}
+
+function speaks(block, cx) {
+	if (!(block instanceof AssistantMessageComponent)) return false;
+	return (block.describe(cx)?.c ?? []).some(child => typeof child?.render !== "function" && (child?.k === "md" || child?.key === "error"));
+}
+
 class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
 		this.role = process.env.OMP_BOT_ROLE || "Chief of staff";
-		this.tint = TINTS.includes(process.env.OMP_BOT_TINT) ? process.env.OMP_BOT_TINT : "purple";
+		this.look = traits(this.name);
+		this.tint = TINTS.includes(process.env.OMP_BOT_TINT) ? process.env.OMP_BOT_TINT : this.look.tint;
 		this.mood = "idle";
 		this.line = pick(IDLE, Date.now());
 		this.hero = true;
@@ -92,13 +161,20 @@ class Bot {
 		this.steps = 0;
 		this.active = false;
 		this.stopped = false;
+		this.failed = false;
 		this.running = new Map();
 		this.tui = undefined;
+		this.clock = undefined;
 		this.boop = undefined;
 		this.boops = 0;
 		this.typing = false;
 		this.awake = ["idle", this.line];
 		this.timers = {};
+	}
+
+	rename(name) {
+		this.name = name;
+		this.look = traits(name);
 	}
 
 	set(mood, line) {
@@ -113,24 +189,33 @@ class Bot {
 	}
 
 	after(key, ms, fn) {
-		clearTimeout(this.timers[key]);
-		this.timers[key] = setTimeout(fn, ms);
+		if (!this.clock) return;
+		this.cancel(key);
+		this.timers[key] = this.clock.setTimeout(fn, ms);
+	}
+
+	cancel(key) {
+		if (this.timers[key] !== undefined) this.clock?.clearTimer(this.timers[key]);
+		this.timers[key] = undefined;
 	}
 
 	stopTimers() {
-		for (const timer of Object.values(this.timers)) clearTimeout(timer);
+		for (const key of Object.keys(this.timers)) this.cancel(key);
 	}
 
 	nap() {
 		this.after("nap", NAP_MS, () => {
-			if (this.active || this.mood === "sleep") return;
+			if (this.active || this.mood === "sleep" || this.mood === "drowsy") return;
 			this.awake = [this.mood === "happy" ? "idle" : this.mood, this.line];
-			this.set("sleep", "Napping. Boop to wake.");
+			this.set("drowsy");
+			this.after("nap", 12000, () => {
+				if (!this.active && this.mood === "drowsy") this.set("sleep", "Napping. Boop to wake.");
+			});
 		});
 	}
 
 	wake() {
-		if (this.mood === "sleep") this.set(...this.awake);
+		if (this.mood === "sleep" || this.mood === "drowsy") this.set(...this.awake);
 	}
 
 	poke() {
@@ -150,18 +235,96 @@ class Bot {
 			this.typing = true;
 			this.render();
 		}
-		this.after("typing", 1200, () => {
+		this.after("typing", 1400, () => {
 			this.typing = false;
 			this.render();
 		});
 		if (!this.active) this.nap();
 	}
+
+	face() {
+		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
+	}
+
+	orb(gaze) {
+		const look = this.look;
+		const shape = col(
+			[
+				col([], { role: `omp.bot.glow.${look.glow}` }),
+				col(
+					[col([], { role: "omp.bot.ring.a" }), col([], { role: "omp.bot.ring.b" }), col([], { role: "omp.bot.ring.c" })],
+					{ role: `omp.bot.rings.${look.rings}` },
+				),
+				col([], { role: `omp.bot.gear.${look.gear}` }),
+				col([], { role: "omp.bot.core" }),
+				row(
+					[
+						col([], { role: "omp.bot.eye.l" }),
+						col([], { role: "omp.bot.eye.r" }),
+						col([], { role: "omp.bot.blush.l" }),
+						col([], { role: "omp.bot.blush.r" }),
+						col([], { role: "omp.bot.mouth" }),
+					],
+					{ role: `omp.bot.face.${look.eyes}` },
+				),
+				col([], { role: "omp.bot.heart.a" }),
+				col([], { role: "omp.bot.heart.b" }),
+				col([], { role: "omp.bot.heart.c" }),
+				col([], { role: "omp.bot.spark.a" }),
+				col([], { role: "omp.bot.spark.b" }),
+				text("z", { role: "omp.bot.z", wrap: "none" }),
+				text("purrr", { role: "omp.bot.purr", wrap: "none" }),
+			],
+			{ role: `omp.bot.orb.${this.face()}`, actions: { click: "boop" } },
+		);
+		const body = gaze
+			? ZONES.reduceRight(
+					(inner, zone) => col([col([], { role: `omp.bot.zone.${zone}` }), inner], { role: `omp.bot.gaze.${zone}` }),
+					shape,
+				)
+			: shape;
+		return col([body], { role: `omp.bot.tempo.${look.tempo}` });
+	}
 }
 
-class BotWidget {
-	constructor(bot, theme, stop) {
+class BotHero {
+	constructor(bot) {
 		this.bot = bot;
-		this.theme = theme;
+	}
+
+	handleNativeEvent(event) {
+		if (event?.type === "action" && event.act === "boop") this.bot.poke();
+	}
+
+	invalidate() {}
+
+	render(width) {
+		const b = this.bot;
+		return [truncateToWidth(replaceTabs(` ◉ ${b.name} · ${b.boop ?? b.line}`), width)];
+	}
+
+	describe() {
+		const b = this.bot;
+		if (!b.hero) return col([], { role: "omp.bot.none" });
+		return col(
+			[
+				b.orb(true),
+				col(
+					[
+						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
+						text(b.boop ?? b.role, { role: "omp.bot.say", wrap: "none" }),
+					],
+					{ role: "omp.bot.words", align: "center", gap: "xs" },
+				),
+			],
+			{ role: `omp.bot.hero.${b.tint}`, align: "center", gap: "sm" },
+		);
+	}
+}
+
+class BotTop {
+	constructor(bot, stop) {
+		this.bot = bot;
 		this.stop = stop;
 	}
 
@@ -173,67 +336,57 @@ class BotWidget {
 
 	invalidate() {}
 
-	render(width) {
+	render() {
+		return [];
+	}
+
+	describe() {
 		const b = this.bot;
-		const t = this.theme;
-		const head = t?.fg ? t.fg("accent", `◉ ${b.name}`) : `◉ ${b.name}`;
-		return [truncateToWidth(replaceTabs(` ${head} · ${b.boop ?? b.line}`), width)];
+		return row(
+			[
+				b.orb(false),
+				text(b.name, { role: "omp.bot.name", wrap: "none" }),
+				text(b.role, { role: "omp.bot.role", wrap: "none" }),
+				b.active
+					? row([text("Stop", { wrap: "none" }), node("kbd", { keys: ["escape"] })], {
+							role: "omp.bot.stop",
+							gap: "xs",
+							align: "center",
+							title: "Stop  esc",
+							actions: { click: "interrupt" },
+						})
+					: undefined,
+			].filter(Boolean),
+			{ role: `omp.bot.top.${b.tint}`, align: "center", gap: "sm" },
+		);
+	}
+}
+
+class BotStatus {
+	constructor(bot) {
+		this.bot = bot;
+	}
+
+	handleNativeEvent(event) {
+		if (event?.type === "action" && event.act === "boop") this.bot.poke();
+	}
+
+	invalidate() {}
+
+	render() {
+		return [];
 	}
 
 	describe() {
 		const b = this.bot;
 		const busy = b.active;
-		const look = b.boop ? "boop" : b.typing && !busy ? "listen" : b.mood;
-		const orb = col(
-			[
-				col([], { role: "omp.bot.glow" }),
-				col([], { role: "omp.bot.ring.a" }),
-				col([], { role: "omp.bot.ring.b" }),
-				col([], { role: "omp.bot.ring.c" }),
-				col([], { role: "omp.bot.core" }),
-				row(
-					[
-						col([], { role: "omp.bot.eye.l" }),
-						col([], { role: "omp.bot.eye.r" }),
-						col([], { role: "omp.bot.blush.l" }),
-						col([], { role: "omp.bot.blush.r" }),
-					],
-					{ role: "omp.bot.face" },
-				),
-				col([], { role: "omp.bot.heart.a" }),
-				col([], { role: "omp.bot.heart.b" }),
-				col([], { role: "omp.bot.heart.c" }),
-				text("z", { role: "omp.bot.z", wrap: "none" }),
-				text("purrr", { role: "omp.bot.purr", wrap: "none" }),
-			],
-			{ role: `omp.bot.orb.${look}`, actions: { click: "boop" } },
-		);
 		const status = b.boop ?? b.line;
-		const words = b.hero
-			? col(
+		return row(
+			[
+				b.orb(true),
+				col(
 					[
-						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
-						text(b.boop ?? b.role, { role: "omp.bot.say", wrap: "none" }),
-					],
-					{ role: "omp.bot.words", align: "center", gap: "xs" },
-				)
-			: col(
-					[
-						row(
-							[
-								text(b.name, { role: "omp.bot.name", wrap: "none" }),
-								busy
-									? row([node("kbd", { keys: ["escape"] }), text("Stop")], {
-											role: "omp.bot.stop",
-											gap: "xs",
-											align: "center",
-											title: "Stop  esc",
-											actions: { click: "interrupt" },
-										})
-									: undefined,
-							].filter(Boolean),
-							{ role: "omp.bot.head", align: "center", gap: "sm" },
-						),
+						text(b.name, { role: "omp.bot.name", wrap: "none" }),
 						row(
 							[
 								busy && !b.boop
@@ -245,59 +398,134 @@ class BotWidget {
 										})
 									: text(status, { role: "omp.bot.say", wrap: "none" }),
 								busy && b.turnStart ? elapsed(Date.now() - b.turnStart) : undefined,
-								busy && b.steps ? text(`${b.steps} step${b.steps === 1 ? "" : "s"}`, { role: "omp.bot.steps", wrap: "none" }) : undefined,
+								busy && b.steps ? text(steps(b.steps), { role: "omp.bot.steps", wrap: "none" }) : undefined,
 							].filter(Boolean),
 							{ role: "omp.bot.status", align: "center", gap: "sm" },
 						),
 					],
 					{ role: "omp.bot.words", gap: "none" },
-				);
-		const gaze = ZONES.reduceRight(
-			(inner, zone) => col([col([], { role: `omp.bot.zone.${zone}` }), inner], { role: `omp.bot.gaze.${zone}` }),
-			orb,
+				),
+			],
+			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "md" },
 		);
-		const layout = b.hero ? col : row;
-		return layout([gaze, words], {
-			role: `omp.bot.${b.hero ? "hero" : "chat"}.${b.tint}`,
-			align: "center",
-			gap: b.hero ? "sm" : "md",
-		});
 	}
 }
 
-class BotFloor {
+class BotWork {
+	constructor() {
+		this.blocks = [];
+		this.toggled = undefined;
+	}
+
+	handleNativeEvent(event) {
+		if (event?.type === "toggle" && event.key === "work") this.toggled = event.collapsed;
+	}
+
 	invalidate() {}
 
 	render() {
 		return [];
 	}
 
-	describe() {
-		return text("\u00a0", { role: "omp.bot.floor" });
+	update(blocks, live) {
+		if (live && this.startedAt === undefined) this.startedAt = Date.now();
+		if (!live && this.startedAt !== undefined && this.endedAt === undefined) this.endedAt = Date.now();
+		this.blocks = blocks;
+	}
+
+	describe(cx) {
+		const tools = this.blocks.filter(isTool);
+		const failed = tools.filter(block => block.describe(cx)?.p?.status === "error").length;
+		const collapsed = this.toggled ?? failed === 0;
+		const ms =
+			this.endedAt !== undefined
+				? this.endedAt - this.startedAt
+				: tools.reduce((total, block) => total + (block.describe(cx)?.p?.took ?? 0), 0);
+		const key = [...this.blocks, collapsed, failed, Math.round(ms / 1000)];
+		if (this.key && same(this.key, key)) return this.node;
+		this.key = key;
+		const head = [
+			text(ms >= 1000 ? `Worked ${clock(ms)}` : "Worked", { wrap: "none" }),
+			text([span(steps(tools.length), "dim")], { wrap: "none" }),
+		];
+		if (failed > 0) head.push(node("badge", { text: `${failed} failed`, tone: "error" }));
+		this.node = node(
+			"section",
+			{ role: "omp.bot.work", collapsible: true, collapsed },
+			[node("row", { gap: "sm", align: "center" }, head, "head"), ...this.blocks],
+			"work",
+		);
+		return this.node;
 	}
 }
 
-function hideTools(state) {
+function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
 	if (proto[PATCHED]) {
 		proto[PATCHED].state = state;
 		return;
 	}
+	const assistant = AssistantMessageComponent.prototype;
+	const describeAssistant = assistant.describe;
 	const inner = proto.nativeBlocks;
-	const memo = new WeakMap();
-	proto[PATCHED] = { state };
+	const innerDescribe = proto.describe;
+	const works = new WeakMap();
+	const shownBy = new WeakMap();
+	const nodeBy = new WeakMap();
+	proto[PATCHED] = { state, cx: undefined };
+
+	assistant.describe = function (cx) {
+		if (cx) proto[PATCHED].cx = cx;
+		return describeAssistant.call(this, cx);
+	};
+
+	function work(first) {
+		let folded = works.get(first);
+		if (!folded) {
+			folded = new BotWork();
+			works.set(first, folded);
+		}
+		return folded;
+	}
+
 	proto.nativeBlocks = function () {
 		const blocks = inner.call(this);
-		if (!proto[PATCHED].state.on || proto[PATCHED].state.reveal) return blocks;
-		const shown = blocks.filter(
-			block => !(block instanceof ToolExecutionComponent) && !(block instanceof ReadToolGroupComponent),
-		);
-		const previous = memo.get(this);
-		if (previous && previous.length === shown.length && previous.every((block, i) => block === shown[i])) {
-			return previous;
+		const s = proto[PATCHED].state;
+		if (!s.on || !s.top) return blocks;
+		const shown = [s.top];
+		let run = [];
+		const close = live => {
+			if (run.some(isTool)) {
+				const folded = work(run[0]);
+				folded.update(run, live);
+				if (!live) shown.push(folded);
+			}
+			run = [];
+		};
+		for (const block of blocks) {
+			if (isTool(block) || (block instanceof AssistantMessageComponent && !speaks(block, proto[PATCHED].cx))) {
+				run.push(block);
+				continue;
+			}
+			close(false);
+			shown.push(block);
 		}
-		memo.set(this, shown);
+		close(s.bot.active);
+		if (!s.bot.hero) shown.push(s.status);
+		const previous = shownBy.get(this);
+		if (previous && same(previous, shown)) return previous;
+		shownBy.set(this, shown);
 		return shown;
+	};
+
+	proto.describe = function () {
+		if (!proto[PATCHED].state.on) return innerDescribe.call(this);
+		const blocks = this.nativeBlocks();
+		const cached = nodeBy.get(this);
+		if (cached?.blocks === blocks) return cached.node;
+		const described = col(blocks, { role: "omp.transcript" });
+		nodeBy.set(this, { blocks, node: described });
+		return described;
 	};
 }
 
@@ -328,7 +556,7 @@ function foldWorkingRow(state) {
 
 export default function ompBot(pi) {
 	const bot = new Bot();
-	const state = { on: process.env.OMP_BOT !== "0", reveal: false };
+	const state = { on: process.env.OMP_BOT !== "0", bot, top: undefined, status: new BotStatus(bot) };
 	let ui;
 	let abort;
 	let unlisten;
@@ -337,12 +565,13 @@ export default function ompBot(pi) {
 
 	function mount() {
 		if (!ui) return;
+		state.top = new BotTop(bot, () => abort?.());
 		ui.setWidget(
 			"omp-bot",
 			state.on
-				? (tui, theme) => {
+				? tui => {
 						bot.tui = tui;
-						return new BotWidget(bot, theme, () => abort?.());
+						return new BotHero(bot);
 					}
 				: undefined,
 		);
@@ -351,6 +580,7 @@ export default function ompBot(pi) {
 
 	function attach(ctx) {
 		ui = ctx.ui;
+		bot.clock = typeof ctx.setTimeout === "function" && typeof ctx.clearTimer === "function" ? ctx : TIMERS;
 		abort = () => {
 			bot.stopped = true;
 			ctx.abort();
@@ -368,7 +598,7 @@ export default function ompBot(pi) {
 		if (ctx.agent?.kind === "sub" || ctx.mode !== "tui") return;
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
-		hideTools(state);
+		patchTranscript(state);
 		foldWorkingRow(state);
 		listen();
 		mount();
@@ -389,7 +619,7 @@ export default function ompBot(pi) {
 		handler: async (args, ctx) => {
 			const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
 			if (parts[0] === "name" && parts[1]) {
-				bot.name = parts.slice(1).join(" ");
+				bot.rename(parts.slice(1).join(" "));
 				bot.set(bot.mood, `Hi, I'm ${bot.name}.`);
 			} else {
 				state.on = !state.on;
@@ -403,7 +633,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb. Tool cards are compressed; /bot reveals them. Use short, plain tool titles where the tool schema supports them. Speak as ${bot.name}: warm, curious, brief.\n`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb. Tool cards are compressed; /bot reveals them. Use short, plain tool titles where the tool schema supports them.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };
@@ -411,14 +641,14 @@ export default function ompBot(pi) {
 
 	pi.on("agent_start", async (_event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		clearTimeout(bot.timers.settle);
-		clearTimeout(bot.timers.nap);
+		bot.cancel("settle");
+		bot.cancel("nap");
 		bot.turnStart = bot.submitted || Date.now();
 		bot.submitted = 0;
 		bot.steps = 0;
 		bot.active = true;
 		bot.stopped = false;
-		state.reveal = false;
+		bot.failed = false;
 		bot.running.clear();
 		if (bot.hero) {
 			bot.hero = false;
@@ -447,8 +677,8 @@ export default function ompBot(pi) {
 		const failedLine = bot.running.get(event.toolCallId) ?? say(event.toolName, event.args);
 		bot.running.delete(event.toolCallId);
 		if (event.isError) {
-			state.reveal = true;
-			bot.set("error", `${failedLine} failed — details are open`);
+			bot.failed = true;
+			bot.set("error", `${failedLine} failed`);
 			return;
 		}
 		const next = [...bot.running.values()].at(-1);
@@ -471,17 +701,29 @@ export default function ompBot(pi) {
 			return;
 		}
 		if (reason === "error" || reason === "length") {
-			state.reveal = true;
 			bot.set("error", final.errorMessage || "The reply ended early — check the transcript");
 			return;
 		}
 		const ms = Date.now() - bot.turnStart;
-		const summary = bot.steps && ms >= 1000 ? `Finished · ${clock(ms)} · ${bot.steps} step${bot.steps === 1 ? "" : "s"}` : "Done";
-		if (state.reveal) {
-			bot.set("error", `${summary} · review tool errors`);
+		const summary = bot.steps && ms >= 1000 ? `Done · ${clock(ms)} · ${steps(bot.steps)}` : "Done";
+		if (bot.failed) {
+			bot.failed = false;
+			bot.set("error", `${summary} · a step failed`);
 			return;
 		}
 		bot.set("happy", summary);
-		bot.after("settle", 4000, () => bot.mood === "happy" && bot.set("idle", summary === "Done" ? "Ready" : summary));
+		bot.after("settle", 4000, () => bot.mood === "happy" && bot.set("idle", "Ready"));
 	});
+}
+
+class BotFloor {
+	invalidate() {}
+
+	render() {
+		return [];
+	}
+
+	describe() {
+		return text("\u00a0", { role: "omp.bot.floor" });
+	}
 }
