@@ -12,7 +12,8 @@ jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null || {
 "$root/bin/omp-bot-ctl" retire "$name"
 dir=$state/bots/$name
 if [ -d "$dir" ]; then
-	if ! flock -w 15 "$dir/lock" true; then
+	exec 8>"$dir/lock"
+	if ! flock -w 15 8; then
 		"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
 		echo "omp-bot-remove: $name is still running; close its tab first" >&2
 		exit 75

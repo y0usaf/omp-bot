@@ -89,7 +89,7 @@ function ensureRunning(bot: string) {
 	lastSpawn.set(bot, Date.now());
 	const logFile = join(STATE, "logs", `${bot}.log`);
 	appendFileSync(logFile, `\n=== ${new Date().toISOString()} headless start\n`);
-	const proc = Bun.spawn([join(ROOT, "bin", "omp-bot"), bot, "--headless"], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
+	const proc = Bun.spawn(["setsid", join(ROOT, "bin", "omp-bot"), bot, "--headless"], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
 	const child: Child = { proc };
 	children.set(bot, child);
 	log(`spawn ${bot} pid ${proc.pid}`);
@@ -105,6 +105,12 @@ function ensureRunning(bot: string) {
 		settleClaim(bot);
 		ensureRunning(bot);
 	});
+}
+
+function killGroup(pid: number) {
+	try {
+		process.kill(-pid, "SIGTERM");
+	} catch {}
 }
 
 function scheduleIdleExit(bot: string) {
@@ -229,7 +235,8 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			claims.set(bot, { until: Number.POSITIVE_INFINITY, waiters: [] });
 			const link = links.get(bot);
 			if (link) link.task = undefined;
-			children.get(bot)?.proc.kill("SIGTERM");
+			const child = children.get(bot);
+			if (child) killGroup(child.proc.pid);
 			log(`retire ${bot}`);
 			return send(socket, { ok: true });
 		}
@@ -286,7 +293,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 	process.on(signal, () => {
 		log(`${signal}: stopping`);
 		server.close();
-		for (const child of children.values()) child.proc.kill("SIGTERM");
+		for (const child of children.values()) killGroup(child.proc.pid);
 		db.close();
 		process.exit(0);
 	});
