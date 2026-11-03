@@ -35,7 +35,8 @@ function matches(rule: Rule, event: Event): boolean {
 function brief(event: Event): string {
 	const { pane, status, took_ms, line, cwd, result } = event.payload;
 	if (event.kind === "command_finished") {
-		return `A command failed in pane ${pane}, exit ${status} after ${Math.round(Number(took_ms ?? 0) / 1000)}s in ${cwd ?? "an unknown directory"}:\n  ${line}\nRead that pane's output and say what failed and why, without changing anything.`;
+		const what = line ? `:\n  ${line}` : ".";
+		return `A command failed in pane ${pane}, exit ${status} after ${Math.round(Number(took_ms ?? 0) / 1000)}s in ${cwd ?? "an unknown directory"}${what}\nRead that pane's output and say what failed and why, without changing anything.`;
 	}
 	if (event.kind === "agent_finished") {
 		return `An agent in pane ${pane} finished as "${result}". Check its claims against the worktree before reporting anything.`;
