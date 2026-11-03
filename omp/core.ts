@@ -29,6 +29,7 @@ export default function core(pi) {
 	let readySent = false;
 	let refused = false;
 	let stopped = false;
+	const until = Number(process.env.OMP_BOT_UNTIL) || 0;
 
 	pi.setLabel("Bot core");
 
@@ -36,7 +37,18 @@ export default function core(pi) {
 		if (socket && !socket.destroyed) socket.write(`${JSON.stringify(message)}\n`);
 	}
 
+	function restart(now) {
+		stopped = true;
+		if (mode === "tui" && process.env.OMP_BOT_RELAUNCH) writeFileSync(process.env.OMP_BOT_RELAUNCH, "");
+		if (now && !ctx.isIdle()) {
+			current = undefined;
+			ctx.abort();
+		}
+		ctx.shutdown();
+	}
+
 	function tick() {
+		if (until && !stopped && Date.now() >= until && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) return restart(false);
 		if (!socket || current || readySent || !ctx?.isIdle() || ctx.hasPendingMessages()) return;
 		readySent = true;
 		send({ op: "ready" });
@@ -52,13 +64,7 @@ export default function core(pi) {
 				ctx?.ui?.notify?.(`omp-bot: ${message.reason}`, "warning");
 				return;
 			case "restart":
-				stopped = true;
-				if (mode === "tui" && process.env.OMP_BOT_RELAUNCH) writeFileSync(process.env.OMP_BOT_RELAUNCH, "");
-				if (message.now && !ctx.isIdle()) {
-					current = undefined;
-					ctx.abort();
-				}
-				ctx.shutdown();
+				restart(message.now);
 				return;
 			case "task":
 				current = { id: message.id, attempt: message.attempt };

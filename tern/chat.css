@@ -1,4 +1,5 @@
 .sf-main > [data-role='omp.bot.msg'],
+.sf-main > [data-role='omp.bot.advice'],
 .sf-main > [data-role^='omp.bot.chat.'],
 .sf-region [data-role='omp.bot.dock'] .sf-col[data-role^='omp.editor'] {
 	max-width: 720px;
@@ -71,4 +72,33 @@
 	margin-left: 6px;
 	padding-left: 12px;
 	box-shadow: inset 1px 0 0 var(--l2);
+}
+
+.sf-region [data-role='omp.bot.advice'] .sf-card[data-role='omp.advisor'] {
+	margin: -4px 0 0;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background: none;
+	box-shadow: none;
+}
+
+.sf-region [data-role='omp.bot.advice'] .sf-card[data-role='omp.advisor'] > .sf-card-head {
+	display: none;
+}
+
+.sf-region [data-role='omp.bot.advice'] .sf-card[data-role='omp.advisor'] > .sf-card-body {
+	padding: 0;
+}
+
+.sf-region [data-role='omp.bot.advice'] [data-role='omp.advisor.note'] {
+	font: 13px/18px var(--sans);
+	color: var(--t4);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sf-region [data-role='omp.bot.advice'] [data-role='omp.advisor.note']::before {
+	content: "Advisor · ";
 }

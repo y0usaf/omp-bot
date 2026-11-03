@@ -407,6 +407,7 @@ function patchTranscript(state) {
 	const shownBy = new WeakMap();
 	const nodeBy = new WeakMap();
 	const marked = new WeakMap();
+	const advice = new WeakMap();
 	proto[PATCHED] = { state, cx: undefined };
 
 	assistant.describe = function (cx) {
@@ -414,11 +415,21 @@ function patchTranscript(state) {
 		return describeAssistant.call(this, cx);
 	};
 
+	function advises(block) {
+		let is = advice.get(block);
+		if (is === undefined) {
+			is = block.describe?.()?.p?.role === "omp.advisor";
+			advice.set(block, is);
+		}
+		return is;
+	}
+
 	function mark(block) {
-		if (!(block instanceof UserMessageComponent || block instanceof AssistantMessageComponent)) return block;
+		const said = block instanceof UserMessageComponent || block instanceof AssistantMessageComponent;
+		if (!said && !advises(block)) return block;
 		let wrapped = marked.get(block);
 		if (!wrapped) {
-			wrapped = new BotMarked([block], "omp.bot.msg");
+			wrapped = new BotMarked([block], said ? "omp.bot.msg" : "omp.bot.advice");
 			marked.set(block, wrapped);
 		}
 		return wrapped;

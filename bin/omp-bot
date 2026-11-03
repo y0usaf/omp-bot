@@ -47,6 +47,16 @@ set -- --continue "$@"
 model=$(field model)
 model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
+now=$(date +%s) until=
+for overlay in "$dir"/config.until-*.yml; do
+	[ -f "$overlay" ] || continue
+	stamp=${overlay##*/config.until-}
+	end=$(date -d "${stamp%.yml}" +%s) || { echo "omp-bot: $overlay: not a date after config.until-" >&2; exit 2; }
+	[ "$end" -gt "$now" ] || continue
+	set -- --config "$overlay" "$@"
+	[ -n "$until" ] && [ "$until" -le "$end" ] || until=$end
+done
+export OMP_BOT_UNTIL="${until:+${until}000}"
 [ ! -f "$dir/config.yml" ] || set -- --config "$dir/config.yml" "$@"
 memory=$(field memory)
 case ${memory:-optchat} in
