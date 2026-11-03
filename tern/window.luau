@@ -8,6 +8,12 @@ local RELAUNCH = 76
 local SHELLS = { sh = true, bash = true, zsh = true, fish = true, dash = true, nu = true, rush = true }
 local GONE_MS = 10000
 local SETTLE_MS = 15000
+local LOOKS = {
+	{ id = "chat", label = "Grok chat", file = "chat.css" },
+	{ id = "frost", label = "frosted bubbles", file = "frost.css" },
+	{ id = "still", label = "no streaming", file = "still.css" },
+}
+local MENU = tern.plugin.data .. "/../ui-menu/kv.json"
 
 local EYES = { "pill", "round", "visor", "lids", "dots" }
 local RAIL_EYES = {
@@ -108,7 +114,6 @@ local function stage(cx: WindowCx)
 		cx:toast("error", "Bots: Stage demo only runs in the omp-bot-demo window")
 		return
 	end
-	tern.css("flat", tern.fs.read(tern.plugin.dir .. "/flat.css"))
 	if tern.fs.exists(config .. "/settings.json") then
 		cx.settings:set_many(tern.json.decode(tern.fs.read(config .. "/settings.json")))
 	end
@@ -286,6 +291,44 @@ local function forward(kind, payload)
 end
 
 show_roles(roster())
+
+local painted: { [string]: boolean } = {}
+
+local function chosen(): { [string]: any }
+	if not tern.fs.exists(MENU) then
+		return {}
+	end
+	local ok, kv = pcall(function()
+		return tern.json.decode(tern.fs.read(MENU))
+	end)
+	return ok and type(kv) == "table" and type(kv.on) == "table" and kv.on or {}
+end
+
+local function paint()
+	local on = chosen()
+	for _, look in ipairs(LOOKS) do
+		local want = on[tern.plugin.id .. ":" .. look.id] ~= false
+		if painted[look.id] ~= want then
+			painted[look.id] = want
+			tern.css(look.id, want and tern.fs.read(tern.plugin.dir .. "/" .. look.file) or "")
+		end
+	end
+end
+
+local function watch_looks()
+	tern.timer(250, function()
+		paint()
+		watch_looks()
+	end)
+end
+
+local menu = {}
+for _, look in ipairs(LOOKS) do
+	menu[#menu + 1] = { id = look.id, label = look.label, group = "Bots" }
+end
+tern.kv.set("ui-menu", menu)
+paint()
+watch_looks()
 
 local function by_name(): { [string]: Bot }
 	local bots = {}

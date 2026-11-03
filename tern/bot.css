@@ -811,21 +811,6 @@
 	background: var(--l1);
 }
 
-.sf-section[data-role='omp.bot.work'] > .sf-section-head {
-	font-size: 13px;
-	color: var(--t2);
-}
-
-.sf-section[data-role='omp.bot.work'] > .sf-section-head .sf-t-dim {
-	color: var(--t4);
-}
-
-.sf-section[data-role='omp.bot.work'] > .sf-section-body {
-	margin-left: 7px;
-	padding-left: 15px;
-	box-shadow: inset 1px 0 0 var(--l2);
-}
-
 @keyframes botIdle {
 	0%, 100% { transform: scale(1) rotate(0deg); }
 	25% { transform: scale(1.05) rotate(0deg); }

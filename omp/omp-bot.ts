@@ -2,13 +2,16 @@ import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-messa
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { chatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
+import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
+const DOCK_PATCHED = Symbol.for("omp-bot.dock");
 const TINTS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
 const ZONES = ["nw", "ne", "w", "e", "sw", "se", "n", "s"];
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
@@ -371,6 +374,25 @@ class BotWork {
 	}
 }
 
+class BotMarked {
+	constructor(items, role) {
+		this.items = items;
+		this.node = col(items, { role });
+	}
+
+	invalidate() {
+		for (const item of this.items) item.invalidate?.();
+	}
+
+	render(width) {
+		return this.items.flatMap(item => item.render(width));
+	}
+
+	describe() {
+		return this.node;
+	}
+}
+
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
 	if (proto[PATCHED]) {
@@ -384,12 +406,23 @@ function patchTranscript(state) {
 	const works = new WeakMap();
 	const shownBy = new WeakMap();
 	const nodeBy = new WeakMap();
+	const marked = new WeakMap();
 	proto[PATCHED] = { state, cx: undefined };
 
 	assistant.describe = function (cx) {
 		if (cx) proto[PATCHED].cx = cx;
 		return describeAssistant.call(this, cx);
 	};
+
+	function mark(block) {
+		if (!(block instanceof UserMessageComponent || block instanceof AssistantMessageComponent)) return block;
+		let wrapped = marked.get(block);
+		if (!wrapped) {
+			wrapped = new BotMarked([block], "omp.bot.msg");
+			marked.set(block, wrapped);
+		}
+		return wrapped;
+	}
 
 	function work(first) {
 		let folded = works.get(first);
@@ -420,7 +453,7 @@ function patchTranscript(state) {
 				continue;
 			}
 			close(false);
-			shown.push(block);
+			shown.push(mark(block));
 		}
 		close(s.bot.active);
 		if (!s.bot.hero) shown.push(s.status);
@@ -438,6 +471,27 @@ function patchTranscript(state) {
 		const described = col(blocks, { role: "omp.transcript" });
 		nodeBy.set(this, { blocks, node: described });
 		return described;
+	};
+}
+
+function patchDock(state) {
+	const proto = Composer.prototype;
+	if (proto[DOCK_PATCHED]) {
+		proto[DOCK_PATCHED].state = state;
+		return;
+	}
+	const inner = proto.describeSurface;
+	const docks = new WeakMap();
+	proto[DOCK_PATCHED] = { state };
+	proto.describeSurface = function (cx) {
+		const surface = inner.call(this, cx);
+		if (!proto[DOCK_PATCHED].state.on) return surface;
+		let wrapped = docks.get(surface);
+		if (!wrapped) {
+			wrapped = { main: surface.main, dock: [new BotMarked(surface.dock, "omp.bot.dock")] };
+			docks.set(surface, wrapped);
+		}
+		return wrapped;
 	};
 }
 
@@ -503,6 +557,7 @@ export default function ompBot(pi) {
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		patchTranscript(state);
+		patchDock(state);
 		patchWorkingRow(state);
 		listen();
 		mount();

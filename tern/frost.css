@@ -1,0 +1,7 @@
+.sf-region [data-role='omp.bot.msg'] .sf-card[data-role='omp.user'] > .sf-card-body,
+.sf-region [data-role='omp.bot.dock'] .sf-col[data-role^='omp.editor'] {
+	background: light-dark(var(--pop-bg), var(--raise));
+	-webkit-backdrop-filter: blur(18px) saturate(130%);
+	backdrop-filter: blur(18px) saturate(130%);
+	box-shadow: 0 0 0 1px var(--l2);
+}
