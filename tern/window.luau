@@ -174,7 +174,53 @@ local function new_bot(cx: WindowCx)
 	end)
 end
 
+local function remove_bot(cx: WindowCx)
+	local items = {}
+	for _, bot in ipairs(roster()) do
+		items[#items + 1] = { label = bot.name, detail = bot.role, icon = "trash", bot = bot }
+	end
+	cx:pick({ items = items, placeholder = "Remove which bot?", icon = "trash", action = "remove" }):next(function(item, _, cx2)
+		if not item or not cx2 then
+			return
+		end
+		local name = item.bot.name
+		cx2:pick({
+			items = {
+				{ label = "Remove " .. name, detail = "Its conversation is archived, not deleted", icon = "trash", go = true },
+				{ label = "Cancel" },
+			},
+			placeholder = "Remove " .. name .. "?",
+			icon = "trash",
+			action = "confirm",
+		}):next(function(choice, _, cx3)
+			if not choice or not choice.go or not cx3 then
+				return
+			end
+			local pane = open_names(cx3)[name]
+			if pane then
+				cx3.layout:close(pane)
+			end
+			local env = {}
+			local state = tern.getenv("OMP_BOT_STATE")
+			if state then
+				env.OMP_BOT_STATE = state
+			end
+			tern.process.run({ ROOT .. "/bin/omp-bot-remove", name }, { env = env, timeout_ms = 30000 }, function(result, cx4)
+				if result.status == 0 then
+					show_roles(roster())
+					if cx4 then
+						cx4:toast("info", "Removed " .. name)
+					end
+				elseif cx4 then
+					cx4:toast("error", "Could not remove " .. name, (result.stderr:gsub("%s+$", "")))
+				end
+			end)
+		end)
+	end)
+end
+
 tern.command({ id = "new", title = "Bots: Open bot", icon = "sparkle", run = new_bot })
+tern.command({ id = "remove", title = "Bots: Remove bot", icon = "trash", run = remove_bot })
 tern.command({ id = "open_all", title = "Bots: Open all", icon = "sparkle", run = open_all })
 tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false

@@ -7,7 +7,8 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   inbox                                         finished and failed tasks not yet acknowledged
   ack ID                                        acknowledge an inbox task
   status                                        which bots are connected, and how
-  claim BOT                                     wait until BOT's headless run has stopped`;
+  claim BOT                                     wait until BOT's headless run has stopped
+  retire BOT                                    fail BOT's queued tasks and stop its background run`;
 
 function request(message: unknown, timeoutMs = 0): Promise<any> {
 	return new Promise((resolve, reject) => {
@@ -67,6 +68,15 @@ try {
 			break;
 		case "status":
 			for (const bot of (await request({ op: "status" })).bots) console.log(`${bot.bot}  ${bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : ""}`);
+			break;
+		case "unretire":
+		case "retire":
+			if (!rest[0]) throw new Error(USAGE);
+			try {
+				await request({ op: command, bot: rest[0] });
+			} catch (error) {
+				if (!["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+			}
 			break;
 		case "claim": {
 			if (!rest[0]) throw new Error(USAGE);

@@ -7,7 +7,7 @@ import { ROOT, ROSTER, SOCKET, STATE } from "./paths";
 const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
 const IDLE_EXIT_MS = Number(process.env.OMP_BOT_IDLE_EXIT_MS) || 300_000;
 const RESPAWN_MS = Number(process.env.OMP_BOT_RESPAWN_MS) || 5_000;
-const CLAIM_MS = 60_000;
+const CLAIM_MS = Number(process.env.OMP_BOT_CLAIM_MS) || 60_000;
 const SILENT = "Nothing to report.";
 
 type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number };
@@ -38,6 +38,7 @@ const q = {
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
 	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE state IN ('done', 'failed') AND seen = 0 ORDER BY updated"),
 	ack: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state IN ('done', 'failed')"),
+	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('pending', 'leased')"),
 };
 
 const links = new Map<string, Link>();
@@ -222,10 +223,24 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 				ok: true,
 				bots: [...roster()].map(bot => ({ bot, link: links.get(bot)?.mode ?? null, task: links.get(bot)?.task ?? null, headless: children.get(bot)?.proc.pid ?? null })),
 			});
+		case "retire": {
+			const bot = message.bot;
+			q.retire.run({ bot, now: Date.now() });
+			claims.set(bot, { until: Number.POSITIVE_INFINITY, waiters: [] });
+			const link = links.get(bot);
+			if (link) link.task = undefined;
+			children.get(bot)?.proc.kill("SIGTERM");
+			log(`retire ${bot}`);
+			return send(socket, { ok: true });
+		}
+		case "unretire":
+			claims.delete(message.bot);
+			return send(socket, { ok: true });
 		case "claim": {
 			const bot = message.bot;
 			const claim = { until: Date.now() + CLAIM_MS, waiters: [] as Array<() => void> };
 			claims.set(bot, claim);
+			setTimeout(() => ensureRunning(bot), CLAIM_MS + 100);
 			if (!children.has(bot)) return send(socket, { ok: true });
 			claim.waiters.push(() => send(socket, { ok: true }));
 			log(`claim ${bot}: waiting for headless to finish`);
