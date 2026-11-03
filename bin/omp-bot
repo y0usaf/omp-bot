@@ -5,6 +5,10 @@ usage="usage: omp-bot NAME [--headless | --create TINT] [omp args...]"
 root=$(cd "$(dirname "$0")/.." && pwd)
 name=$1
 shift
+case $name in
+"" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, space, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
+esac
+[ ${#name} -le 40 ] || { echo "omp-bot: bot name longer than 40 characters" >&2; exit 2; }
 headless=0
 tint=
 case ${1:-} in

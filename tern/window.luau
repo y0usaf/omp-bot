@@ -126,6 +126,10 @@ local function create(cx: WindowCx, bots: { Bot })
 		if not name or name == "" or not cx2 then
 			return
 		end
+		if #name > 40 or name:sub(1, 1) == "." or name:find("[^%w%._ %-]") then
+			cx2:toast("error", "Bot names use letters, digits, spaces, '.', '_' or '-', and can't start with '.'")
+			return
+		end
 		for _, bot in ipairs(bots) do
 			if bot.name == name then
 				open(cx2, bot)
