@@ -8,6 +8,7 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   ack ID                                        acknowledge an inbox task
   status                                        which bots are connected, and how
   claim BOT                                     wait until BOT's headless run has stopped
+  event JSON                                    record a lifecycle event; the gate logs its decision, nothing runs
   retire BOT                                    fail BOT's queued tasks and stop its background run`;
 
 function request(message: unknown, timeoutMs = 0): Promise<any> {
@@ -54,6 +55,12 @@ try {
 			if (rest.length < 2) throw new Error(USAGE);
 			const reply = await request({ op: "enqueue", bot: rest[0], text: rest.slice(1).join(" "), key: opts.key, origin: opts.origin });
 			console.log(`${reply.id} ${reply.created ? "queued" : `already ${reply.state}`}`);
+			break;
+		}
+		case "event": {
+			const event = JSON.parse(rest.join(" "));
+			const reply = await request({ op: "event", ...event });
+			console.log(reply.rule ?? "no rule");
 			break;
 		}
 		case "tasks":

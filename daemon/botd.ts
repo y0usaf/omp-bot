@@ -3,6 +3,7 @@ import { createServer, type Socket } from "node:net";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, ROSTER, SOCKET, STATE } from "./paths";
+import { record } from "./gate";
 
 const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
 const IDLE_EXIT_MS = Number(process.env.OMP_BOT_IDLE_EXIT_MS) || 300_000;
@@ -221,6 +222,11 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			return send(socket, { ok: true, tasks: q.list.all({ state: message.state ?? null, bot: message.bot ?? null, limit: message.limit ?? 50 }) });
 		case "inbox":
 			return send(socket, { ok: true, tasks: q.inbox.all() });
+		case "event": {
+			const decision = record({ source: String(message.source ?? "unknown"), kind: String(message.kind ?? ""), payload: message.payload ?? {} });
+			log(`event ${message.kind} from ${message.source}: ${decision.rule ?? "no rule"}`);
+			return send(socket, { ok: true, ...decision });
+		}
 		case "ack":
 			q.ack.run({ id: message.id });
 			return send(socket, { ok: true });

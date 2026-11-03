@@ -230,4 +230,31 @@ tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false
 end, run = stage })
 
+local cwds = {}
+
+local function forward(kind, payload)
+	local env = {}
+	local state = tern.getenv("OMP_BOT_STATE")
+	if state then
+		env.OMP_BOT_STATE = state
+	end
+	local event = tern.json.encode({ source = "tern", kind = kind, payload = payload })
+	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "event", event }, { env = env, timeout_ms = 5000 }, function() end)
+end
+
+tern.on("cwd", function(ev)
+	cwds[ev.pane] = ev.path
+end)
+
+tern.on("command_finished", function(ev)
+	if ev.status == 0 then
+		return
+	end
+	forward("command_finished", { pane = ev.pane, line = ev.line, status = ev.status, took_ms = ev.took_ms, cwd = cwds[ev.pane] })
+end)
+
+tern.on("agent_finished", function(ev)
+	forward("agent_finished", { pane = ev.pane, result = ev.result })
+end)
+
 show_roles(roster())
