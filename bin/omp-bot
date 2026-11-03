@@ -48,6 +48,17 @@ model=$(field model)
 model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
 [ ! -f "$dir/config.yml" ] || set -- --config "$dir/config.yml" "$@"
+memory=$(field memory)
+case ${memory:-optchat} in
+optchat)
+	[ -n "${OMP_BOT_OPTCHAT:-}" ] || { echo "omp-bot: $name keeps OptChat memory but OMP_BOT_OPTCHAT, OptChat's directory, is unset; set it, or \"memory\": \"none\" on the bot" >&2; exit 1; }
+	mkdir -p "$dir/optchat"
+	export OPTCHAT_DIR="$dir/optchat" OPTCHAT_BOT="$name" OPTCHAT_RULES="$dir/rules.md" OPTCHAT_BOTS="$state/bots"
+	set -- -e "$OMP_BOT_OPTCHAT/extension.ts" --config "$root/omp/memory.yml" "$@"
+	;;
+none) ;;
+*) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
+esac
 set -- -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1

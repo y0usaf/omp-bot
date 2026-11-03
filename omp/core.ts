@@ -107,7 +107,7 @@ export default function core(pi) {
 
 	pi.on("before_agent_start", async (event, c) => {
 		if (c.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const text = identity({ name, role, persona, mode });
+		const text = identity({ name, role, persona, mode, memory: process.env.OPTCHAT_BOT === name });
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${text}`;
 		return { systemPrompt };

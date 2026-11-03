@@ -8,7 +8,7 @@ const CTL = join(ROOT, "bin/omp-bot-ctl");
 
 type Bot = { name: string; role?: string };
 
-function team(name: string): string[] {
+function team(name: string, role: string, memory: boolean): string[] {
 	let bots: Bot[] = [];
 	try {
 		bots = JSON.parse(readFileSync(ROSTER, "utf8"));
@@ -18,7 +18,13 @@ function team(name: string): string[] {
 		"# Your team",
 		"Each bot owns one lane and keeps its own conversation. The roster right now:",
 		...bots.filter(bot => bot?.name).map(bot => `- ${bot.name}: ${bot.role || "Assistant"}${bot.name === name ? " (you)" : ""}`),
-		"When something belongs in another bot's lane, say whose it is in a few words. You can't message other bots or see their conversations.",
+		"When something belongs in another bot's lane, say whose it is in a few words.",
+		...(/chief of staff/i.test(role)
+			? []
+			: [`When your own work needs something from another bot's lane, queue it a task with \`${CTL} task NAME "brief" --origin "bot:${name}"\`; its answer comes back to you as a task from "reply:NAME". Don't wait on it or poll for it.`]),
+		memory
+			? "You can read other bots' memory, read-only: memories lists the bots that keep one, and zoom, date and recent take a bot's name."
+			: "You can't see other bots' conversations.",
 		"",
 	];
 }
@@ -97,8 +103,8 @@ function chief(name: string): string[] {
 	];
 }
 
-export function identity({ name, role, persona, mode }: { name: string; role: string; persona: string; mode: string }): string {
-	const lines = ["", ...self(name, role, persona, mode), ...team(name)];
+export function identity({ name, role, persona, mode, memory }: { name: string; role: string; persona: string; mode: string; memory: boolean }): string {
+	const lines = ["", ...self(name, role, persona, mode), ...team(name, role, memory)];
 	if (/chief of staff/i.test(role)) lines.push(...chief(name));
 	return lines.join("\n");
 }

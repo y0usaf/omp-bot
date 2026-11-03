@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+[ $# -eq 1 ] || { echo "usage: omp-bot-memory NAME" >&2; exit 2; }
+name=$1
+case $name in
+"" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, space, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
+esac
+config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
+[ ! -r "$config" ] || . "$config"
+[ -n "${OMP_BOT_OPTCHAT:-}" ] || { echo "omp-bot-memory: OMP_BOT_OPTCHAT, OptChat's directory, is unset" >&2; exit 1; }
+state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+dir=$state/bots/$name/optchat
+mkdir -p "$dir"
+cd "$dir"
+export OPTCHAT_DIR="$dir" OPTCHAT_BOT="$name"
+exec "${OMP_BIN:-omp}" --mode rpc --no-ui --no-session --no-extensions --no-tools --no-lsp --no-skills --no-rules --no-title \
+	-e "$OMP_BOT_OPTCHAT/service.ts"

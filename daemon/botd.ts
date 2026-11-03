@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { createServer, type Socket } from "node:net";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, ROSTER, SOCKET, STATE } from "./paths";
 import { record } from "./gate";
@@ -9,6 +9,8 @@ const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
 const IDLE_EXIT_MS = Number(process.env.OMP_BOT_IDLE_EXIT_MS) || 300_000;
 const RESPAWN_MS = Number(process.env.OMP_BOT_RESPAWN_MS) || 5_000;
 const CLAIM_MS = Number(process.env.OMP_BOT_CLAIM_MS) || 60_000;
+const MEMORY_POLL_MS = Number(process.env.OMP_BOT_MEMORY_POLL_MS) || 5_000;
+const MEMORY_RETRY_MS = 60_000;
 const SILENT = "Nothing to report.";
 
 type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number };
@@ -46,6 +48,8 @@ const links = new Map<string, Link>();
 const children = new Map<string, Child>();
 const claims = new Map<string, { until: number; waiters: Array<() => void> }>();
 const lastSpawn = new Map<string, number>();
+const summarisers = new Map<string, ReturnType<typeof Bun.spawn>>();
+const memoryRetry = new Map<string, number>();
 
 function log(line: string) {
 	console.log(`${new Date().toISOString()} ${line}`);
@@ -53,6 +57,64 @@ function log(line: string) {
 
 function roster(): Set<string> {
 	return new Set((JSON.parse(readFileSync(ROSTER, "utf8")) as Array<{ name: string }>).map(bot => bot.name));
+}
+
+function memoryBots(): string[] {
+	try {
+		return (JSON.parse(readFileSync(ROSTER, "utf8")) as Array<{ name: string; memory?: string }>)
+			.filter(bot => (bot.memory ?? "optchat") === "optchat" && claims.get(bot.name)?.until !== Number.POSITIVE_INFINITY)
+			.map(bot => bot.name);
+	} catch {
+		return [];
+	}
+}
+
+function behind(bot: string): boolean {
+	const dir = join(STATE, "bots", bot, "optchat");
+	let logs: string[];
+	try {
+		logs = readdirSync(join(dir, "log"));
+	} catch {
+		return false;
+	}
+	let since: number;
+	try {
+		if (!JSON.parse(readFileSync(join(dir, "view.json"), "utf8")).built) return true;
+		since = statSync(join(dir, "view.json")).mtimeMs;
+	} catch {
+		return logs.length > 0;
+	}
+	return logs.some(name => statSync(join(dir, "log", name)).mtimeMs > since);
+}
+
+function startSummariser(bot: string) {
+	const logFile = join(STATE, "logs", `${bot}.optchat.log`);
+	appendFileSync(logFile, `\n=== ${new Date().toISOString()} summariser start\n`);
+	const proc = Bun.spawn(["setsid", join(ROOT, "bin", "omp-bot-memory"), bot], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
+	summarisers.set(bot, proc);
+	log(`memory ${bot} pid ${proc.pid}`);
+	(async () => {
+		for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) appendFileSync(logFile, chunk);
+	})().catch(() => {});
+	proc.exited.then(code => {
+		if (summarisers.get(bot) === proc) summarisers.delete(bot);
+		if (code !== 0 && proc.signalCode === null) memoryRetry.set(bot, Date.now() + MEMORY_RETRY_MS);
+		log(`memory exit ${bot} pid ${proc.pid} code ${code}`);
+	});
+}
+
+function stopSummariser(bot: string) {
+	const proc = summarisers.get(bot);
+	if (!proc) return;
+	summarisers.delete(bot);
+	log(`memory stop ${bot} pid ${proc.pid}`);
+	killGroup(proc.pid);
+}
+
+function tendMemory() {
+	const want = new Set(memoryBots().filter(bot => links.has(bot) || children.has(bot) || behind(bot)));
+	for (const bot of summarisers.keys()) if (!want.has(bot)) stopSummariser(bot);
+	for (const bot of want) if (!summarisers.has(bot) && (memoryRetry.get(bot) ?? 0) <= Date.now()) startSummariser(bot);
 }
 
 function send(socket: Socket, message: unknown) {
@@ -196,6 +258,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 				}
 			}
 			log(`hello ${link.bot} (${link.mode})`);
+			tendMemory();
 			return send(socket, { op: "welcome", task: link.task ?? null });
 		}
 		case "ready": {
@@ -255,6 +318,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (link) link.task = undefined;
 			const child = children.get(bot);
 			if (child) killGroup(child.proc.pid);
+			stopSummariser(bot);
 			log(`retire ${bot}`);
 			return send(socket, { ok: true });
 		}
@@ -305,6 +369,8 @@ const server = createServer(socket => {
 server.listen(SOCKET, () => {
 	log(`listening on ${SOCKET}`);
 	for (const { bot } of q.pendingBots.all()) ensureRunning(bot);
+	tendMemory();
+	setInterval(tendMemory, MEMORY_POLL_MS);
 });
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -312,6 +378,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 		log(`${signal}: stopping`);
 		server.close();
 		for (const child of children.values()) killGroup(child.proc.pid);
+		for (const proc of summarisers.values()) killGroup(proc.pid);
 		db.close();
 		process.exit(0);
 	});
