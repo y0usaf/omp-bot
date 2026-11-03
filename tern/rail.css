@@ -38,10 +38,6 @@
 	font-size: 11.5px;
 }
 
-#tabbar .tb-row .kbds {
-	display: none !important;
-}
-
 #tabbar .tt[data-tc] .tn-dk-c {
 	position: relative;
 	width: 18px;
