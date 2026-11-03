@@ -1,11 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { STATE } from "./paths";
 
 export const NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 export const REFERENCE = /\$\{?SECRET_([A-Z][A-Z0-9_]{0,63})/g;
-export const KEY = process.env.OMP_BOT_SECRET_KEY || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "omp-bot", "secrets.key");
+export const KEY = process.env.OMP_BOT_SECRET_KEY || join(STATE, "secrets.key");
 const AGE = process.env.OMP_BOT_AGE || "age";
 const DEFAULT_TTL = "24h";
 
