@@ -6,28 +6,102 @@ local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local TABS = tern.plugin.data .. "/../agent-tabs/kv.json"
 
-local MINI = { "..ooooo..", ".ohhbbbo.", "ohbbbbbso", "obbbbbbso", "obbbbbbso", "obbbbbbso", ".ossssso.", "oaobbboao", ".oaaoaao." }
-local MINI_EYES: { [string]: { { number } } } = { oval = { { 2, 3 }, { 2, 4 } }, round = { { 2, 3 }, { 3, 3 }, { 2, 4 }, { 3, 4 } }, dot = { { 2, 4 } } }
 local CHAO_EYES = { "oval", "round", "dot" }
 local CHAO_TYPES = { "neutral", "neutral", "hero", "dark" }
-local INK: { [string]: string } = { o = "#141414", h = "var(--mh)", b = "var(--mb)", s = "var(--ms)", e = "var(--me)", a = "var(--ma)" }
+local SPRITES: { [string]: { string } } = {
+	neutral = {
+		"...........oo......",
+		".........ooddo.....",
+		".....oooodiaado....",
+		"...oonijjjjjjino...",
+		"..oembbbbbbbbbmeo..",
+		".osmbbbbbbbbbbbmso.",
+		".ombbbbbbbbbbbbbmo.",
+		"ocmbbwwbbbbbwwbbmco",
+		"osmbweewbbbweewbmso",
+		"osmbweewbbbweewbmso",
+		"osmmweewbbbweewmmso",
+		"ocmmweewbbbweewmmco",
+		"oesmmwwmmmmmwwmmseo",
+		".oecsssssssssssceo.",
+		"..oooecsssssceooo..",
+		".oosmcmmmmmmmcmsoo.",
+		"odjbmsmbbbbbmsmbjdo",
+		"oiaiecsmmmmmsceiaio",
+		"odinoecsssssceonido",
+		".ooodsseoooessdooo.",
+		"..odajmscocsmjado..",
+		"..ondimscocsmidno..",
+		"...oooooo.oooooo...",
+	},
+	hero = {
+		"........oo.....oo........",
+		".......oaao...oaao.......",
+		".......oajjo.ojjao.......",
+		"........ojbo.objo........",
+		".........obbobbo.........",
+		".........oocbcoo.........",
+		".......oocbbbbbcoo.......",
+		"......obbbbbbbbbbbo......",
+		".....ocbbbbbbbbbbbco.....",
+		"....osbbbbbbbbbbbbbso....",
+		"....obbbbbbbbbbbbbbbo....",
+		"...ocbbbccbbbbbccbbbco...",
+		"...osbbccbcbbbccbcbbso...",
+		"...osbbcbbcbbbcbbcbbso...",
+		"...osbbcbbcbbbcbbcbbso...",
+		"...osbbcbccbbbcbccbbso...",
+		"...ocsbbccbbbbbccbbsco...",
+		"..oooccsbbbbbbbbbsccooo..",
+		".oyyyooocccssscccoooyyyo.",
+		"oyyyoosbcsbbbbbscbsooyyyo",
+		"oyyoajjbsbbbbbbbsbjjaoyyo",
+		".oooajjjcsbbbbbscjjjaooo.",
+		"...oaaaoccsssssccoaaao...",
+		"....oooajscooocsjaooo....",
+		".....oajjjscocsjjjao.....",
+		".....oaaajscocsjaaao.....",
+		"......oooooo.oooooo......",
+	},
+	dark = {
+		"...........oooo........",
+		".......ooooooooooo.oo..",
+		"....ooooobbbbbbbboodao.",
+		"...ooobbbbbbbboobbbddao",
+		"..oobbbbbbbbbbbbobboodo",
+		".oobbbbbbbbbbbbbbobo...",
+		".obbbbbbbbbbbbbbbooo...",
+		"oobbbbbbbbbbbbbbboo....",
+		"oobbewbbbbbbbwebboo....",
+		"oobbewwbbbbbwwebboo....",
+		"oobbewwbbbbbwwebboo....",
+		"oobbewwebbbewwebboo....",
+		"oobbeweebbbeweebboo....",
+		"ooobbeebbbbbeebbooo....",
+		".oooobbbbbbbbboooo.....",
+		"..oooodooooodoooo......",
+		".ddoboaoooooaobodd.....",
+		"dadobobaaaaabobodao....",
+		"daddooooaaaooooddao....",
+		"daaaoooobbbooooaaao....",
+		".ooddoooooooooddoo.....",
+		"..oaddbboooboddao......",
+		"..oaaadbbobbdaaao......",
+		"...oooooo.oooooo.......",
+	},
+}
+local INK: { [string]: string } = { o = "#000", w = "#f8f8f8", b = "var(--mb)", m = "var(--mm)", s = "var(--ms)", c = "var(--mc)", e = "var(--me)", a = "var(--ma)", i = "var(--mi)", d = "var(--md)", n = "var(--mn)", j = "var(--mj)", y = "var(--my)" }
 local TYPE_INK: { [string]: string } = {
-	neutral = "--mb: color-mix(in srgb, var(--bot) 50%, #fff); --mh: color-mix(in srgb, var(--bot) 28%, #fff); --ms: color-mix(in srgb, var(--bot) 78%, #fff); --me: color-mix(in srgb, var(--bot) 70%, #000); --ma: #ffd23f;",
-	hero = "--mb: color-mix(in srgb, var(--bot) 12%, #fff); --mh: #fff; --ms: color-mix(in srgb, var(--bot) 34%, #fff); --me: color-mix(in srgb, var(--bot) 75%, #000); --ma: #8fd3ff;",
-	dark = "--mb: color-mix(in srgb, var(--bot) 32%, #161a38); --mh: color-mix(in srgb, var(--bot) 48%, #161a38); --ms: color-mix(in srgb, var(--bot) 14%, #10132a); --me: #e9f0ff; --ma: #e8343e;",
+	neutral = "--mb: color-mix(in srgb, var(--bot) 35%, #fff); --mm: color-mix(in srgb, var(--bot) 50%, #fff); --ms: color-mix(in srgb, var(--bot) 70%, #fff); --mc: color-mix(in srgb, var(--bot) 82%, #000); --me: color-mix(in srgb, var(--bot) 55%, #000); --ma: #f8f820; --mi: #d8d868; --md: #c0b830; --mn: #88a850; --mj: #d8f8b0;",
+	hero = "--mb: #f8f8f8; --ms: #bec2bf; --mc: #647c9a; --mj: #c8ebf1; --ma: #89a8dd; --my: #f7df56;",
+	dark = "--mb: color-mix(in srgb, var(--bot) 22%, #152745); --me: #1c63a1; --ma: #d52b38; --md: #a71a30;",
 }
-local TYPE_BALL: { [string]: string } = {
-	hero = "left: 5px; top: -4px; width: 8px; height: 2px; background: none; box-shadow: 0 0 0 1px var(--ma);",
-	dark = "transform: rotate(45deg);",
-}
-
-type Bot = { name: string, role: string?, tint: string?, cwd: string?, persona: string?, chao: any? }
 
 local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
 end
 
-local function chao(bot: Bot): (string, string)
+local function chao(bot: Bot): string
 	local h = 0x811cb697
 	for i = 1, #bot.name do
 		h = mul32(bit32.bxor(h, string.byte(bot.name, i)), 0x01000193)
@@ -35,28 +109,21 @@ local function chao(bot: Bot): (string, string)
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x85ebca6b)
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 13)), 0xc2b2ae35)
 	h = bit32.bxor(h, bit32.rshift(h, 16))
-	local eyes, kind = CHAO_EYES[h % 3 + 1], CHAO_TYPES[(h // 3) % 4 + 1]
+	local kind = CHAO_TYPES[(h // #CHAO_EYES) % #CHAO_TYPES + 1]
 	local own = type(bot.chao) == "string" and { type = bot.chao } or (type(bot.chao) == "table" and bot.chao or {})
-	return MINI_EYES[own.eyes] and own.eyes or eyes, TYPE_INK[own.type] and own.type or kind
+	return SPRITES[own.type] and own.type or kind
 end
 
-local function mini(eyes: string): string
-	local rows: { { string } } = {}
-	for y, line in ipairs(MINI) do
-		rows[y] = {}
-		for x = 1, #line do
-			rows[y][x] = line:sub(x, x)
-		end
-	end
-	for _, at in ipairs(MINI_EYES[eyes]) do
-		rows[at[2] + 1][at[1] + 1] = "e"
-		rows[at[2] + 1][9 - at[1]] = "e"
-	end
+local function mini(kind: string): string
+	local rows = SPRITES[kind]
+	local left = (18 - #rows[1]) // 2
+	local top = 18 - #rows
 	local shadows: { string } = {}
-	for y, cells in ipairs(rows) do
-		for x, c in ipairs(cells) do
-			if INK[c] then
-				shadows[#shadows + 1] = (x - 1) * 2 .. "px " .. (y - 1) * 2 .. "px 0 " .. INK[c]
+	for y, line in ipairs(rows) do
+		for x = 1, #line do
+			local ink = INK[line:sub(x, x)]
+			if ink then
+				shadows[#shadows + 1] = (left + x + 29) .. "px " .. (top + y + 29) .. "px 0 " .. ink
 			end
 		end
 	end
@@ -79,12 +146,9 @@ local function show_roles(bots: { Bot })
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode(bot.role) .. "; }"
 		end
 		if bot.tint then
-			local eyes, kind = chao(bot)
 			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
-			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(eyes) .. "; }"
-			if TYPE_BALL[kind] then
-				rules[#rules + 1] = dot .. "::before { " .. TYPE_BALL[kind] .. " }"
-			end
+			local kind = chao(bot)
+			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(kind) .. "; }"
 		end
 	end
 	tern.css("roles", table.concat(rules, "\n"))

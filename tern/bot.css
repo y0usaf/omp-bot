@@ -52,45 +52,53 @@
 }
 
 [data-role='omp.bot.type.neutral'] {
-	--xb: color-mix(in srgb, var(--t) 50%, #fff);
-	--xh: color-mix(in srgb, var(--t) 28%, #fff);
-	--xs: color-mix(in srgb, var(--t) 78%, #fff);
-	--xe: color-mix(in srgb, var(--t) 70%, #000);
-	--xa: #ffd23f;
-	--xd: #d69e12;
+	--xb: color-mix(in srgb, var(--t) 35%, #fff);
+	--xm: color-mix(in srgb, var(--t) 50%, #fff);
+	--xs: color-mix(in srgb, var(--t) 70%, #fff);
+	--xc: color-mix(in srgb, var(--t) 82%, #000);
+	--xe: color-mix(in srgb, var(--t) 55%, #000);
+	--xw: #f8f8f8;
+	--xa: #f8f820;
+	--xi: #d8d868;
+	--xd: #c0b830;
+	--xn: #88a850;
+	--xj: #d8f8b0;
 }
 [data-role='omp.bot.type.hero'] {
-	--xb: color-mix(in srgb, var(--t) 12%, #fff);
-	--xh: #fff;
-	--xs: color-mix(in srgb, var(--t) 34%, #fff);
-	--xe: color-mix(in srgb, var(--t) 75%, #000);
-	--xa: #8fd3ff;
-	--xd: #4aa3e8;
+	--xb: #f8f8f8;
+	--xs: #bec2bf;
+	--xc: #647c9a;
+	--xe: #647c9a;
+	--xw: #f8f8f8;
+	--xj: #c8ebf1;
+	--xa: #89a8dd;
+	--xi: #c8ebf1;
+	--xd: #647c9a;
+	--xy: #f7df56;
 }
 [data-role='omp.bot.type.dark'] {
-	--xb: color-mix(in srgb, var(--t) 32%, #161a38);
-	--xh: color-mix(in srgb, var(--t) 48%, #161a38);
-	--xs: color-mix(in srgb, var(--t) 14%, #10132a);
-	--xe: #e9f0ff;
-	--xa: #e8343e;
-	--xd: #a81d27;
+	--xb: color-mix(in srgb, var(--t) 22%, #152745);
+	--xe: #1c63a1;
+	--xw: #f8f8f8;
+	--xa: #d52b38;
+	--xi: #d52b38;
+	--xd: #a71a30;
 }
 
 [data-role^='omp.bot.chao.'] {
 	position: relative;
 	flex: none;
-	width: calc(18 * var(--p));
+	align-items: flex-start;
 	cursor: pointer;
 }
 
 [data-role='omp.bot.emote'] {
-	height: calc(10 * var(--p));
-	align-items: center;
-	justify-content: flex-end;
+	flex: none;
+	align-items: flex-end;
 }
 
 [data-role='omp.bot.body'] {
-	width: calc(18 * var(--p));
+	position: relative;
 	align-items: center;
 }
 
@@ -105,20 +113,25 @@
 	width: var(--p);
 	height: var(--p);
 }
-[data-role='omp.bot.px.o'] { background: light-dark(#141414, #44485e); }
-[data-role='omp.bot.px.w'] { background: #fff; }
+[data-role='omp.bot.px.o'] { background: light-dark(#000, #44485e); }
 [data-role='omp.bot.px.r'] { background: #ff4f7b; }
 [data-role='omp.bot.px.b'] { background: var(--xb); }
-[data-role='omp.bot.px.h'] { background: var(--xh); }
+[data-role='omp.bot.px.m'] { background: var(--xm); }
 [data-role='omp.bot.px.s'] { background: var(--xs); }
+[data-role='omp.bot.px.c'] { background: var(--xc); }
 [data-role='omp.bot.px.e'] { background: var(--xe); }
 [data-role='omp.bot.px.a'] { background: var(--xa); }
+[data-role='omp.bot.px.i'] { background: var(--xi); }
 [data-role='omp.bot.px.d'] { background: var(--xd); }
+[data-role='omp.bot.px.n'] { background: var(--xn); }
+[data-role='omp.bot.px.j'] { background: var(--xj); }
+[data-role='omp.bot.px.w'] { background: var(--xw); }
+[data-role='omp.bot.px.y'] { background: var(--xy); }
 
 [data-role='omp.bot.blink'] {
 	position: absolute;
-	left: 0;
-	top: calc(17 * var(--p));
+	inset: 0;
+	align-items: center;
 }
 [data-role='omp.bot.blink'] [data-role^='omp.bot.px.'] {
 	opacity: 0;
@@ -128,12 +141,11 @@
 [data-role^='omp.bot.glyph.'] {
 	animation: chaoBob 1.8s steps(1) infinite;
 }
-[data-role='omp.bot.glyph.halo'] { transform: translateY(calc(2 * var(--p))); animation-name: chaoHalo; }
 [data-role='omp.bot.glyph.swirl'] { animation: chaoSpin 0.8s steps(4) infinite; }
 [data-role='omp.bot.glyph.ask'] { animation: chaoSway 1.2s steps(1) infinite; }
 [data-role='omp.bot.glyph.bang'] { animation-duration: 0.5s; }
 [data-role='omp.bot.glyph.heart'] { animation: chaoRise 1s steps(5) 1 both; }
-[data-role='omp.bot.glyph.droop'] { transform: translateY(calc(3 * var(--p))); animation: none; }
+[data-role='omp.bot.glyph.droop'] { transform: translateY(calc(2 * var(--p))); animation: none; }
 [data-role='omp.bot.glyph.z'] { animation: chaoZ 2.4s steps(6) infinite; }
 [data-role='omp.bot.chao.drowsy'] [data-role^='omp.bot.glyph.'] { animation-duration: 4s; }
 
@@ -201,11 +213,6 @@
 @keyframes chaoBob {
 	0%, 100% { transform: translateY(0); }
 	50% { transform: translateY(calc(-1 * var(--p))); }
-}
-
-@keyframes chaoHalo {
-	0%, 100% { transform: translateY(calc(2 * var(--p))); }
-	50% { transform: translateY(calc(1 * var(--p))); }
 }
 
 @keyframes chaoSpin {

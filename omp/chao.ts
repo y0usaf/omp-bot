@@ -9,59 +9,150 @@ const TRAITS = [
 	["tint", TINTS],
 ];
 
-const HEAD = {
-	neutral: ["..........oo......", ".........oao......", ".....oooaaooo....."],
-	hero: ["...oo........oo...", "...oho......oho...", "...ohhoooooohho..."],
-	dark: ["..........oo......", ".........oao......", ".....oooaaooo....."],
+const SPRITES = {
+	neutral: {
+		ball: [
+			".ooo.",
+			"oaaio",
+			"oaido",
+			"oiddo",
+			".ooo.",
+		],
+		body: [
+			"...........oo......",
+			".........ooddo.....",
+			".....oooodiaado....",
+			"...oonijjjjjjino...",
+			"..oembbbbbbbbbmeo..",
+			".osmbbbbbbbbbbbmso.",
+			".ombbbbbbbbbbbbbmo.",
+			"ocmbbwwbbbbbwwbbmco",
+			"osmbweewbbbweewbmso",
+			"osmbweewbbbweewbmso",
+			"osmmweewbbbweewmmso",
+			"ocmmweewbbbweewmmco",
+			"oesmmwwmmmmmwwmmseo",
+			".oecsssssssssssceo.",
+			"..oooecsssssceooo..",
+			".oosmcmmmmmmmcmsoo.",
+			"odjbmsmbbbbbmsmbjdo",
+			"oiaiecsmmmmmsceiaio",
+			"odinoecsssssceonido",
+			".ooodsseoooessdooo.",
+			"..odajmscocsmjado..",
+			"..ondimscocsmidno..",
+			"...oooooo.oooooo...",
+		],
+		anchor: 14,
+		gap: 3,
+		eyes: [7, 4, 18],
+		pupil: "e",
+		slump: 13,
+	},
+	hero: {
+		ball: [
+			"...ooooooo...",
+			".ooaaaaaaaoo.",
+			"oaaaoooooaaao",
+			".ooaaaaaaaoo.",
+			"...ooooooo...",
+		],
+		body: [
+			"........oo.....oo........",
+			".......oaao...oaao.......",
+			".......oajjo.ojjao.......",
+			"........ojbo.objo........",
+			".........obbobbo.........",
+			".........oocbcoo.........",
+			".......oocbbbbbcoo.......",
+			"......obbbbbbbbbbbo......",
+			".....ocbbbbbbbbbbbco.....",
+			"....osbbbbbbbbbbbbbso....",
+			"....obbbbbbbbbbbbbbbo....",
+			"...ocbbbccbbbbbccbbbco...",
+			"...osbbccbcbbbccbcbbso...",
+			"...osbbcbbcbbbcbbcbbso...",
+			"...osbbcbbcbbbcbbcbbso...",
+			"...osbbcbccbbbcbccbbso...",
+			"...ocsbbccbbbbbccbbsco...",
+			"..oooccsbbbbbbbbbsccooo..",
+			".oyyyooocccssscccoooyyyo.",
+			"oyyyoosbcsbbbbbscbsooyyyo",
+			"oyyoajjbsbbbbbbbsbjjaoyyo",
+			".oooajjjcsbbbbbscjjjaooo.",
+			"...oaaaoccsssssccoaaao...",
+			"....oooajscooocsjaooo....",
+			".....oajjjscocsjjjao.....",
+			".....oaaajscocsjaaao.....",
+			"......oooooo.oooooo......",
+		],
+		anchor: 12,
+		gap: 1,
+		eyes: [11, 7, 24],
+		pupil: "c",
+		slump: 17,
+	},
+	dark: {
+		ball: [
+			"...o...",
+			".odado.",
+			".oadad.",
+			"oadadad",
+			".oadad.",
+			".ooaoo.",
+			"...o...",
+		],
+		body: [
+			"...........oooo.............",
+			".......ooooooooooo.oo.......",
+			"....ooooobbbbbbbboodao......",
+			"...ooobbbbbbbboobbbddao.....",
+			"..oobbbbbbbbbbbbobboodo.....",
+			".oobbbbbbbbbbbbbbobo........",
+			".obbbbbbbbbbbbbbbooo........",
+			"oobbbbbbbbbbbbbbboo.........",
+			"oobbewbbbbbbbwebboo.........",
+			"oobbewwbbbbbwwebboo.........",
+			"oobbewwbbbbbwwebboo.........",
+			"oobbewwebbbewwebboo.........",
+			"oobbeweebbbeweebboo.........",
+			"ooobbeebbbbbeebbooo.........",
+			".oooobbbbbbbbboooo..........",
+			"..oooodooooodoooo...........",
+			".ddoboaoooooaobodd..........",
+			"dadobobaaaaabobodao.........",
+			"daddooooaaaooooddao.........",
+			"daaaoooobbbooooaaao.........",
+			".ooddoooooooooddoo..........",
+			"..oaddbboooboddao...........",
+			"..oaaadbbobbdaaao...........",
+			"...oooooo.oooooo............",
+		],
+		anchor: 24,
+		gap: 0,
+		eyes: [8, 4, 18],
+		pupil: "e",
+		slump: 14,
+	},
 };
-
-const TRUNK = [
-	".....obbb",
-	"...obbbbb",
-	"..obbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	".obbbbbbb",
-	"..oosssss",
-	".oo.obbbb",
-	"oaaobbbbb",
-	"oaaoobbbb",
-	".oooaaobb",
-	"...oaaaoo",
-	"....ooo..",
-];
-
-const EYE_ROW = 7;
-const NECK_ROW = 13;
 
 const EYES = {
-	oval: [".ee.", "ewee", "eeee", "eeee", ".ee."],
-	round: ["....", ".ee.", "ewee", "eeee", ".ee."],
-	dot: ["....", "....", ".we.", ".ee.", "...."],
-	happy: ["....", "....", ".ee.", "e..e", "...."],
-	sad: ["....", "..ee", ".eee", "ewee", ".ee."],
-	half: ["....", "....", "eeee", "ewee", ".ee."],
-	shut: ["....", "....", "....", "e..e", ".ee."],
+	round: ["....", ".ww.", "wxxw", "wxxw", ".ww.", "...."],
+	dot: ["....", "....", ".xx.", ".xx.", "....", "...."],
+	happy: ["....", "....", ".xx.", "x..x", "....", "...."],
+	sad: ["...x", "..xx", ".xxx", "wxxx", "wxxw", "...."],
+	half: ["....", "....", "xxxx", "x..x", ".xx.", "...."],
+	shut: ["....", "....", "....", "x..x", ".xx.", "...."],
 };
-
-const BLINK = ["bbbb", "bbbb", "bbbb", "eeee", ".bb."];
 
 const GLYPHS = {
-	ball: ["aaa", "aaa", "aad"],
-	ask: [".aaa.", "aa.aa", "...aa", "..aa.", ".....", "..aa."],
-	bang: ["aa", "aa", "aa", "aa", "..", "aa"],
+	ask: [".aai.", "ai.ad", "...ad", "..ad.", ".....", "..ad."],
+	bang: ["ai", "ai", "ad", "ad", "..", "ad"],
 	heart: [".rr.rr.", "rrrrrrr", "rrrrrrr", ".rrrrr.", "..rrr..", "...r..."],
-	swirl: [".aaa.", "a....", "a.aa.", "a...a", ".aaa."],
-	droop: ["aaa", "ddd"],
-	spiky: ["a.a.a", ".aaa.", "aadaa", ".aaa.", "a.a.a"],
-	z: ["aaaa", "..a.", ".a..", "aaaa"],
+	swirl: [".aai.", "a....", "a.ai.", "a...d", ".idd."],
+	droop: ["aai", "idd"],
+	z: ["aaaa", "..a.", ".a..", "aadd"],
 };
-
-const HALO = [".dddddd.", "d......d", ".dddddd."];
 
 const BALL = { neutral: "ball", hero: "halo", dark: "spiky" };
 
@@ -107,41 +198,10 @@ export function chaoOf(name, tint) {
 	}
 	const entry = roster(name);
 	const own = typeof entry.chao === "string" ? { type: entry.chao } : (entry.chao ?? {});
-	if (HEAD[own.type]) look.type = own.type;
+	if (SPRITES[own.type]) look.type = own.type;
 	if (TRAITS[0][1].includes(own.eyes)) look.eyes = own.eyes;
 	if (TINTS.includes(tint)) look.tint = tint;
 	return look;
-}
-
-function mirror(rows) {
-	return rows.map(r => (r.length === 18 ? r : r + [...r].reverse().join("")));
-}
-
-function shade(rows) {
-	const at = (x, y) => rows[y]?.[x] ?? ".";
-	const edge = c => c === "o" || c === ".";
-	return rows.map((r, y) =>
-		[...r]
-			.map((c, x) => {
-				if (c === "a") return edge(at(x, y + 1)) || edge(at(x + 1, y)) ? "d" : c;
-				if (c !== "b") return c;
-				if (edge(at(x, y + 1)) || edge(at(x + 1, y))) return "s";
-				return edge(at(x, y - 1)) || edge(at(x - 1, y)) ? "h" : c;
-			})
-			.join(""),
-	);
-}
-
-function stamp(rows, eye, top) {
-	const out = rows.map(r => [...r]);
-	eye.forEach((r, dy) =>
-		[...r].forEach((c, dx) => {
-			if (c === ".") return;
-			out[top + dy][2 + dx] = c;
-			out[top + dy][15 - dx] = c;
-		}),
-	);
-	return out.map(r => r.join(""));
 }
 
 function outline(mask) {
@@ -153,33 +213,69 @@ function outline(mask) {
 	);
 }
 
-function pixels(rows, trim) {
+function eyed(sprite, name) {
+	const [top, left, axis] = sprite.eyes;
+	const out = sprite.body.map(r => [...r]);
+	const eye = c => c === sprite.pupil || c === "w";
+	EYES[name].forEach((stamp, dy) => {
+		const line = out[top + dy];
+		for (let dx = 0; dx < 4; dx++) {
+			for (const x of [left + dx, axis - left - dx]) {
+				if (eye(line[x])) {
+					let k = x - 1;
+					while (eye(line[k])) k--;
+					line[x] = line[k];
+				}
+			}
+		}
+		[...stamp].forEach((c, dx) => {
+			if (c === ".") return;
+			const v = c === "x" ? sprite.pupil : c;
+			line[left + dx] = v;
+			line[axis - left - dx] = v;
+		});
+	});
+	return out;
+}
+
+function cells(chars) {
+	return [...chars].map(c => col([], { role: `omp.bot.px.${c === "." ? "_" : c}` }));
+}
+
+function pixels(rows) {
 	return rows.map(r => {
-		const cut = trim ? Math.min(r.length - r.replace(/^\.+/, "").length, r.length - r.replace(/\.+$/, "").length) : 0;
-		const line = r.slice(cut, r.length - cut);
-		return row(
-			[...line].map(c => col([], { role: `omp.bot.px.${c === "." ? "_" : c}` })),
-			{ role: "omp.bot.line", gap: "none" },
-		);
+		const cut = Math.min(r.length - r.replace(/^\.+/, "").length, r.length - r.replace(/\.+$/, "").length);
+		return row(cells(r.slice(cut, r.length - cut)), { role: "omp.bot.line", gap: "none" });
 	});
 }
 
 export function drawChao(look, mood) {
-	const sleep = mood === "sleep";
+	const sprite = SPRITES[look.type];
 	const eyes = MOOD_EYES[mood] ?? look.eyes;
-	let base = mirror([...HEAD[look.type], ...TRUNK]);
-	if (sleep) base = [".".repeat(18), ...base.slice(0, NECK_ROW), ...base.slice(NECK_ROW + 1)];
-	const top = EYE_ROW + (sleep ? 1 : 0);
-	const eye = look.type === "dark" ? EYES[eyes].map(r => `.${r.slice(1)}`) : EYES[eyes];
-	const body = stamp(shade(base), eye, top);
+	let body = (eyes === "oval" ? sprite.body.map(r => [...r]) : eyed(sprite, eyes)).map(r => r.join(""));
+	const [top, left, axis] = sprite.eyes;
+	const shut = eyed(sprite, "shut");
+	let blink = body.map((r, y) =>
+		y < top || y >= top + 6 ? "" : [...r].map((_, x) => (x >= left && x < left + 4) || (x <= axis - left && x > axis - left - 4) ? shut[y][x] : ".").join(""),
+	);
+	if (mood === "sleep") {
+		const slump = rows => ["", ...rows.slice(0, sprite.slump), ...rows.slice(sprite.slump + 1)];
+		body = slump(body);
+		blink = slump(blink);
+	}
 	const emote = EMOTE[mood] ?? "ball";
 	const kind = emote === "ball" ? BALL[look.type] : emote;
-	const glyph = kind === "halo" ? HALO : outline(GLYPHS[kind]);
+	const glyph = emote === "ball" ? sprite.ball : outline(GLYPHS[emote]);
+	const width = glyph[0].length;
+	const pad = Math.max(0, Math.min(sprite.anchor - Math.floor(width / 2), sprite.body[0].length - width));
 	const parts = [
-		col([col(pixels([...glyph, "", ""], false), { role: `omp.bot.glyph.${kind}`, gap: "none" })], { role: "omp.bot.emote", gap: "none" }),
-		col(pixels(body, true), { role: "omp.bot.body", gap: "none" }),
+		row([row(cells(".".repeat(pad)), { role: "omp.bot.line", gap: "none" }), col(glyph.map(r => row(cells(r), { role: "omp.bot.line", gap: "none" })), { role: `omp.bot.glyph.${kind}`, gap: "none" })], {
+			role: "omp.bot.emote",
+			gap: "none",
+		}),
+		...Array.from({ length: sprite.gap }, () => row([], { role: "omp.bot.line", gap: "none" })),
+		col([...pixels(body), ...(eyes === look.eyes ? [col(pixels(blink), { role: "omp.bot.blink", gap: "none" })] : [])], { role: "omp.bot.body", gap: "none" }),
 	];
-	if (eyes === look.eyes) parts.push(col(pixels(BLINK.map(r => `..${r}......${[...r].reverse().join("")}..`), false), { role: "omp.bot.blink", gap: "none" }));
 	return col(
 		[col([col(parts, { role: `omp.bot.chao.${mood}`, gap: "none", actions: { click: "boop" } })], { role: `omp.bot.type.${look.type}`, gap: "none" })],
 		{ role: `omp.bot.tempo.${look.tempo}`, gap: "none" },
