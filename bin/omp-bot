@@ -42,6 +42,8 @@ persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
+[ -z "${OMP_BOT_CWD_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CWD_EXTENSION" "$@"
+[ -z "${OMP_BOT_SECRETS_EXTENSION:-}" ] || set -- -e "$OMP_BOT_SECRETS_EXTENSION" "$@"
 [ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
 [ "$(field extensions)" = true ] || set -- --no-extensions "$@"
 model=$(field model)
@@ -69,7 +71,7 @@ optchat)
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" -e "$root/omp/secrets.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
+set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
 	exec flock -n -o "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
