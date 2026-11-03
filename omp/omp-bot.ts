@@ -1,5 +1,6 @@
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
+import { chatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
@@ -409,7 +410,7 @@ function patchTranscript(state) {
 			if (run.some(isTool)) {
 				const folded = work(run[0]);
 				folded.update(run, live);
-				if (!live) shown.push(folded);
+				if (!live && !chatTranscriptDisplayPreferences.hideToolActivity) shown.push(folded);
 			}
 			run = [];
 		};
