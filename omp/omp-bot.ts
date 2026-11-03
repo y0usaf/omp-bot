@@ -12,7 +12,7 @@ import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
-import { col, elapsed, node, row, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 
@@ -444,10 +444,7 @@ class BotWork {
 		const key = [...this.blocks, collapsed, failed, Math.round(ms / 1000)];
 		if (this.key && same(this.key, key)) return this.node;
 		this.key = key;
-		const head = [
-			text(ms >= 1000 ? `Worked ${clock(ms)}` : "Worked", { wrap: "none" }),
-			text([span(steps(tools.length), "dim")], { wrap: "none" }),
-		];
+		const head = [text(ms >= 1000 ? `Worked ${clock(ms)}` : "Worked", { wrap: "none" })];
 		if (failed > 0) head.push(node("badge", { text: `${failed} failed`, tone: "error" }));
 		this.node = node(
 			"section",
