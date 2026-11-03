@@ -47,6 +47,7 @@ set -- --continue "$@"
 model=$(field model)
 model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
+[ ! -f "$dir/config.yml" ] || set -- --config "$dir/config.yml" "$@"
 set -- -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1

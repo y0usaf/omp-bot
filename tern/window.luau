@@ -130,24 +130,63 @@ local function create(cx: WindowCx, bots: { Bot })
 			cx2:toast("error", "Bot names use letters, digits, spaces, '.', '_' or '-', and can't start with '.'")
 			return
 		end
-		for _, bot in ipairs(bots) do
-			if bot.name == name then
-				open(cx2, bot)
+		local function free_tint(): string
+			local used = {}
+			for _, other in ipairs(bots) do
+				used[other.tint or ""] = true
+			end
+			local tint = TINTS[#bots % #TINTS + 1]
+			for _, t in ipairs(TINTS) do
+				if not used[t] then
+					tint = t
+					break
+				end
+			end
+			return tint
+		end
+		for _, existing in ipairs(bots) do
+			if existing.name == name then
+				cx2:pick({
+					items = {
+						{ label = "Open " .. name, detail = "keeps its conversation", icon = "sparkle", reuse = true },
+						{ label = "Start a fresh " .. name, detail = "archives the old conversation first", icon = "plus", fresh = true },
+					},
+					placeholder = name .. " already exists",
+					icon = "sparkle",
+					action = "open",
+				}):next(function(choice, _, cx3)
+					if not choice or not cx3 then
+						return
+					end
+					if choice.reuse then
+						open(cx3, existing)
+						return
+					end
+					local pane = open_names(cx3)[name]
+					if pane then
+						cx3.layout:close(pane)
+					end
+					local env = {}
+					local state = tern.getenv("OMP_BOT_STATE")
+					if state then
+						env.OMP_BOT_STATE = state
+					end
+					tern.process.run({ ROOT .. "/bin/omp-bot-remove", name }, { env = env, timeout_ms = 30000 }, function(result, cx4)
+						if not cx4 then
+							return
+						end
+						if result.status ~= 0 then
+							cx4:toast("error", "Could not clear " .. name, (result.stderr:gsub("%s+$", "")))
+							return
+						end
+						open(cx4, { name = name, role = "Assistant", tint = free_tint(), cwd = "~" }, true)
+						show_roles(roster())
+					end)
+				end)
 				return
 			end
 		end
-		local used = {}
-		for _, bot in ipairs(bots) do
-			used[bot.tint or ""] = true
-		end
-		local tint = TINTS[#bots % #TINTS + 1]
-		for _, t in ipairs(TINTS) do
-			if not used[t] then
-				tint = t
-				break
-			end
-		end
-		local bot = { name = name, role = "Assistant", tint = tint, cwd = "~" }
+		local bot = { name = name, role = "Assistant", tint = free_tint(), cwd = "~" }
 		bots[#bots + 1] = bot
 		show_roles(bots)
 		open(cx2, bot, true)
