@@ -44,7 +44,9 @@ set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
 [ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
 [ "$(field extensions)" = true ] || set -- --no-extensions "$@"
-[ -z "${OMP_BOT_MODEL:-}" ] || set -- --model "$OMP_BOT_MODEL" "$@"
+model=$(field model)
+model=${model:-${OMP_BOT_MODEL:-}}
+[ -z "$model" ] || set -- --model "$model" "$@"
 set -- -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1

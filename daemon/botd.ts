@@ -168,6 +168,16 @@ function enqueue(message: { bot?: string; text?: string; key?: string; origin?: 
 	return { id: task.id, created, state: task.state };
 }
 
+function replyToOrigin(id: string) {
+	const task = q.byId.get({ id });
+	if (!task?.origin?.startsWith("bot:") || (task.state !== "done" && task.state !== "failed")) return;
+	const to = task.origin.slice(4);
+	if (!roster().has(to)) return log(`reply ${id}: no bot named ${to}`);
+	const body = task.state === "done" ? String(task.result ?? "").trim() : `It failed: ${task.error}`;
+	q.ack.run({ id });
+	enqueue({ bot: to, text: `Reply from ${task.bot} to your task ${id}:\n\n${body}`, key: `reply-${id}`, origin: `reply:${task.bot}` });
+}
+
 function handle(socket: Socket, message: any, self: { link?: Link }) {
 	switch (message.op) {
 		case "hello": {
@@ -206,6 +216,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			q.silent.run({ id: message.id, silent: SILENT });
 			if (link.task === message.id) link.task = undefined;
 			log(`done ${message.id} by ${link.bot}`);
+			replyToOrigin(message.id);
 			return send(socket, { op: "ack", id: message.id });
 		}
 		case "fail": {
@@ -214,6 +225,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			q.release.run({ id: message.id, error: String(message.error ?? "failed"), max: message.final ? 0 : MAX_ATTEMPTS, now: Date.now() });
 			if (link.task === message.id) link.task = undefined;
 			log(`fail ${message.id} by ${link.bot}: ${message.error}`);
+			replyToOrigin(message.id);
 			return send(socket, { op: "ack", id: message.id });
 		}
 		case "enqueue":
