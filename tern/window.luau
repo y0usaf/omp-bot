@@ -6,29 +6,61 @@ local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local TABS = tern.plugin.data .. "/../agent-tabs/kv.json"
 
-local EYES = { "pill", "round", "visor", "lids", "dots" }
-local RAIL_EYES = {
-	round = "left: 5.2px; top: 6.8px; width: 2.8px; height: 2.8px; border-radius: 50%; box-shadow: 4.8px 0 0 #1a1730;",
-	visor = "left: 5px; top: 7.4px; width: 8px; height: 2.2px; border-radius: 1.1px; box-shadow: none;",
-	lids = "left: 5.1px; top: 6.6px; width: 2.8px; height: 3.2px; border-radius: 0.6px 0.6px 1.6px 1.6px; box-shadow: 4.8px 0 0 #1a1730;",
-	dots = "left: 5px; top: 7.4px; width: 2px; height: 2px; border-radius: 50%; box-shadow: 6px 0 0 #1a1730;",
+local MINI = { "..ooooo..", ".ohhbbbo.", "ohbbbbbso", "obbbbbbso", "obbbbbbso", "obbbbbbso", ".ossssso.", "oaobbboao", ".oaaoaao." }
+local MINI_EYES: { [string]: { { number } } } = { oval = { { 2, 3 }, { 2, 4 } }, round = { { 2, 3 }, { 3, 3 }, { 2, 4 }, { 3, 4 } }, dot = { { 2, 4 } } }
+local CHAO_EYES = { "oval", "round", "dot" }
+local CHAO_TYPES = { "neutral", "neutral", "hero", "dark" }
+local INK: { [string]: string } = { o = "#141414", h = "var(--mh)", b = "var(--mb)", s = "var(--ms)", e = "var(--me)", a = "var(--ma)" }
+local TYPE_INK: { [string]: string } = {
+	neutral = "--mb: color-mix(in srgb, var(--bot) 50%, #fff); --mh: color-mix(in srgb, var(--bot) 28%, #fff); --ms: color-mix(in srgb, var(--bot) 78%, #fff); --me: color-mix(in srgb, var(--bot) 70%, #000); --ma: #ffd23f;",
+	hero = "--mb: color-mix(in srgb, var(--bot) 12%, #fff); --mh: #fff; --ms: color-mix(in srgb, var(--bot) 34%, #fff); --me: color-mix(in srgb, var(--bot) 75%, #000); --ma: #8fd3ff;",
+	dark = "--mb: color-mix(in srgb, var(--bot) 32%, #161a38); --mh: color-mix(in srgb, var(--bot) 48%, #161a38); --ms: color-mix(in srgb, var(--bot) 14%, #10132a); --me: #e9f0ff; --ma: #e8343e;",
+}
+local TYPE_BALL: { [string]: string } = {
+	hero = "left: 5px; top: -4px; width: 8px; height: 2px; background: none; box-shadow: 0 0 0 1px var(--ma);",
+	dark = "transform: rotate(45deg);",
 }
 
-type Bot = { name: string, role: string?, tint: string?, cwd: string?, persona: string? }
+type Bot = { name: string, role: string?, tint: string?, cwd: string?, persona: string?, chao: any? }
 
 local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
 end
 
-local function eyes(name: string): string
+local function chao(bot: Bot): (string, string)
 	local h = 0x811cb697
-	for i = 1, #name do
-		h = mul32(bit32.bxor(h, string.byte(name, i)), 0x01000193)
+	for i = 1, #bot.name do
+		h = mul32(bit32.bxor(h, string.byte(bot.name, i)), 0x01000193)
 	end
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x85ebca6b)
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 13)), 0xc2b2ae35)
 	h = bit32.bxor(h, bit32.rshift(h, 16))
-	return EYES[h % #EYES + 1]
+	local eyes, kind = CHAO_EYES[h % 3 + 1], CHAO_TYPES[(h // 3) % 4 + 1]
+	local own = type(bot.chao) == "string" and { type = bot.chao } or (type(bot.chao) == "table" and bot.chao or {})
+	return MINI_EYES[own.eyes] and own.eyes or eyes, TYPE_INK[own.type] and own.type or kind
+end
+
+local function mini(eyes: string): string
+	local rows: { { string } } = {}
+	for y, line in ipairs(MINI) do
+		rows[y] = {}
+		for x = 1, #line do
+			rows[y][x] = line:sub(x, x)
+		end
+	end
+	for _, at in ipairs(MINI_EYES[eyes]) do
+		rows[at[2] + 1][at[1] + 1] = "e"
+		rows[at[2] + 1][9 - at[1]] = "e"
+	end
+	local shadows: { string } = {}
+	for y, cells in ipairs(rows) do
+		for x, c in ipairs(cells) do
+			if INK[c] then
+				shadows[#shadows + 1] = (x - 1) * 2 .. "px " .. (y - 1) * 2 .. "px 0 " .. INK[c]
+			end
+		end
+	end
+	return table.concat(shadows, ", ")
 end
 
 local function quote(s: string): string
@@ -46,9 +78,13 @@ local function show_roles(bots: { Bot })
 			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode(bot.role) .. "; }"
 		end
-		local look = bot.tint and RAIL_EYES[eyes(bot.name)]
-		if look then
-			rules[#rules + 1] = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c::after { " .. look .. " }"
+		if bot.tint then
+			local eyes, kind = chao(bot)
+			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
+			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(eyes) .. "; }"
+			if TYPE_BALL[kind] then
+				rules[#rules + 1] = dot .. "::before { " .. TYPE_BALL[kind] .. " }"
+			end
 		end
 	end
 	tern.css("roles", table.concat(rules, "\n"))

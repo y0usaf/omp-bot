@@ -2,42 +2,18 @@ import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
-const TINTS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
-const ZONES = ["nw", "ne", "w", "e", "sw", "se", "n", "s"];
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
 const THINKING = ["Thinking…", "Hmm, let me see…", "Mulling it over…", "Working it out…"];
-const SEED = 0x811cb697;
-const TRAITS = [
-	["eyes", ["pill", "round", "visor", "lids", "dots"]],
-	["rings", ["atom", "saturn", "twin", "orbit"]],
-	["gear", ["antenna", "sprout", "halo", "ears", "moon"]],
-	["glow", ["drift", "pulse", "flare"]],
-	["tempo", ["calm", "even", "brisk"]],
-	["tint", TINTS],
-];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 
 function pick(list, seed) {
 	return list[Math.abs(seed) % list.length];
-}
-
-function traits(name) {
-	let h = SEED;
-	for (const byte of new TextEncoder().encode(name)) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
-	h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
-	h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
-	h = (h ^ (h >>> 16)) >>> 0;
-	const look = {};
-	for (const [key, list] of TRAITS) {
-		look[key] = list[h % list.length];
-		h = Math.floor(h / list.length);
-	}
-	return look;
 }
 
 function same(a, b) {
@@ -48,8 +24,8 @@ class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
 		this.role = process.env.OMP_BOT_ROLE || "Chief of staff";
-		this.look = traits(this.name);
-		this.tint = TINTS.includes(process.env.OMP_BOT_TINT) ? process.env.OMP_BOT_TINT : this.look.tint;
+		this.look = chaoOf(this.name, process.env.OMP_BOT_TINT);
+		this.tint = this.look.tint;
 		this.mood = "idle";
 		this.line = pick(IDLE, Date.now());
 		this.hero = true;
@@ -70,7 +46,7 @@ class Bot {
 
 	rename(name) {
 		this.name = name;
-		this.look = traits(name);
+		this.look = chaoOf(name, this.tint);
 	}
 
 	set(mood, line) {
@@ -142,44 +118,8 @@ class Bot {
 		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
 	}
 
-	orb(gaze) {
-		const look = this.look;
-		const shape = col(
-			[
-				col([], { role: `omp.bot.glow.${look.glow}` }),
-				col(
-					[col([], { role: "omp.bot.ring.a" }), col([], { role: "omp.bot.ring.b" }), col([], { role: "omp.bot.ring.c" })],
-					{ role: `omp.bot.rings.${look.rings}` },
-				),
-				col([], { role: `omp.bot.gear.${look.gear}` }),
-				col([], { role: "omp.bot.core" }),
-				row(
-					[
-						col([], { role: "omp.bot.eye.l" }),
-						col([], { role: "omp.bot.eye.r" }),
-						col([], { role: "omp.bot.blush.l" }),
-						col([], { role: "omp.bot.blush.r" }),
-						col([], { role: "omp.bot.mouth" }),
-					],
-					{ role: `omp.bot.face.${look.eyes}` },
-				),
-				col([], { role: "omp.bot.heart.a" }),
-				col([], { role: "omp.bot.heart.b" }),
-				col([], { role: "omp.bot.heart.c" }),
-				col([], { role: "omp.bot.spark.a" }),
-				col([], { role: "omp.bot.spark.b" }),
-				text("z", { role: "omp.bot.z", wrap: "none" }),
-				text("purrr", { role: "omp.bot.purr", wrap: "none" }),
-			],
-			{ role: `omp.bot.orb.${this.face()}`, actions: { click: "boop" } },
-		);
-		const body = gaze
-			? ZONES.reduceRight(
-					(inner, zone) => col([col([], { role: `omp.bot.zone.${zone}` }), inner], { role: `omp.bot.gaze.${zone}` }),
-					shape,
-				)
-			: shape;
-		return col([body], { role: `omp.bot.tempo.${look.tempo}` });
+	chao() {
+		return drawChao(this.look, this.face());
 	}
 }
 
@@ -204,7 +144,7 @@ class BotHero {
 		if (!b.hero) return col([], { role: "omp.bot.none" });
 		return col(
 			[
-				b.orb(true),
+				b.chao(),
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
@@ -240,7 +180,7 @@ class BotTop {
 		const b = this.bot;
 		return row(
 			[
-				b.orb(false),
+				b.chao(),
 				text(b.name, { role: "omp.bot.name", wrap: "none" }),
 				text(b.role, { role: "omp.bot.role", wrap: "none" }),
 				b.active
@@ -279,7 +219,7 @@ class BotStatus {
 		const status = b.boop ?? b.line;
 		return row(
 			[
-				b.orb(true),
+				b.chao(),
 				col(
 					[
 						text(b.name, { role: "omp.bot.name", wrap: "none" }),
@@ -406,7 +346,7 @@ export default function ompBot(pi) {
 	});
 
 	pi.registerCommand("bot", {
-		description: "Bot mode: an orb that works for you; /bot toggles it, /bot name NAME renames it",
+		description: "Bot mode: a Chao that works for you; /bot toggles it, /bot name NAME renames it",
 		handler: async (args, ctx) => {
 			const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
 			if (parts[0] === "name" && parts[1]) {
@@ -424,7 +364,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb: your replies and one status word, nothing else.\n`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small Chao: your replies and one status word, nothing else.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };

@@ -4,7 +4,7 @@
 #tabbar .tt[data-tc='green'] { --bot: #2fbf71; }
 #tabbar .tt[data-tc='teal'] { --bot: #19b8c4; }
 #tabbar .tt[data-tc='blue'] { --bot: #3d7bff; }
-#tabbar .tt[data-tc='purple'] { --bot: #6d7bff; }
+#tabbar .tt[data-tc='purple'] { --bot: #8f6bff; }
 #tabbar .tt[data-tc='pink'] { --bot: #ff5fa8; }
 
 #tabbar .tt[data-tc] {
@@ -42,12 +42,8 @@
 	position: relative;
 	width: 18px;
 	height: 18px;
-	border-radius: 50%;
 	color: transparent;
-	background:
-		radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 40%),
-		radial-gradient(circle at 50% 58%, var(--bot), rgb(from var(--bot) r g b / 35%) 62%, rgb(from var(--bot) r g b / 0%) 74%);
-	box-shadow: 0 0 10px -2px rgb(from var(--bot) r g b / 70%);
+	background: none;
 }
 
 #tabbar .tt[data-tc] .tn-dk-c * {
@@ -57,42 +53,44 @@
 #tabbar .tt[data-tc] .tn-dk-c::after {
 	content: '';
 	position: absolute;
-	left: 5.6px;
-	top: 6px;
+	left: 0;
+	top: 1px;
 	width: 2px;
-	height: 4.6px;
-	border-radius: 1px;
-	background: #1a1730;
-	box-shadow: 4.6px 0 0 #1a1730;
+	height: 2px;
 }
 
-#tabbar .tt[data-tc]:hover .tn-dk-c::after {
-	top: 7.6px;
-	height: 1.6px;
+#tabbar .tt[data-tc] .tn-dk-c::before {
+	content: '';
+	position: absolute;
+	z-index: 1;
+	left: 7px;
+	top: -4px;
+	width: 4px;
+	height: 4px;
+	background: var(--ma);
+	box-shadow: 0 0 0 1px #141414;
 }
 
 #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] {
-	animation: railOrbPulse 1.6s ease-in-out infinite;
+	animation: railChaoBob 0.8s steps(1) infinite;
 }
 
-#tabbar .tt[data-tc] .tn-dk-c[data-st='waiting']::before,
-#tabbar .tt[data-tc] .tn-dk-c[data-st='failed']::before {
-	content: '';
-	position: absolute;
-	right: -2px;
-	top: -2px;
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
+#tabbar .tt[data-tc] .tn-dk-c[data-st='waiting']::before {
 	background: #f0a020;
-	box-shadow: 0 0 0 1.5px light-dark(#f8f8f8, #161618);
 }
 
 #tabbar .tt[data-tc] .tn-dk-c[data-st='failed']::before {
+	top: -2px;
 	background: #e5484d;
 }
 
-@keyframes railOrbPulse {
-	0%, 100% { transform: scale(1); box-shadow: 0 0 8px -2px rgb(from var(--bot) r g b / 60%); }
-	50% { transform: scale(1.12); box-shadow: 0 0 14px 0 rgb(from var(--bot) r g b / 85%); }
+@keyframes railChaoBob {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	#tabbar .tt[data-tc] .tn-dk-c[data-st='working'] {
+		animation: none;
+	}
 }
