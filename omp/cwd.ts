@@ -42,16 +42,4 @@ export default function cwd(pi) {
 
 	pi.on("session_start", async (_event, c) => pin(c));
 	pi.on("session_switch", async (_event, c) => pin(c));
-
-	pi.on("input", async event => {
-		const dir = /^\/cwd\s+(\S[\s\S]*)$/.exec(String(event.text ?? "").trim())?.[1];
-		return dir ? { text: `/move ${dir}` } : undefined;
-	});
-
-	pi.registerCommand("cwd", {
-		description: "Show the bot's working directory; /cwd DIR moves the bot there, as /move does, and it starts there from now on",
-		handler: async (_args, c) => {
-			c.ui.notify(c.sessionManager.getCwd(), "info");
-		},
-	});
 }
