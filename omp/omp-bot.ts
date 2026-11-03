@@ -1,17 +1,10 @@
-import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
-import { chatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
-import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
-import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
-import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
-const DOCK_PATCHED = Symbol.for("omp-bot.dock");
 const TINTS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
 const ZONES = ["nw", "ne", "w", "e", "sw", "se", "n", "s"];
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
@@ -28,7 +21,6 @@ const TRAITS = [
 	["tint", TINTS],
 ];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
-const TOOLS = [ToolExecutionComponent, ReadToolGroupComponent];
 
 function pick(list, seed) {
 	return list[Math.abs(seed) % list.length];
@@ -48,24 +40,8 @@ function traits(name) {
 	return look;
 }
 
-function clock(ms) {
-	const s = Math.max(0, Math.round(ms / 1000));
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	return `${m}m ${String(s % 60).padStart(2, "0")}s`;
-}
-
 function same(a, b) {
 	return a.length === b.length && a.every((item, i) => item === b[i]);
-}
-
-function isTool(block) {
-	return TOOLS.some(kind => block instanceof kind);
-}
-
-function speaks(block, cx) {
-	if (!(block instanceof AssistantMessageComponent)) return false;
-	return (block.describe(cx)?.c ?? []).some(child => typeof child?.render !== "function" && (child?.k === "md" || child?.key === "error"));
 }
 
 class Bot {
@@ -329,180 +305,26 @@ class BotStatus {
 	}
 }
 
-class BotWork {
-	constructor() {
-		this.blocks = [];
-		this.toggled = undefined;
-	}
-
-	handleNativeEvent(event) {
-		if (event?.type === "toggle" && event.key === "work") this.toggled = event.collapsed;
-	}
-
-	invalidate() {}
-
-	render() {
-		return [];
-	}
-
-	update(blocks, live) {
-		if (live && this.startedAt === undefined) this.startedAt = Date.now();
-		if (!live && this.startedAt !== undefined && this.endedAt === undefined) this.endedAt = Date.now();
-		this.blocks = blocks;
-	}
-
-	describe(cx) {
-		const tools = this.blocks.filter(isTool);
-		const failed = tools.filter(block => block.describe(cx)?.p?.status === "error").length;
-		const collapsed = this.toggled ?? failed === 0;
-		const ms =
-			this.endedAt !== undefined
-				? this.endedAt - this.startedAt
-				: tools.reduce((total, block) => total + (block.describe(cx)?.p?.took ?? 0), 0);
-		const key = [...this.blocks, collapsed, failed, Math.round(ms / 1000)];
-		if (this.key && same(this.key, key)) return this.node;
-		this.key = key;
-		const head = [text(ms >= 1000 ? `Worked ${clock(ms)}` : "Worked", { wrap: "none" })];
-		if (failed > 0) head.push(node("badge", { text: `${failed} failed`, tone: "error" }));
-		this.node = node(
-			"section",
-			{ role: "omp.bot.work", collapsible: true, collapsed },
-			[node("row", { gap: "sm", align: "center" }, head, "head"), ...this.blocks],
-			"work",
-		);
-		return this.node;
-	}
-}
-
-class BotMarked {
-	constructor(items, role) {
-		this.items = items;
-		this.node = col(items, { role });
-	}
-
-	invalidate() {
-		for (const item of this.items) item.invalidate?.();
-	}
-
-	render(width) {
-		return this.items.flatMap(item => item.render(width));
-	}
-
-	describe() {
-		return this.node;
-	}
-}
-
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
 	if (proto[PATCHED]) {
 		proto[PATCHED].state = state;
 		return;
 	}
-	const assistant = AssistantMessageComponent.prototype;
-	const describeAssistant = assistant.describe;
 	const inner = proto.nativeBlocks;
-	const innerDescribe = proto.describe;
-	const works = new WeakMap();
 	const shownBy = new WeakMap();
-	const nodeBy = new WeakMap();
-	const marked = new WeakMap();
-	const advice = new WeakMap();
-	proto[PATCHED] = { state, cx: undefined };
-
-	assistant.describe = function (cx) {
-		if (cx) proto[PATCHED].cx = cx;
-		return describeAssistant.call(this, cx);
-	};
-
-	function advises(block) {
-		let is = advice.get(block);
-		if (is === undefined) {
-			is = block.describe?.()?.p?.role === "omp.advisor";
-			advice.set(block, is);
-		}
-		return is;
-	}
-
-	function mark(block) {
-		const said = block instanceof UserMessageComponent || block instanceof AssistantMessageComponent;
-		if (!said && !advises(block)) return block;
-		let wrapped = marked.get(block);
-		if (!wrapped) {
-			wrapped = new BotMarked([block], said ? "omp.bot.msg" : "omp.bot.advice");
-			marked.set(block, wrapped);
-		}
-		return wrapped;
-	}
-
-	function work(first) {
-		let folded = works.get(first);
-		if (!folded) {
-			folded = new BotWork();
-			works.set(first, folded);
-		}
-		return folded;
-	}
+	proto[PATCHED] = { state };
 
 	proto.nativeBlocks = function () {
 		const blocks = inner.call(this);
 		const s = proto[PATCHED].state;
 		if (!s.on || !s.top) return blocks;
-		const shown = [s.top];
-		let run = [];
-		const close = live => {
-			if (run.some(isTool)) {
-				const folded = work(run[0]);
-				folded.update(run, live);
-				if (!live && !chatTranscriptDisplayPreferences.hideToolActivity) shown.push(folded);
-			}
-			run = [];
-		};
-		for (const block of blocks) {
-			if (isTool(block) || (block instanceof AssistantMessageComponent && !speaks(block, proto[PATCHED].cx))) {
-				run.push(block);
-				continue;
-			}
-			close(false);
-			shown.push(mark(block));
-		}
-		close(s.bot.active);
+		const shown = [s.top, ...blocks];
 		if (!s.bot.hero) shown.push(s.status);
 		const previous = shownBy.get(this);
 		if (previous && same(previous, shown)) return previous;
 		shownBy.set(this, shown);
 		return shown;
-	};
-
-	proto.describe = function () {
-		if (!proto[PATCHED].state.on) return innerDescribe.call(this);
-		const blocks = this.nativeBlocks();
-		const cached = nodeBy.get(this);
-		if (cached?.blocks === blocks) return cached.node;
-		const described = col(blocks, { role: "omp.transcript" });
-		nodeBy.set(this, { blocks, node: described });
-		return described;
-	};
-}
-
-function patchDock(state) {
-	const proto = Composer.prototype;
-	if (proto[DOCK_PATCHED]) {
-		proto[DOCK_PATCHED].state = state;
-		return;
-	}
-	const inner = proto.describeSurface;
-	const docks = new WeakMap();
-	proto[DOCK_PATCHED] = { state };
-	proto.describeSurface = function (cx) {
-		const surface = inner.call(this, cx);
-		if (!proto[DOCK_PATCHED].state.on) return surface;
-		let wrapped = docks.get(surface);
-		if (!wrapped) {
-			wrapped = { main: surface.main, dock: [new BotMarked(surface.dock, "omp.bot.dock")] };
-			docks.set(surface, wrapped);
-		}
-		return wrapped;
 	};
 }
 
@@ -568,7 +390,6 @@ export default function ompBot(pi) {
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		patchTranscript(state);
-		patchDock(state);
 		patchWorkingRow(state);
 		listen();
 		mount();
@@ -603,7 +424,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb: your replies and one status word, nothing else. Your tool calls are hidden from the transcript, so say in words what you found and what you ran rather than pointing at a card.\n`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb: your replies and one status word, nothing else.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };

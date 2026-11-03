@@ -44,6 +44,8 @@ set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
 [ -z "${OMP_BOT_CWD_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CWD_EXTENSION" "$@"
 [ -z "${OMP_BOT_SECRETS_EXTENSION:-}" ] || set -- -e "$OMP_BOT_SECRETS_EXTENSION" "$@"
+[ -z "${OMP_BOT_WORK_FOLD_EXTENSION:-}" ] || set -- -e "$OMP_BOT_WORK_FOLD_EXTENSION" "$@"
+[ -z "${OMP_BOT_CHAT_LOOK_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CHAT_LOOK_EXTENSION" "$@"
 [ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
 [ "$(field extensions)" = true ] || set -- --no-extensions "$@"
 model=$(field model)
