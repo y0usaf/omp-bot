@@ -2,7 +2,7 @@ omp-bot turns an omp session in Tern into a named, animated bot you chat with, p
 
 ## Run
 
-Needs Tern, omp, bun, jq and flock on `PATH` (`OMP_BIN` picks another omp, `OMP_BOT_MODEL` another model; default `smol`).
+Needs Tern, omp, bun, jq and flock on `PATH` (`OMP_BIN` picks another omp; a bot runs on your omp config's default model unless `OMP_BOT_MODEL` names another).
 
 - `bin/omp-botd` is the supervisor that queues tasks and runs bots. finix runs it as the `omp-botd` service.
 - `bin/omp-bot-ctl task BOT TEXT [--key KEY] [--origin ORIGIN]` queues a task. `inbox` lists finished and failed tasks you haven't acknowledged, `ack ID` acknowledges one, `tasks` lists recent ones and `status` shows which bots are awake.
