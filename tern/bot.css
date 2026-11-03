@@ -43,6 +43,9 @@
 	display: none !important;
 }
 
+[data-role='omp.bot.reply'] .md.streaming {
+	display: none !important;
+}
 
 
 [data-role^='omp.bot.tempo.'],

@@ -1,6 +1,8 @@
+import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
+import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { chaoOf, drawChao } from "./chao.ts";
 
@@ -245,6 +247,26 @@ class BotStatus {
 	}
 }
 
+class BotReply {
+	constructor(block, source) {
+		this.block = block;
+		this.source = source;
+		this.node = col([block], { role: "omp.bot.reply" });
+	}
+
+	invalidate() {
+		this.block.invalidate?.();
+	}
+
+	render(width) {
+		return this.block.render(width);
+	}
+
+	describe() {
+		return this.node;
+	}
+}
+
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
 	if (proto[PATCHED]) {
@@ -253,13 +275,26 @@ function patchTranscript(state) {
 	}
 	const inner = proto.nativeBlocks;
 	const shownBy = new WeakMap();
+	const replies = new WeakMap();
 	proto[PATCHED] = { state };
+
+	function reply(block) {
+		const source = block?.mode === "thinking" ? undefined : (block?.source ?? block);
+		if (!(source instanceof AssistantMessageComponent)) return block;
+		let wrapped = replies.get(block);
+		if (!wrapped) {
+			wrapped = new BotReply(block, source);
+			replies.set(block, wrapped);
+		}
+		if (isNativeSettled(block) && !isNativeSettled(wrapped)) settleNative(wrapped);
+		return wrapped;
+	}
 
 	proto.nativeBlocks = function () {
 		const blocks = inner.call(this);
 		const s = proto[PATCHED].state;
 		if (!s.on || !s.top) return blocks;
-		const shown = [s.top, ...blocks];
+		const shown = [s.top, ...blocks.map(reply)];
 		if (!s.bot.hero) shown.push(s.status);
 		const previous = shownBy.get(this);
 		if (previous && same(previous, shown)) return previous;
