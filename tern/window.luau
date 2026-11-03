@@ -4,6 +4,10 @@ local ROOT = tern.plugin.dir .. "/.."
 local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or ((tern.getenv("HOME") or "") .. "/.local/state")) .. "/omp-bot")
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
+local RELAUNCH = 76
+local SHELLS = { sh = true, bash = true, zsh = true, fish = true, dash = true, nu = true, rush = true }
+local GONE_MS = 10000
+local SETTLE_MS = 15000
 
 local EYES = { "pill", "round", "visor", "lids", "dots" }
 local RAIL_EYES = {
@@ -281,19 +285,181 @@ local function forward(kind, payload)
 	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "event", event }, { env = env, timeout_ms = 5000 }, function() end)
 end
 
-tern.on("cwd", function(ev)
+show_roles(roster())
+
+local function by_name(): { [string]: Bot }
+	local bots = {}
+	for _, bot in ipairs(roster()) do
+		bots[bot.name] = bot
+	end
+	return bots
+end
+
+local function session_names(cx: WindowCx): { [number]: string }
+	local names = {}
+	for _, s in ipairs(cx.session:sessions()) do
+		names[s.id] = s.name
+	end
+	return names
+end
+
+local function idle_shell(pane: PaneInfo?): boolean
+	if not pane or pane.kind ~= "terminal" or pane.busy or pane.running or pane.exited ~= nil then
+		return false
+	end
+	local program = (pane.program or ""):gsub("^%-", ""):match("[^/]*$")
+	return pane.at_prompt == true or SHELLS[program] == true
+end
+
+local function relaunch(cx: WindowCx, pane: number, bot: Bot)
+	local new = cx.layout:split(pane, "right", { command = command(bot.name) })
+	if not new then
+		cx:toast("error", "Could not reopen " .. bot.name)
+		return
+	end
+	cx.layout:close(pane)
+	local tab = cx.session:tab_of(new)
+	if tab and bot.tint then
+		cx.layout:color_tab(tab, bot.tint :: any)
+	end
+end
+
+local function restore(cx: WindowCx, reopen: boolean)
+	local saved = tern.kv.get("open") or {}
+	local bots = by_name()
+	for _, s in ipairs(cx.session:sessions()) do
+		local want = saved[s.name]
+		if want then
+			local tabs = {}
+			for _, tab in ipairs(cx.session:tabs()) do
+				if tab.session == s.id and tab.name then
+					tabs[tab.name] = tab
+				end
+			end
+			local order = {}
+			for name, position in pairs(want) do
+				if bots[name] then
+					order[#order + 1] = { name = name, position = position }
+				end
+			end
+			table.sort(order, function(a, b)
+				return a.position < b.position
+			end)
+			for _, entry in ipairs(order) do
+				local bot = bots[entry.name]
+				local tab = tabs[entry.name]
+				if tab then
+					if tab.panes == 1 and idle_shell(cx.session:pane(tab.pane)) then
+						relaunch(cx, tab.pane, bot)
+					end
+				elseif reopen and s.current then
+					local id = cx.layout:new_tab({ command = command(bot.name) }, { focus = false })
+					local new = id and (cx.session:tab_of(id) or id)
+					if new then
+						cx.layout:name_tab(new, bot.name)
+						if bot.tint then
+							cx.layout:color_tab(new, bot.tint :: any)
+						end
+						cx.layout:order_tab(new, entry.position)
+					end
+				end
+			end
+		end
+	end
+end
+
+local gone: { [string]: number } = {}
+
+local function remember(cx: WindowCx)
+	local bots = by_name()
+	local sessions = session_names(cx)
+	local present = {}
+	for _, tab in ipairs(cx.session:tabs()) do
+		local session = sessions[tab.session]
+		if session and tab.name and bots[tab.name] then
+			present[session] = present[session] or {}
+			present[session][tab.name] = tab.position
+		end
+	end
+	local saved = tern.kv.get("open") or {}
+	local changed = false
+	local now = tern.now()
+	for _, session in pairs(sessions) do
+		local want = saved[session] or {}
+		local have = present[session] or {}
+		for name, position in pairs(have) do
+			gone[session .. "/" .. name] = nil
+			if want[name] ~= position then
+				want[name] = position
+				changed = true
+			end
+		end
+		for name in pairs(want) do
+			local key = session .. "/" .. name
+			if not have[name] then
+				gone[key] = gone[key] or now
+				if now - gone[key] >= GONE_MS then
+					want[name] = nil
+					gone[key] = nil
+					changed = true
+				end
+			end
+		end
+		saved[session] = next(want) and want or nil
+	end
+	if changed then
+		tern.kv.set("open", saved)
+	end
+end
+
+local function relaunch_exited(cx: WindowCx)
+	local bots = by_name()
+	local names = {}
+	for _, tab in ipairs(cx.session:tabs()) do
+		names[tab.id] = tab.name
+	end
+	for _, pane in ipairs(cx.session:panes()) do
+		local name = pane.exited == RELAUNCH and pane.tab and names[pane.tab]
+		if name and bots[name] then
+			relaunch(cx, pane.pane, bots[name])
+		end
+	end
+end
+
+local started = 0
+
+local function sync(_ev: any, cx: WindowCx)
+	relaunch_exited(cx)
+	if tern.now() - started < SETTLE_MS then
+		restore(cx, false)
+	end
+	remember(cx)
+end
+
+for _, event in ipairs({ "focus", "pane_created", "pane_closed", "tab_created", "tab_closed", "title", "agent_state" }) do
+	tern.on(event, sync)
+end
+
+tern.on("cwd", function(ev, cx: WindowCx)
 	cwds[ev.pane] = ev.path
+	sync(ev, cx)
 end)
 
-tern.on("command_finished", function(ev)
+tern.on("command_finished", function(ev, cx: WindowCx)
+	sync(ev, cx)
 	if ev.status == 0 then
 		return
 	end
 	forward("command_finished", { pane = ev.pane, line = ev.line, status = ev.status, took_ms = ev.took_ms, cwd = cwds[ev.pane] })
 end)
 
-tern.on("agent_finished", function(ev)
+tern.on("agent_finished", function(ev, cx: WindowCx)
+	sync(ev, cx)
 	forward("agent_finished", { pane = ev.pane, result = ev.result })
 end)
 
-show_roles(roster())
+tern.on("window_start", function(cx: WindowCx)
+	started = tern.now()
+	restore(cx, true)
+	remember(cx)
+end)

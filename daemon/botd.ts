@@ -11,10 +11,11 @@ const RESPAWN_MS = Number(process.env.OMP_BOT_RESPAWN_MS) || 5_000;
 const CLAIM_MS = Number(process.env.OMP_BOT_CLAIM_MS) || 60_000;
 const MEMORY_POLL_MS = Number(process.env.OMP_BOT_MEMORY_POLL_MS) || 5_000;
 const MEMORY_RETRY_MS = 60_000;
+const DRAIN_MS = Number(process.env.OMP_BOT_DRAIN_MS) || 120_000;
 const SILENT = "Nothing to report.";
 
 type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number };
-type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; idle: boolean; task?: string; closing?: boolean };
+type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; closing?: boolean };
 type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout> };
 
 mkdirSync(join(STATE, "logs"), { recursive: true });
@@ -50,6 +51,10 @@ const claims = new Map<string, { until: number; waiters: Array<() => void> }>();
 const lastSpawn = new Map<string, number>();
 const summarisers = new Map<string, ReturnType<typeof Bun.spawn>>();
 const memoryRetry = new Map<string, number>();
+const restarts = new Map<string, { now: boolean }>();
+const respawn = new Set<string>();
+const dying = new Map<string, number>();
+let draining = false;
 
 function log(line: string) {
 	console.log(`${new Date().toISOString()} ${line}`);
@@ -132,7 +137,8 @@ function claimed(bot: string): boolean {
 function dispatch(bot: string) {
 	const link = links.get(bot);
 	if (!link) return ensureRunning(bot);
-	if (!link.idle || link.task || link.closing) return;
+	if (restarts.has(bot)) return tendRestart(bot);
+	if (!link.idle || link.task || link.closing || draining) return;
 	const task = q.next.get({ bot });
 	if (!task) return scheduleIdleExit(bot);
 	q.lease.run({ id: task.id, now: Date.now() });
@@ -143,11 +149,11 @@ function dispatch(bot: string) {
 	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, text: task.text, origin: task.origin });
 }
 
-function ensureRunning(bot: string) {
-	if (links.has(bot) || children.has(bot) || claimed(bot) || !q.next.get({ bot })) return;
+function ensureRunning(bot: string, force = false) {
+	if (draining || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
 	const wait = (lastSpawn.get(bot) ?? 0) + RESPAWN_MS - Date.now();
 	if (wait > 0) {
-		setTimeout(() => ensureRunning(bot), wait);
+		setTimeout(() => ensureRunning(bot, force), wait);
 		return;
 	}
 	lastSpawn.set(bot, Date.now());
@@ -167,7 +173,7 @@ function ensureRunning(bot: string) {
 		const link = links.get(bot);
 		if (link?.mode === "headless") dropLink(link, `headless exited with ${code}`);
 		settleClaim(bot);
-		ensureRunning(bot);
+		ensureRunning(bot, respawn.delete(bot));
 	});
 }
 
@@ -200,6 +206,38 @@ function stopHeadless(bot: string) {
 	} catch {}
 }
 
+function hold(bot: string) {
+	claims.set(bot, { until: Date.now() + CLAIM_MS, waiters: claims.get(bot)?.waiters ?? [] });
+	setTimeout(() => ensureRunning(bot), CLAIM_MS + 100);
+}
+
+function tendRestart(bot: string): "waiting" | "restarting" {
+	const want = restarts.get(bot);
+	const link = links.get(bot);
+	if (!want || !link || (!want.now && (link.task || !link.idle))) return "waiting";
+	restarts.delete(bot);
+	link.closing = true;
+	if (link.mode === "headless") respawn.add(bot);
+	else hold(bot);
+	log(`restart ${bot} (${link.mode})${want.now && link.task ? `, dropping ${link.task}` : ""}`);
+	send(link.socket, { op: "restart", now: want.now });
+	if (link.mode === "headless") {
+		try {
+			(children.get(bot)?.proc.stdin as import("bun").FileSink | undefined)?.end();
+		} catch {}
+	}
+	return "restarting";
+}
+
+function alive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function settleClaim(bot: string) {
 	const claim = claims.get(bot);
 	if (!claim || children.has(bot)) return;
@@ -209,6 +247,7 @@ function settleClaim(bot: string) {
 function dropLink(link: Link, reason: string) {
 	if (links.get(link.bot) !== link) return;
 	links.delete(link.bot);
+	if (link.mode === "tui" && link.pid) dying.set(link.bot, link.pid);
 	if (link.task) {
 		q.release.run({ id: link.task, error: reason, max: MAX_ATTEMPTS, now: Date.now() });
 		log(`release ${link.task} from ${link.bot}: ${reason}`);
@@ -246,10 +285,12 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "hello": {
 			const existing = links.get(message.bot);
 			if (existing && !existing.socket.destroyed) return send(socket, { op: "refused", reason: `${message.bot} is already connected` });
-			const link: Link = { socket, bot: message.bot, mode: message.mode === "headless" ? "headless" : "tui", idle: false };
+			const link: Link = { socket, bot: message.bot, mode: message.mode === "headless" ? "headless" : "tui", pid: Number(message.pid) || undefined, idle: false };
 			links.set(link.bot, link);
 			self.link = link;
 			if (link.mode === "tui") claims.delete(link.bot);
+			dying.delete(link.bot);
+			if (draining && link.mode === "headless") link.closing = true;
 			if (message.task) {
 				const task = q.byId.get({ id: message.task });
 				if (task && (task.state === "pending" || task.state === "leased")) {
@@ -266,6 +307,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			const link = self.link;
 			if (!link) return;
 			link.idle = true;
+			if (restarts.has(link.bot)) return void tendRestart(link.bot);
 			if (link.closing && link.mode === "headless") return stopHeadless(link.bot);
 			return dispatch(link.bot);
 		}
@@ -326,6 +368,25 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "unretire":
 			claims.delete(message.bot);
 			return send(socket, { ok: true });
+		case "restart": {
+			const bot = message.bot;
+			if (!roster().has(bot)) throw new Error(`no bot named ${bot}`);
+			if (!links.has(bot) && !children.has(bot)) return send(socket, { ok: true, state: "asleep" });
+			const now = Boolean(message.now) || restarts.get(bot)?.now === true;
+			restarts.set(bot, { now });
+			log(`restart ${bot} requested${now ? " now" : ""}`);
+			return send(socket, { ok: true, state: tendRestart(bot) });
+		}
+		case "holder": {
+			const bot = message.bot;
+			const link = links.get(bot);
+			if (link?.mode === "tui") return send(socket, { ok: true, holder: link.closing ? "dying" : "tui", pid: link.pid ?? null });
+			if (link || children.has(bot)) return send(socket, { ok: true, holder: "headless", pid: children.get(bot)?.proc.pid ?? link?.pid ?? null });
+			const pid = dying.get(bot);
+			if (pid && alive(pid)) return send(socket, { ok: true, holder: "dying", pid });
+			dying.delete(bot);
+			return send(socket, { ok: true, holder: null, pid: null });
+		}
 		case "claim": {
 			const bot = message.bot;
 			const claim = { until: Date.now() + CLAIM_MS, waiters: [] as Array<() => void> };
@@ -374,13 +435,35 @@ server.listen(SOCKET, () => {
 	setInterval(tendMemory, MEMORY_POLL_MS);
 });
 
-for (const signal of ["SIGTERM", "SIGINT"] as const) {
-	process.on(signal, () => {
-		log(`${signal}: stopping`);
-		server.close();
-		for (const child of children.values()) killGroup(child.proc.pid);
-		for (const proc of summarisers.values()) killGroup(proc.pid);
-		db.close();
-		process.exit(0);
-	});
+function stop() {
+	server.close();
+	for (const child of children.values()) killGroup(child.proc.pid);
+	for (const proc of summarisers.values()) killGroup(proc.pid);
+	db.close();
+	process.exit(0);
 }
+
+function drain(signal: string) {
+	if (draining) {
+		log(`${signal} again: stopping now`);
+		return stop();
+	}
+	draining = true;
+	const busy = [...links.values()].filter(link => link.mode === "headless" && link.task).map(link => link.bot);
+	log(`${signal}: draining${busy.length ? `, waiting up to ${DRAIN_MS / 1000}s for ${busy.join(", ")}` : ""}`);
+	for (const bot of children.keys()) stopHeadless(bot);
+	setTimeout(() => {
+		log("drain timed out: stopping");
+		stop();
+	}, DRAIN_MS).unref();
+	const check = () => {
+		if (children.size === 0) {
+			log("drained: stopping");
+			return stop();
+		}
+		setTimeout(check, 250);
+	};
+	check();
+}
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => drain(signal));

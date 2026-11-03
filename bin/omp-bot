@@ -62,10 +62,31 @@ esac
 set -- -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
-	exec flock -n "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
+	exec flock -n -o "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
 fi
 "$root/bin/omp-bot-ctl" claim "$name" || true
-code=0
-flock -w 30 -E 75 "$dir/lock" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" "$@" || code=$?
-[ "$code" != 75 ] || echo "omp-bot: $name is already open somewhere else" >&2
+export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
+rm -f "$OMP_BOT_RELAUNCH"
+waiting=
+while :; do
+	code=0
+	flock -w 2 -E 213 -o "$dir/lock" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" "$@" || code=$?
+	[ "$code" = 213 ] || break
+	holder=$("$root/bin/omp-bot-ctl" holder "$name" 2>/dev/null) || holder=none
+	case $holder in
+	headless*) "$root/bin/omp-bot-ctl" claim "$name" || true ;;
+	tui*)
+		echo "omp-bot: $name is already open somewhere else (pid ${holder#tui })" >&2
+		exit 75
+		;;
+	*)
+		[ -n "$waiting" ] || echo "omp-bot: waiting for $name's last run to exit…" >&2
+		waiting=1
+		;;
+	esac
+done
+if [ -e "$OMP_BOT_RELAUNCH" ]; then
+	rm -f "$OMP_BOT_RELAUNCH"
+	exit 76
+fi
 exit "$code"

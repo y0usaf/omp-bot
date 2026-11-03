@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { SOCKET } from "../daemon/paths";
 import { identity } from "./prompt";
@@ -49,6 +50,15 @@ export default function core(pi) {
 			case "refused":
 				refused = true;
 				ctx?.ui?.notify?.(`omp-bot: ${message.reason}`, "warning");
+				return;
+			case "restart":
+				stopped = true;
+				if (mode === "tui" && process.env.OMP_BOT_RELAUNCH) writeFileSync(process.env.OMP_BOT_RELAUNCH, "");
+				if (message.now && !ctx.isIdle()) {
+					current = undefined;
+					ctx.abort();
+				}
+				ctx.shutdown();
 				return;
 			case "task":
 				current = { id: message.id, attempt: message.attempt };

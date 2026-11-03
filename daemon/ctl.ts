@@ -7,7 +7,9 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   inbox                                         finished and failed tasks not yet acknowledged
   ack ID                                        acknowledge an inbox task
   status                                        which bots are connected, and how
+  restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task)
   claim BOT                                     wait until BOT's headless run has stopped
+  holder BOT                                    what holds BOT's lock: tui PID, dying PID, headless PID or none
   event JSON                                    record a lifecycle event; the gate logs its decision, nothing runs
   retire BOT                                    fail BOT's queued tasks and stop its background run`;
 
@@ -35,7 +37,8 @@ function flags(args: string[]): { rest: string[]; opts: Record<string, string> }
 	const rest: string[] = [];
 	const opts: Record<string, string> = {};
 	for (let i = 0; i < args.length; i++) {
-		if (args[i].startsWith("--")) opts[args[i].slice(2)] = args[++i];
+		if (args[i] === "--now") opts.now = "1";
+		else if (args[i].startsWith("--")) opts[args[i].slice(2)] = args[++i];
 		else rest.push(args[i]);
 	}
 	return { rest, opts };
@@ -85,6 +88,23 @@ try {
 				if (!["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
 			}
 			break;
+		case "restart": {
+			if (!rest[0]) throw new Error(USAGE);
+			const reply = await request({ op: "restart", bot: rest[0], now: Boolean(opts.now) });
+			console.log(reply.state === "asleep" ? `${rest[0]} is asleep; it starts fresh next time` : reply.state === "restarting" ? `restarting ${rest[0]}` : `${rest[0]} restarts once its turn ends`);
+			break;
+		}
+		case "holder": {
+			if (!rest[0]) throw new Error(USAGE);
+			let reply = { holder: null, pid: null };
+			try {
+				reply = await request({ op: "holder", bot: rest[0] }, 5000);
+			} catch (error) {
+				if (!["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+			}
+			console.log(reply.holder ? `${reply.holder} ${reply.pid ?? ""}`.trim() : "none");
+			break;
+		}
 		case "claim": {
 			if (!rest[0]) throw new Error(USAGE);
 			const notice = setTimeout(() => console.error(`Waiting for ${rest[0]} to finish its background task…`), 500);
