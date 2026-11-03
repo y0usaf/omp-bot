@@ -1,5 +1,7 @@
 advisor:
   enabled: false
+display:
+  hideToolActivity: true
 personality: none
 startup:
   quiet: true

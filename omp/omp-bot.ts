@@ -1,19 +1,9 @@
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-import { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
-import { CollabPromptMessageComponent } from "@oh-my-pi/pi-tui/chat/collab-prompt-message";
-import {
-	BranchSummaryMessageComponent,
-	CompactionSummaryMessageComponent,
-	HandoffSummaryMessageComponent,
-} from "@oh-my-pi/pi-tui/chat/compaction-summary-message";
-import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
-import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
-import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
-import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
-import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { Loader } from "@oh-my-pi/pi-tui/components/loader";
+import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
@@ -35,17 +25,6 @@ const TRAITS = [
 ];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const TOOLS = [ToolExecutionComponent, ReadToolGroupComponent];
-const INITIATORS = [
-	UserMessageComponent,
-	CollapsedSyntheticMessageComponent,
-	SkillMessageComponent,
-	CollabPromptMessageComponent,
-	BashExecutionComponent,
-	EvalExecutionComponent,
-	CompactionSummaryMessageComponent,
-	HandoffSummaryMessageComponent,
-	BranchSummaryMessageComponent,
-];
 
 function pick(list, seed) {
 	return list[Math.abs(seed) % list.length];
@@ -65,69 +44,11 @@ function traits(name) {
 	return look;
 }
 
-function base(path) {
-	if (typeof path !== "string" || !path) return undefined;
-	const clean = path.replace(/[?#].*$/, "").replace(/\/+$/, "");
-	return clean.slice(clean.lastIndexOf("/") + 1) || clean;
-}
-
-function host(url) {
-	try {
-		return new URL(String(url)).host;
-	} catch {
-		return undefined;
-	}
-}
-
-function firstWord(command) {
-	if (typeof command !== "string") return undefined;
-	return command.trim().split(/\s+/)[0];
-}
-
-function say(toolName, args) {
-	const a = args ?? {};
-	const intent = a.i ?? a.intent ?? a.title ?? a.description;
-	if (typeof intent === "string" && intent.trim()) return intent.trim();
-	switch (toolName) {
-		case "read":
-			return `Reading ${base(a.path) ?? "a file"}`;
-		case "write":
-			return `Writing ${base(a.path) ?? "a file"}`;
-		case "edit":
-			return "Editing code";
-		case "bash":
-			return `Running ${firstWord(a.command) ?? "a command"}`;
-		case "grep":
-		case "find":
-		case "glob":
-		case "ast_grep":
-			return "Searching the code";
-		case "web_search":
-			return "Searching the web";
-		case "web_fetch":
-			return `Reading ${host(a.url) ?? "a page"}`;
-		case "task":
-			return "Briefing helpers";
-		case "ask":
-			return "Waiting on you";
-		case "lsp":
-			return "Asking the language server";
-		case "todo":
-			return "Updating the plan";
-		default:
-			return toolName ? `Using ${toolName.replace(/_/g, " ")}` : "Working";
-	}
-}
-
 function clock(ms) {
 	const s = Math.max(0, Math.round(ms / 1000));
 	if (s < 60) return `${s}s`;
 	const m = Math.floor(s / 60);
 	return `${m}m ${String(s % 60).padStart(2, "0")}s`;
-}
-
-function steps(n) {
-	return `${n} step${n === 1 ? "" : "s"}`;
 }
 
 function same(a, b) {
@@ -136,10 +57,6 @@ function same(a, b) {
 
 function isTool(block) {
 	return TOOLS.some(kind => block instanceof kind);
-}
-
-function isInitiator(block) {
-	return INITIATORS.some(kind => block instanceof kind);
 }
 
 function speaks(block, cx) {
@@ -158,7 +75,6 @@ class Bot {
 		this.hero = true;
 		this.turnStart = 0;
 		this.submitted = 0;
-		this.steps = 0;
 		this.active = false;
 		this.stopped = false;
 		this.failed = false;
@@ -397,8 +313,6 @@ class BotStatus {
 											role: "omp.bot.say",
 										})
 									: text(status, { role: "omp.bot.say", wrap: "none" }),
-								busy && b.turnStart ? elapsed(Date.now() - b.turnStart) : undefined,
-								busy && b.steps ? text(steps(b.steps), { role: "omp.bot.steps", wrap: "none" }) : undefined,
 							].filter(Boolean),
 							{ role: "omp.bot.status", align: "center", gap: "sm" },
 						),
@@ -526,28 +440,20 @@ function patchTranscript(state) {
 	};
 }
 
-function isPlainWorkingRow(child, cx) {
-	const node = child?.describe?.(cx);
-	if (node?.p?.role !== "omp.working" || !Array.isArray(node.c)) return false;
-	return node.c[0]?.k === "spinner" && !node.c.some(part => part?.k === "progress");
-}
-
-function foldWorkingRow(state) {
-	const proto = InteractiveMode.prototype;
+function patchWorkingRow(state) {
+	const proto = Loader.prototype;
 	if (proto[HUD_PATCHED]) {
 		proto[HUD_PATCHED].state = state;
 		return;
 	}
-	const inner = proto.describeStatusHud;
-	if (typeof inner !== "function") return;
+	const innerRender = proto.render;
+	const innerDescribe = proto.describe;
 	proto[HUD_PATCHED] = { state };
-	proto.describeStatusHud = function (children, cx) {
-		if (!proto[HUD_PATCHED].state.on) return inner.call(this, children, cx);
-		return inner.call(
-			this,
-			children.filter(child => !isPlainWorkingRow(child, cx)),
-			cx,
-		);
+	proto.render = function (width) {
+		return proto[HUD_PATCHED].state.on ? [] : innerRender.call(this, width);
+	};
+	proto.describe = function (cx) {
+		return proto[HUD_PATCHED].state.on ? row([]) : innerDescribe.call(this, cx);
 	};
 }
 
@@ -596,7 +502,7 @@ export default function ompBot(pi) {
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		patchTranscript(state);
-		foldWorkingRow(state);
+		patchWorkingRow(state);
 		listen();
 		mount();
 		bot.nap();
@@ -630,7 +536,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb. Tool cards are compressed; /bot reveals them. Use short, plain tool titles where the tool schema supports them.\n`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small living orb: your replies and one status word, nothing else. Your tool calls are hidden from the transcript, so say in words what you found and what you ran rather than pointing at a card.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };
@@ -642,7 +548,6 @@ export default function ompBot(pi) {
 		bot.cancel("nap");
 		bot.turnStart = bot.submitted || Date.now();
 		bot.submitted = 0;
-		bot.steps = 0;
 		bot.active = true;
 		bot.stopped = false;
 		bot.failed = false;
@@ -663,23 +568,19 @@ export default function ompBot(pi) {
 
 	pi.on("tool_execution_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		bot.steps += 1;
-		const line = say(event.toolName, event.args);
-		bot.running.set(event.toolCallId, line);
-		bot.set(event.toolName === "ask" ? "waiting" : "working", line);
+		bot.running.set(event.toolCallId, true);
+		bot.set(event.toolName === "ask" ? "waiting" : "working", event.toolName === "ask" ? "Waiting on you" : "Working");
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		const failedLine = bot.running.get(event.toolCallId) ?? say(event.toolName, event.args);
 		bot.running.delete(event.toolCallId);
 		if (event.isError) {
 			bot.failed = true;
-			bot.set("error", `${failedLine} failed`);
+			bot.set("error", "A step failed");
 			return;
 		}
-		const next = [...bot.running.values()].at(-1);
-		bot.set(next ? "working" : "thinking", next ?? bot.line);
+		bot.set(bot.running.size > 0 ? "working" : "thinking", bot.running.size > 0 ? "Working" : bot.line);
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -701,14 +602,12 @@ export default function ompBot(pi) {
 			bot.set("error", final.errorMessage || "The reply ended early — check the transcript");
 			return;
 		}
-		const ms = Date.now() - bot.turnStart;
-		const summary = bot.steps && ms >= 1000 ? `Done · ${clock(ms)} · ${steps(bot.steps)}` : "Done";
 		if (bot.failed) {
 			bot.failed = false;
-			bot.set("error", `${summary} · a step failed`);
+			bot.set("error", "Done · a step failed");
 			return;
 		}
-		bot.set("happy", summary);
+		bot.set("happy", "Done");
 		bot.after("settle", 4000, () => bot.mood === "happy" && bot.set("idle", "Ready"));
 	});
 }
