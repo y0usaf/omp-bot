@@ -43,7 +43,8 @@ persona=$(field persona)
 set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
 [ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
-set -- --no-extensions -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" "$@"
+[ "$(field extensions)" = true ] || set -- --no-extensions "$@"
+set -- -e "$root/omp/core.ts" --config "$root/omp/demo.yml" --model "${OMP_BOT_MODEL:-smol}" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
 	exec flock -n "$dir/lock" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
