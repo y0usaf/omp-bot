@@ -29,7 +29,7 @@ export default function core(pi) {
 	let readySent = false;
 	let refused = false;
 	let stopped = false;
-	const until = Number(process.env.OMP_BOT_UNTIL) || 0;
+	const until = Number(process.env.OMP_UNTIL) || 0;
 
 	pi.setLabel("Bot core");
 
