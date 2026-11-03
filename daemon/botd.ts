@@ -97,9 +97,10 @@ function startSummariser(bot: string) {
 		for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) appendFileSync(logFile, chunk);
 	})().catch(() => {});
 	proc.exited.then(code => {
-		if (summarisers.get(bot) === proc) summarisers.delete(bot);
-		if (code !== 0 && proc.signalCode === null) memoryRetry.set(bot, Date.now() + MEMORY_RETRY_MS);
 		log(`memory exit ${bot} pid ${proc.pid} code ${code}`);
+		if (summarisers.get(bot) !== proc) return;
+		summarisers.delete(bot);
+		if (code !== 0) memoryRetry.set(bot, Date.now() + MEMORY_RETRY_MS);
 	});
 }
 
