@@ -9,13 +9,15 @@ const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
 const IDLE_EXIT_MS = Number(process.env.OMP_BOT_IDLE_EXIT_MS) || 300_000;
 const RESPAWN_MS = Number(process.env.OMP_BOT_RESPAWN_MS) || 5_000;
 const CLAIM_MS = Number(process.env.OMP_BOT_CLAIM_MS) || 60_000;
+const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const MEMORY_POLL_MS = Number(process.env.OMP_BOT_MEMORY_POLL_MS) || 5_000;
 const MEMORY_RETRY_MS = 60_000;
 const DRAIN_MS = Number(process.env.OMP_BOT_DRAIN_MS) || 120_000;
 const SILENT = "Nothing to report.";
+const ACTIONS = { approve: "approved", deny: "denied", handle: "left it to you to decide" } as const;
 
-type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number };
-type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; closing?: boolean };
+type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number; token: string | null; beat: number | null; wait: string | null; question: string | null; answer: string | null };
+type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; token?: string; closing?: boolean };
 type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout> };
 
 mkdirSync(join(STATE, "logs"), { recursive: true });
@@ -23,26 +25,35 @@ const db = new Database(join(STATE, "tasks.db"), { create: true, strict: true })
 db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
 db.exec(`CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY, bot TEXT NOT NULL, key TEXT NOT NULL UNIQUE, text TEXT NOT NULL, origin TEXT,
-	state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT,
-	created INTEGER NOT NULL, updated INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0)`);
+	state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT,
+	created INTEGER NOT NULL, updated INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0,
+	token TEXT, beat INTEGER, wait TEXT, question TEXT, answer TEXT)`);
+const columns = new Set(db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('tasks')").all().map(column => column.name));
+for (const column of ["token TEXT", "beat INTEGER", "wait TEXT", "question TEXT", "answer TEXT"]) if (!columns.has(column.split(" ")[0])) db.exec(`ALTER TABLE tasks ADD COLUMN ${column}`);
+db.exec("UPDATE tasks SET state = 'queued' WHERE state IN ('pending', 'leased')");
 db.exec("CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (bot, state, created)");
 
+const HELD = "(state = 'running' OR (state = 'waiting' AND wait = 'jobs'))";
 const q = {
 	insert: db.query("INSERT INTO tasks (id, bot, key, text, origin, created, updated) VALUES ($id, $bot, $key, $text, $origin, $now, $now) ON CONFLICT (key) DO NOTHING"),
 	byKey: db.query<Task, { key: string }>("SELECT * FROM tasks WHERE key = $key"),
 	byId: db.query<Task, { id: string }>("SELECT * FROM tasks WHERE id = $id"),
-	next: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'pending' ORDER BY created LIMIT 1"),
-	pendingBots: db.query<{ bot: string }, []>("SELECT DISTINCT bot FROM tasks WHERE state = 'pending'"),
-	lease: db.query("UPDATE tasks SET state = 'leased', attempts = attempts + 1, updated = $now WHERE id = $id AND state = 'pending'"),
-	resume: db.query("UPDATE tasks SET state = 'leased', updated = $now WHERE id = $id AND state IN ('pending', 'leased')"),
-	finish: db.query("UPDATE tasks SET state = 'done', result = $result, updated = $now WHERE id = $id AND state = 'leased'"),
-	release: db.query("UPDATE tasks SET state = CASE WHEN attempts >= $max THEN 'failed' ELSE 'pending' END, error = $error, updated = $now WHERE id = $id AND state = 'leased'"),
+	next: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued' ORDER BY created LIMIT 1"),
+	queuedBots: db.query<{ bot: string }, []>("SELECT DISTINCT bot FROM tasks WHERE state = 'queued'"),
+	lease: db.query("UPDATE tasks SET state = 'running', attempts = attempts + 1, token = $token, beat = $now, wait = NULL, updated = $now WHERE id = $id AND state = 'queued'"),
+	resume: db.query(`UPDATE tasks SET state = CASE WHEN state = 'queued' THEN 'running' ELSE state END, beat = $now, updated = $now WHERE id = $id AND token = $token AND (state = 'queued' OR ${HELD})`),
+	beat: db.query(`UPDATE tasks SET beat = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	finish: db.query(`UPDATE tasks SET state = 'done', result = $result, wait = NULL, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	release: db.query(`UPDATE tasks SET state = CASE WHEN attempts >= $max THEN 'failed' ELSE 'queued' END, wait = NULL, error = $error, updated = $now WHERE id = $id AND token IS $token AND ${HELD}`),
+	wait: db.query(`UPDATE tasks SET state = 'waiting', wait = $wait, question = $question, result = $result, seen = CASE WHEN $wait = 'decision' THEN 0 ELSE seen END, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	answer: db.query("UPDATE tasks SET state = 'queued', attempts = 0, answer = $answer, wait = NULL, seen = 1, updated = $now WHERE id = $id AND state = 'waiting' AND wait = 'decision'"),
 	silent: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state = 'done' AND trim(result) = $silent"),
-	orphans: db.query("UPDATE tasks SET state = 'pending', updated = $now WHERE state = 'leased'"),
+	silentHeld: db.query<Task, { before: number }>(`SELECT * FROM tasks WHERE ${HELD} AND beat < $before`),
+	grace: db.query(`UPDATE tasks SET beat = $now WHERE ${HELD}`),
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
-	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE state IN ('done', 'failed') AND seen = 0 ORDER BY updated"),
+	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
 	ack: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state IN ('done', 'failed')"),
-	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('pending', 'leased')"),
+	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('queued', 'running', 'waiting')"),
 };
 
 const links = new Map<string, Link>();
@@ -141,12 +152,14 @@ function dispatch(bot: string) {
 	if (!link.idle || link.task || link.closing || draining) return;
 	const task = q.next.get({ bot });
 	if (!task) return scheduleIdleExit(bot);
-	q.lease.run({ id: task.id, now: Date.now() });
+	const token = crypto.randomUUID();
+	q.lease.run({ id: task.id, token, now: Date.now() });
 	link.idle = false;
 	link.task = task.id;
+	link.token = token;
 	clearTimeout(children.get(bot)?.idleTimer);
 	log(`lease ${task.id} -> ${bot} (${link.mode}, attempt ${task.attempts + 1})`);
-	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, text: task.text, origin: task.origin });
+	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, token, text: task.text, origin: task.origin, answer: task.answer ? JSON.parse(task.answer) : null });
 }
 
 function ensureRunning(bot: string, force = false) {
@@ -249,21 +262,41 @@ function dropLink(link: Link, reason: string) {
 	links.delete(link.bot);
 	if (link.mode === "tui" && link.pid) dying.set(link.bot, link.pid);
 	if (link.task && link.mode === "tui" && !link.closing) {
-		const id = link.task;
+		const { task: id, token } = link;
 		hold(link.bot);
 		log(`keep ${id} for ${link.bot} to resume: ${reason}`);
 		setTimeout(() => {
 			if (links.get(link.bot)?.task === id) return;
-			q.release.run({ id, error: `${reason}, and ${link.bot} did not come back to resume it`, max: MAX_ATTEMPTS, now: Date.now() });
+			if (!q.release.run({ id, token: token ?? null, error: `${reason}, and ${link.bot} did not come back to resume it`, max: MAX_ATTEMPTS, now: Date.now() }).changes) return;
 			log(`release ${id} from ${link.bot}: not resumed`);
 			dispatch(link.bot);
 		}, CLAIM_MS);
 	} else if (link.task) {
-		q.release.run({ id: link.task, error: reason, max: MAX_ATTEMPTS, now: Date.now() });
+		q.release.run({ id: link.task, token: link.token ?? null, error: reason, max: MAX_ATTEMPTS, now: Date.now() });
 		log(`release ${link.task} from ${link.bot}: ${reason}`);
 	}
 	if (!link.socket.destroyed) link.socket.destroy();
 	setTimeout(() => dispatch(link.bot), 0);
+}
+
+function stale(socket: Socket, link: Link, message: any) {
+	log(`ignore ${message.op} for ${message.id} from ${link.bot}: not the current attempt`);
+	if (link.task === message.id) link.task = link.token = undefined;
+	send(socket, { op: "expired", id: message.id });
+}
+
+function expire() {
+	const now = Date.now();
+	for (const task of q.silentHeld.all({ before: now - 3 * HEARTBEAT_MS })) {
+		q.release.run({ id: task.id, token: task.token, error: "its attempt missed three check-ins", max: MAX_ATTEMPTS, now });
+		log(`expire ${task.id} attempt ${task.attempts}: no check-in`);
+		const link = links.get(task.bot);
+		if (link?.task === task.id) {
+			link.task = link.token = undefined;
+			send(link.socket, { op: "expired", id: task.id });
+		}
+		dispatch(task.bot);
+	}
 }
 
 function enqueue(message: { bot?: string; text?: string; key?: string; origin?: string }) {
@@ -301,13 +334,10 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (link.mode === "tui") claims.delete(link.bot);
 			dying.delete(link.bot);
 			if (draining && link.mode === "headless") link.closing = true;
-			if (message.task) {
-				const task = q.byId.get({ id: message.task });
-				if (task && (task.state === "pending" || task.state === "leased")) {
-					q.resume.run({ id: task.id, now: Date.now() });
-					link.task = task.id;
-					log(`resume ${task.id} on ${link.bot}`);
-				}
+			if (message.task && q.resume.run({ id: String(message.task), token: String(message.token ?? ""), now: Date.now() }).changes) {
+				link.task = message.task;
+				link.token = message.token;
+				log(`resume ${link.task} on ${link.bot}`);
 			}
 			log(`hello ${link.bot} (${link.mode})`);
 			tendMemory();
@@ -328,9 +358,9 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "done": {
 			const link = self.link;
 			if (!link) return;
-			q.finish.run({ id: message.id, result: String(message.result ?? ""), now: Date.now() });
+			if (!q.finish.run({ id: message.id, token: String(message.token ?? ""), result: String(message.result ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
 			q.silent.run({ id: message.id, silent: SILENT });
-			if (link.task === message.id) link.task = undefined;
+			if (link.task === message.id) link.task = link.token = undefined;
 			log(`done ${message.id} by ${link.bot}`);
 			replyToOrigin(message.id);
 			return send(socket, { op: "ack", id: message.id });
@@ -338,11 +368,37 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "fail": {
 			const link = self.link;
 			if (!link) return;
-			q.release.run({ id: message.id, error: String(message.error ?? "failed"), max: message.final ? 0 : MAX_ATTEMPTS, now: Date.now() });
-			if (link.task === message.id) link.task = undefined;
+			if (!q.release.run({ id: message.id, token: String(message.token ?? ""), error: String(message.error ?? "failed"), max: message.final ? 0 : MAX_ATTEMPTS, now: Date.now() }).changes) return stale(socket, link, message);
+			if (link.task === message.id) link.task = link.token = undefined;
 			log(`fail ${message.id} by ${link.bot}: ${message.error}`);
 			replyToOrigin(message.id);
 			return send(socket, { op: "ack", id: message.id });
+		}
+		case "beat": {
+			const link = self.link;
+			if (!link) return;
+			if (!q.beat.run({ id: message.id, token: String(message.token ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
+			return;
+		}
+		case "wait": {
+			const link = self.link;
+			if (!link) return;
+			const wait = message.wait === "decision" ? "decision" : "jobs";
+			const question = wait === "decision" ? String(message.question ?? "").trim() || "(no question given)" : null;
+			if (!q.wait.run({ id: message.id, token: String(message.token ?? ""), wait, question, result: String(message.result ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
+			if (wait === "decision" && link.task === message.id) link.task = link.token = undefined;
+			log(`wait ${message.id} on ${wait} by ${link.bot}`);
+			return send(socket, { op: "ack", id: message.id });
+		}
+		case "answer": {
+			const action = String(message.action) as keyof typeof ACTIONS;
+			if (!(action in ACTIONS)) throw new Error(`answer is approve, deny or handle, not ${message.action}`);
+			const task = q.byId.get({ id: String(message.id) });
+			if (!task || task.state !== "waiting" || task.wait !== "decision") throw new Error(`task ${message.id} isn't waiting on a decision`);
+			q.answer.run({ id: task.id, answer: JSON.stringify({ action, question: task.question, note: String(message.note ?? "").trim() || null }), now: Date.now() });
+			log(`answer ${task.id}: ${action}`);
+			dispatch(task.bot);
+			return send(socket, { ok: true, state: "queued" });
 		}
 		case "enqueue":
 			return send(socket, { ok: true, ...enqueue(message) });
@@ -368,7 +424,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			q.retire.run({ bot, now: Date.now() });
 			claims.set(bot, { until: Number.POSITIVE_INFINITY, waiters: [] });
 			const link = links.get(bot);
-			if (link) link.task = undefined;
+			if (link) link.task = link.token = undefined;
 			const child = children.get(bot);
 			if (child) killGroup(child.proc.pid);
 			stopSummariser(bot);
@@ -413,7 +469,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 }
 
 if (existsSync(SOCKET)) unlinkSync(SOCKET);
-q.orphans.run({ now: Date.now() });
+q.grace.run({ now: Date.now() });
 
 const server = createServer(socket => {
 	const self: { link?: Link } = {};
@@ -440,9 +496,10 @@ const server = createServer(socket => {
 
 server.listen(SOCKET, () => {
 	log(`listening on ${SOCKET}`);
-	for (const { bot } of q.pendingBots.all()) ensureRunning(bot);
+	for (const { bot } of q.queuedBots.all()) ensureRunning(bot);
 	tendMemory();
 	setInterval(tendMemory, MEMORY_POLL_MS);
+	setInterval(expire, HEARTBEAT_MS / 2);
 });
 
 function stop() {

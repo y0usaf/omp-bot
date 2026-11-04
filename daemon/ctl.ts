@@ -4,8 +4,9 @@ import { SOCKET } from "./paths";
 const USAGE = `usage: omp-bot-ctl COMMAND
   task BOT TEXT [--key KEY] [--origin ORIGIN]   queue a task; the same KEY never queues twice
   tasks [--bot BOT] [--state STATE]             recent tasks
-  inbox                                         finished and failed tasks not yet acknowledged
+  inbox                                         decisions waiting on you, and finished and failed tasks not yet acknowledged
   ack ID                                        acknowledge an inbox task
+  approve|deny|handle ID [NOTE]                 answer a task waiting on your decision: approve, deny, or let its bot decide
   status                                        which bots are connected, and how
   restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task)
   claim BOT                                     wait until BOT's headless run has stopped
@@ -46,8 +47,9 @@ function flags(args: string[]): { rest: string[]; opts: Record<string, string> }
 
 function line(task: any): string {
 	const when = new Date(task.updated).toISOString().replace("T", " ").slice(0, 19);
-	const body = (task.state === "failed" ? task.error : task.result ?? task.text) ?? "";
-	return `${task.id}  ${task.bot}  ${task.state}  attempt ${task.attempts}  ${when}\n  ${String(body).trim().replace(/\n/g, "\n  ")}`;
+	const waiting = task.state === "waiting" ? (task.wait === "decision" ? " on your decision" : " on its jobs") : "";
+	const body = (task.state === "failed" ? task.error : task.wait === "decision" ? `${task.question}\n\n${task.result ?? ""}` : task.result ?? task.text) ?? "";
+	return `${task.id}  ${task.bot}  ${task.state}${waiting}  attempt ${task.attempts}  ${when}\n  ${String(body).trim().replace(/\n/g, "\n  ")}`;
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -75,6 +77,13 @@ try {
 		case "ack":
 			if (!rest[0]) throw new Error(USAGE);
 			await request({ op: "ack", id: rest[0] });
+			break;
+		case "approve":
+		case "deny":
+		case "handle":
+			if (!rest[0]) throw new Error(USAGE);
+			await request({ op: "answer", id: rest[0], action: command, note: rest.slice(1).join(" ") });
+			console.log(`${rest[0]} queued`);
 			break;
 		case "status":
 			for (const bot of (await request({ op: "status" })).bots) console.log(`${bot.bot}  ${bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : ""}`);
