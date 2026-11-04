@@ -9,6 +9,18 @@ const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
 type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string };
+type Decision = { id: string; question: string | null; text: string };
+
+const CHOICES = [
+	{ label: "Approve", action: "approve", description: "Go ahead with what the bot proposes" },
+	{ label: "Deny", action: "deny", description: "Don't; the bot is told no" },
+	{ label: "Handle", action: "handle", description: "Leave the call to the bot" },
+];
+
+function brief(text: string, max = 240): string {
+	const line = text.replace(/\s+/g, " ").trim();
+	return line.length > max ? `${line.slice(0, max)}…` : line;
+}
 
 function prompt(task) {
 	const lines = [`[omp-bot task ${task.id}, attempt ${task.attempt}${task.origin ? `, from ${task.origin}` : ""}${task.answer ? ", your question answered" : ""}]`, "", task.text];
@@ -41,6 +53,9 @@ export default function core(pi) {
 	let refused = false;
 	let stopped = false;
 	const until = Number(process.env.OMP_UNTIL) || 0;
+	let decisions: Decision[] = [];
+	const dismissed = new Set<string>();
+	let asking: { id: string; controller: AbortController } | undefined;
 
 	pi.setLabel("Bot core");
 
@@ -85,13 +100,46 @@ export default function core(pi) {
 			keep(undefined);
 		}
 		if (until && !stopped && Date.now() >= until && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) return restart(false);
+		if (!asking && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) {
+			const next = decisions.find(decision => !dismissed.has(decision.id));
+			if (next) void decide(next);
+		}
 		if (!socket || current || readySent || !ctx?.isIdle() || ctx.hasPendingMessages()) return;
 		readySent = true;
 		send({ op: "ready" });
 	}
 
+	async function decide(decision: Decision) {
+		const askDialog = ctx?.hasUI ? ctx.ui?.askDialog : undefined;
+		if (!askDialog) return;
+		const controller = new AbortController();
+		asking = { id: decision.id, controller };
+		try {
+			const result = await askDialog([{ id: decision.id, header: `${name} asks`, question: decision.question || `(no question given) ${brief(decision.text)}`, options: CHOICES.map(({ label, description }) => ({ label, description })) }], { signal: controller.signal });
+			const answer = result?.kind === "chat" ? undefined : result?.results?.[0];
+			const choice = CHOICES.find(each => each.label === answer?.selectedOptions?.[0]) ?? (answer?.customInput?.trim() ? CHOICES[2] : undefined);
+			if (!choice || answer?.timedOut) {
+				if (!controller.signal.aborted) dismissed.add(decision.id);
+				return;
+			}
+			send({ op: "answer", id: decision.id, action: choice.action, note: answer?.customInput ?? answer?.note ?? "" });
+			decisions = decisions.filter(each => each.id !== decision.id);
+		} catch (error) {
+			if (!controller.signal.aborted) {
+				dismissed.add(decision.id);
+				ctx.ui?.notify?.(`omp-bot: could not show ${decision.id}: ${error instanceof Error ? error.message : error}`, "warning");
+			}
+		} finally {
+			if (asking?.controller === controller) asking = undefined;
+		}
+	}
+
 	function receive(message) {
 		switch (message.op) {
+			case "decisions":
+				decisions = Array.isArray(message.tasks) ? message.tasks : [];
+				if (asking && !decisions.some(decision => decision.id === asking!.id)) asking.controller.abort();
+				return;
 			case "welcome":
 				readySent = false;
 				if (current && message.task !== current.id) keep(undefined);
@@ -155,6 +203,14 @@ export default function core(pi) {
 
 	pi.events.on("ompd:ended", ({ id }) => {
 		if (current?.jobs.includes(id)) keep({ ...current, jobs: current.jobs.filter(job => job !== id) });
+	});
+
+	pi.registerCommand("decisions", {
+		description: "Show the decisions this bot's tasks are waiting on again",
+		handler: async () => {
+			dismissed.clear();
+			if (!decisions.length) ctx?.ui?.notify?.("No decisions are waiting on you.", "info");
+		},
 	});
 
 	pi.registerTool({

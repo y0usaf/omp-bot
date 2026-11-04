@@ -50,6 +50,7 @@ const q = {
 	silent: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state = 'done' AND trim(result) = $silent"),
 	silentHeld: db.query<Task, { before: number }>(`SELECT * FROM tasks WHERE ${HELD} AND beat < $before`),
 	held: db.query<Task, []>(`SELECT * FROM tasks WHERE ${HELD}`),
+	decisions: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'waiting' AND wait = 'decision' ORDER BY updated"),
 	grace: db.query(`UPDATE tasks SET beat = $now WHERE ${HELD}`),
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
 	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
@@ -295,6 +296,12 @@ function dropLink(link: Link, reason: string) {
 	setTimeout(() => dispatch(link.bot), 0);
 }
 
+function pushDecisions(bot: string) {
+	const link = links.get(bot);
+	if (link?.mode !== "tui") return;
+	send(link.socket, { op: "decisions", tasks: q.decisions.all({ bot }).map(task => ({ id: task.id, question: task.question, text: task.text })) });
+}
+
 function stale(socket: Socket, link: Link, message: any) {
 	log(`ignore ${message.op} for ${message.id} from ${link.bot}: not the current attempt`);
 	if (link.task === message.id) link.task = link.token = undefined;
@@ -357,7 +364,8 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			}
 			log(`hello ${link.bot} (${link.mode})`);
 			tendMemory();
-			return send(socket, { op: "welcome", task: link.task ?? null });
+			send(socket, { op: "welcome", task: link.task ?? null });
+			return pushDecisions(link.bot);
 		}
 		case "ready": {
 			const link = self.link;
@@ -406,7 +414,8 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (!q.wait.run({ id: message.id, token: String(message.token ?? ""), wait, question, result: String(message.result ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
 			if (wait === "decision" && link.task === message.id) link.task = link.token = undefined;
 			log(`wait ${message.id} on ${wait} by ${link.bot}`);
-			return send(socket, { op: "ack", id: message.id });
+			send(socket, { op: "ack", id: message.id });
+			return wait === "decision" ? pushDecisions(link.bot) : undefined;
 		}
 		case "answer": {
 			const action = String(message.action) as keyof typeof ACTIONS;
@@ -415,6 +424,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (!task || task.state !== "waiting" || task.wait !== "decision") throw new Error(`task ${message.id} isn't waiting on a decision`);
 			q.answer.run({ id: task.id, answer: JSON.stringify({ action, question: task.question, note: String(message.note ?? "").trim() || null }), now: Date.now() });
 			log(`answer ${task.id}: ${action}`);
+			pushDecisions(task.bot);
 			dispatch(task.bot);
 			return send(socket, { ok: true, state: "queued" });
 		}
