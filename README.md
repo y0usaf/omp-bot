@@ -80,5 +80,9 @@ After a reboot, a crash or a restart, bots and their work carry on with no one r
 - HAL9001 as chief of staff handing other bots tasks itself.
 - The inbox inside Tern.
 - Bots run omp directly on this machine, not in omp-box.
+- A finix service for `bin/ompd`: the first bot to start launches it, so after a reboot jobs are reconciled only once a bot runs.
+- A hard memory limit: ompd samples its jobs' resident memory every second and kills a job over the cap, because finix delegates no cgroup to the user; a spike faster than that can pass the cap briefly. Lean builds started outside ompd don't take its slots.
+- `--restore` for background bots: omp refuses it in RPC mode, so their interrupted turns are retried as new attempts.
+- Decisions inside Tern: waiting tasks are answered with `omp-bot-ctl`; the task board demo doesn't send its Approve, Deny and Handle to the queue yet.
 
 Initially drafted by Claude AI.
