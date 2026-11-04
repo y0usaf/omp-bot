@@ -423,7 +423,7 @@ export default function ompBot(pi) {
 	});
 
 	pi.on("message_update", async (event, ctx) => {
-		if (ctx.agent?.kind === "sub" || bot.running.size > 0) return;
+		if (ctx.agent?.kind === "sub" || !bot.active || bot.running.size > 0) return;
 		const kind = event.assistantMessageEvent?.type;
 		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Writing it up…");
 		else if (kind === "thinking_delta" || kind === "thinking_start") bot.set("thinking", bot.mood === "thinking" ? bot.line : pick(THINKING, Date.now()));
