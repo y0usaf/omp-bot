@@ -1,0 +1,5 @@
+#!/bin/sh
+printf '%s' "$$" >"$1/pid.tmp" && mv -f "$1/pid.tmp" "$1/pid"
+bash -c "$(cat "$1/command")" </dev/null
+code=$?
+printf '%s\n' "$code" >"$1/exit.tmp" && mv -f "$1/exit.tmp" "$1/exit"

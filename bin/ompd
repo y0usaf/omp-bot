@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+[ "${1:-}" = serve ] || exec bun "$root/daemon/ompd.ts" "$@"
+state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+mkdir -p "$state"
+exec flock -n -E 0 -o "$state/ompd.lock" bun "$root/daemon/ompd.ts" serve
