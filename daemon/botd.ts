@@ -35,7 +35,7 @@ db.exec("CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (bot, state, created)")
 
 const HELD = "(state = 'running' OR (state = 'waiting' AND wait = 'jobs'))";
 const q = {
-	insert: db.query("INSERT INTO tasks (id, bot, key, text, origin, created, updated) VALUES ($id, $bot, $key, $text, $origin, $now, $now) ON CONFLICT (key) DO NOTHING"),
+	insert: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, created, updated) VALUES ($id, $bot, $key, $text, $origin, 'queued', $now, $now) ON CONFLICT (key) DO NOTHING"),
 	byKey: db.query<Task, { key: string }>("SELECT * FROM tasks WHERE key = $key"),
 	byId: db.query<Task, { id: string }>("SELECT * FROM tasks WHERE id = $id"),
 	next: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued' ORDER BY created LIMIT 1"),
