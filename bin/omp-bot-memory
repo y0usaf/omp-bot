@@ -13,5 +13,7 @@ dir=$state/bots/$name/optchat
 mkdir -p "$dir"
 cd "$dir"
 export OPTCHAT_DIR="$dir" OPTCHAT_BOT="$name"
+exec 9>"$dir/optchatd.lock"
+flock -n 9 || { echo "omp-bot-memory: $name's memory is already running ($dir/optchatd.lock is held)" >&2; exit 1; }
 exec "${OMP_BIN:-omp}" --mode rpc --no-ui --no-session --no-extensions --no-tools --no-lsp --no-skills --no-rules --no-title \
 	-e "$OMP_BOT_OPTCHAT/service.ts"
