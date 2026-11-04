@@ -43,8 +43,51 @@
 	display: none !important;
 }
 
-[data-role='omp.bot.reply'] .md.streaming {
+:root:not(#ob):not(#oc) [data-role='omp.bot.reply'],
+:root:not(#ob):not(#oc) [data-role='omp.bot.you'] {
+	margin: 6px 0;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.bot.reply'] > [data-role^='omp.assistant'] {
+	align-self: flex-start;
+	max-width: min(80%, 560px);
+	margin: 0;
+	padding: 7px 12px;
+	border-radius: var(--r-card);
+	background: rgb(from var(--t1) r g b / 6%);
+	box-shadow: none;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.bot.you'] .sf-card[data-role^='omp.user'] {
+	align-self: flex-end;
+	max-width: min(80%, 560px);
+	margin: 0 0 0 auto;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.bot.you'] .sf-card[data-role^='omp.user'] > .sf-card-body {
+	align-items: flex-end;
+	padding: 0;
+	background: none;
+	box-shadow: none;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.bot.you'] .sf-card[data-role^='omp.user'] > .sf-card-body > .sf-md {
+	padding: 7px 12px;
+	border-radius: var(--r-card);
+	background: var(--oz-pink, var(--l2));
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.bot.dock'] :is([data-role='omp.composer.context'], [data-role='omp.composer.usage'], [data-role='omp.composer.extras']) {
 	display: none !important;
+}
+
+[data-role='omp.bot.reply'] [data-role='omp.turn.usage'] {
+	display: none !important;
+}
+
+[data-role='omp.bot.took'] {
+	opacity: 0.45;
+	font-size: 0.85em;
 }
 
 

@@ -1,13 +1,17 @@
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
-import { col, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
+import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
+import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
+const DOCK_PATCHED = Symbol.for("omp-bot.dock");
+const NONE = col([], { role: "omp.bot.none" });
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
@@ -217,41 +221,40 @@ class BotStatus {
 
 	describe() {
 		const b = this.bot;
-		const busy = b.active;
+		const busy = b.active && !b.boop;
 		const status = b.boop ?? b.line;
 		return row(
 			[
 				b.chao(),
-				col(
-					[
-						text(b.name, { role: "omp.bot.name", wrap: "none" }),
-						row(
-							[
-								busy && !b.boop
-									? node("shimmer", {
-											spans: [{ t: status, s: "muted" }],
-											mode: "classic",
-											palette: { low: "dim", mid: "muted", high: "accent" },
-											role: "omp.bot.say",
-										})
-									: text(status, { role: "omp.bot.say", wrap: "none" }),
-							].filter(Boolean),
-							{ role: "omp.bot.status", align: "center", gap: "sm" },
-						),
-					],
-					{ role: "omp.bot.words", gap: "none" },
-				),
-			],
-			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "md" },
+				busy
+					? node("shimmer", {
+							spans: [{ t: status, s: "muted" }],
+							mode: "classic",
+							palette: { low: "dim", mid: "muted", high: "accent" },
+							role: "omp.bot.say",
+						})
+					: text(status, { role: "omp.bot.say", wrap: "none" }),
+				busy ? node("row", { role: "omp.bot.took" }, [elapsed(Date.now() - b.turnStart)]) : undefined,
+			].filter(Boolean),
+			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "sm" },
 		);
 	}
 }
 
+function unsaid(child) {
+	if (typeof child?.render === "function") return false;
+	return String(child?.p?.role ?? "").startsWith("omp.thinking") || child?.p?.stream === true;
+}
+
+function says(child) {
+	return typeof child?.render !== "function" && (child?.k === "md" || child?.k === "image" || child?.key === "error");
+}
+
 class BotReply {
-	constructor(block, source) {
+	constructor(block) {
 		this.block = block;
-		this.source = source;
-		this.node = col([block], { role: "omp.bot.reply" });
+		this.whole = undefined;
+		this.node = NONE;
 	}
 
 	invalidate() {
@@ -260,6 +263,34 @@ class BotReply {
 
 	render(width) {
 		return this.block.render(width);
+	}
+
+	handleNativeEvent(event) {
+		this.block.handleNativeEvent?.(event);
+	}
+
+	describe(cx) {
+		const whole = this.block.describe(cx);
+		if (whole === this.whole) return this.node;
+		this.whole = whole;
+		const children = (whole?.c ?? []).filter(child => !unsaid(child));
+		this.node = children.some(says) ? col([{ ...whole, c: children }], { role: "omp.bot.reply" }) : NONE;
+		return this.node;
+	}
+}
+
+class Marked {
+	constructor(items, role) {
+		this.items = items;
+		this.node = col(items, { role });
+	}
+
+	invalidate() {
+		for (const item of this.items) item.invalidate?.();
+	}
+
+	render(width) {
+		return this.items.flatMap(item => item.render(width));
 	}
 
 	describe() {
@@ -275,31 +306,64 @@ function patchTranscript(state) {
 	}
 	const inner = proto.nativeBlocks;
 	const shownBy = new WeakMap();
-	const replies = new WeakMap();
+	const wrapped = new WeakMap();
+	const advice = new WeakMap();
 	proto[PATCHED] = { state };
 
-	function reply(block) {
-		const source = block?.mode === "thinking" ? undefined : (block?.source ?? block);
-		if (!(source instanceof AssistantMessageComponent)) return block;
-		let wrapped = replies.get(block);
-		if (!wrapped) {
-			wrapped = new BotReply(block, source);
-			replies.set(block, wrapped);
+	function advises(block) {
+		let is = advice.get(block);
+		if (is === undefined) {
+			is = block.describe?.()?.p?.role === "omp.advisor";
+			advice.set(block, is);
 		}
-		if (isNativeSettled(block) && !isNativeSettled(wrapped)) settleNative(wrapped);
-		return wrapped;
+		return is;
+	}
+
+	function shown(block) {
+		if (block?.mode === "thinking" || advises(block)) return undefined;
+		const source = block?.source ?? block;
+		const reply = source instanceof AssistantMessageComponent;
+		if (!reply && !(block instanceof UserMessageComponent)) return block;
+		let wrapper = wrapped.get(block);
+		if (!wrapper) {
+			wrapper = reply ? new BotReply(block) : new Marked([block], "omp.bot.you");
+			wrapped.set(block, wrapper);
+		}
+		if (isNativeSettled(block) && !isNativeSettled(wrapper)) settleNative(wrapper);
+		return wrapper;
 	}
 
 	proto.nativeBlocks = function () {
 		const blocks = inner.call(this);
 		const s = proto[PATCHED].state;
 		if (!s.on || !s.top) return blocks;
-		const shown = [s.top, ...blocks.map(reply)];
-		if (!s.bot.hero) shown.push(s.status);
+		const shownBlocks = [s.top, ...blocks.map(shown).filter(Boolean)];
+		if (!s.bot.hero) shownBlocks.push(s.status);
 		const previous = shownBy.get(this);
-		if (previous && same(previous, shown)) return previous;
-		shownBy.set(this, shown);
-		return shown;
+		if (previous && same(previous, shownBlocks)) return previous;
+		shownBy.set(this, shownBlocks);
+		return shownBlocks;
+	};
+}
+
+function patchDock(state) {
+	const proto = Composer.prototype;
+	if (proto[DOCK_PATCHED]) {
+		proto[DOCK_PATCHED].state = state;
+		return;
+	}
+	const inner = proto.describeSurface;
+	const docks = new WeakMap();
+	proto[DOCK_PATCHED] = { state };
+	proto.describeSurface = function (cx) {
+		const surface = inner.call(this, cx);
+		if (!proto[DOCK_PATCHED].state.on) return surface;
+		let marked = docks.get(surface);
+		if (!marked) {
+			marked = { ...surface, dock: [new Marked(surface.dock, "omp.bot.dock")] };
+			docks.set(surface, marked);
+		}
+		return marked;
 	};
 }
 
@@ -366,6 +430,7 @@ export default function ompBot(pi) {
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		patchTranscript(state);
 		patchWorkingRow(state);
+		patchDock(state);
 		listen();
 		mount();
 		bot.nap();
