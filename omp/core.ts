@@ -127,7 +127,7 @@ export default function core(pi) {
 		s.unref();
 		s.setEncoding("utf8");
 		let buffer = "";
-		s.on("connect", () => send({ op: "hello", bot: name, mode, pid: process.pid, task: current?.id ?? null, token: current?.token ?? null }));
+		s.on("connect", () => send({ op: "hello", bot: name, mode, pid: Number(process.env.OMP_BOT_PID) || process.pid, task: current?.id ?? null, token: current?.token ?? null }));
 		s.on("data", chunk => {
 			buffer += chunk;
 			let nl: number;

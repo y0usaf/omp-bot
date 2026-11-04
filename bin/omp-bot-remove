@@ -1,8 +1,15 @@
 #!/bin/sh
 set -eu
-[ $# -eq 1 ] || { echo "usage: omp-bot-remove NAME" >&2; exit 2; }
+usage="usage: omp-bot-remove NAME [--purge]"
+[ $# -ge 1 ] && [ $# -le 2 ] || { echo "$usage" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd)
 name=$1
+purge=0
+case ${2:-} in
+"") ;;
+--purge) purge=1 ;;
+*) echo "$usage" >&2; exit 2 ;;
+esac
 case $name in
 "" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, space, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
 esac
@@ -12,27 +19,64 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
 state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
 export OMP_BOT_STATE="$state"
 [ -e "$state/bots.json" ] || { echo "omp-bot-remove: no roster at $state/bots.json" >&2; exit 1; }
-jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null || { echo "omp-bot-remove: no bot named $name" >&2; exit 1; }
-"$root/bin/omp-bot-ctl" retire "$name"
+# A roster entry's persist paths, one per line, with ~ expanded.
+persisted() { jq -r '.persist // [] | .[]' | while IFS= read -r path; do case $path in "~") echo "$HOME" ;; "~/"*) echo "$HOME/${path#"~/"}" ;; *) echo "$path" ;; esac; done; }
+# Revokes omp-box's grants of the paths given one per line.
+ungrant() {
+	command -v omp-box >/dev/null || return 0
+	grants=$(omp-box list --json) || return 0
+	printf '%s\n' "$1" | while IFS= read -r path; do
+		[ -n "$path" ] || continue
+		printf '%s' "$grants" | jq -r --arg p "$path" '.[] | select(.path == $p) | .name' | while IFS= read -r grant; do omp-box rm "$grant" >/dev/null || true; done
+	done
+}
 dir=$state/bots/$name
-if [ -d "$dir" ]; then
-	exec 8>"$dir/lock"
-	if ! flock -w 15 8; then
-		"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
-		echo "omp-bot-remove: $name is still running; close its tab first" >&2
-		exit 75
+if bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json"); then
+	"$root/bin/omp-bot-ctl" retire "$name"
+	if [ -d "$dir" ]; then
+		exec 8>"$dir/lock"
+		if ! flock -w 15 8; then
+			"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
+			echo "omp-bot-remove: $name is still running; close its tab first" >&2
+			exit 75
+		fi
 	fi
-fi
-(
-	flock 9
-	tmp=$(mktemp "$state/bots.json.XXXXXX")
-	jq --arg n "$name" 'map(select(.name != $n))' "$state/bots.json" >"$tmp"
-	chmod 644 "$tmp"
-	mv -f "$tmp" "$state/bots.json"
-) 9>"$state/bots.lock"
-if [ -d "$dir" ]; then
+	(
+		flock 9
+		tmp=$(mktemp "$state/bots.json.XXXXXX")
+		jq --arg n "$name" 'map(select(.name != $n))' "$state/bots.json" >"$tmp"
+		chmod 644 "$tmp"
+		mv -f "$tmp" "$state/bots.json"
+	) 9>"$state/bots.lock"
+	[ "$(printf '%s' "$bot" | jq -r '.box // false')" != true ] || ungrant "$(printf '%s\n' "$dir"; printf '%s' "$bot" | persisted)"
+	archive=$state/archive/$name-$(date +%Y%m%d-%H%M%S)
 	mkdir -p "$state/archive"
-	mv "$dir" "$state/archive/$name-$(date +%Y%m%d-%H%M%S)"
+	if [ -d "$dir" ]; then mv "$dir" "$archive"; else mkdir "$archive"; fi
+	printf '%s\n' "$bot" >"$archive/roster.json"
+	"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
+	echo "removed $name"
+elif [ "$purge" = 0 ]; then
+	echo "omp-bot-remove: no bot named $name" >&2
+	exit 1
 fi
-"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
-echo "removed $name"
+[ "$purge" = 1 ] || exit 0
+# Purging deletes the data of every path the bot ever declared under persist, as recorded in its archives,
+# except a path another bot on the roster still declares.
+paths=$(for entry in "$state/archive/$name"-*/roster.json; do
+	[ -f "$entry" ] && jq -e --arg n "$name" '.name == $n' "$entry" >/dev/null && persisted <"$entry"
+done | sort -u)
+[ -n "$paths" ] || { echo "omp-bot-remove: $name declared no persist paths; nothing to purge"; exit 0; }
+held=$(jq -c '.[]' "$state/bots.json" | while IFS= read -r other; do printf '%s' "$other" | persisted; done)
+printf '%s\n' "$paths" | while IFS= read -r path; do
+	case $path in
+	/ | "$HOME" | "$HOME"/ | "$state" | "$state"/*) echo "omp-bot-remove: not purging $path" >&2; continue ;;
+	esac
+	case "$state/" in "${path%/}"/*) echo "omp-bot-remove: not purging $path, which holds the bot state" >&2; continue ;; esac
+	if printf '%s\n' "$held" | grep -qxF -- "$path"; then
+		echo "omp-bot-remove: keeping $path, which another bot declares"
+		continue
+	fi
+	ungrant "$path"
+	if [ -n "${OMP_BOT_PERSIST:-}" ]; then "$OMP_BOT_PERSIST" purge "$path"; else rm -rf -- "$path"; fi
+	echo "purged $path"
+done

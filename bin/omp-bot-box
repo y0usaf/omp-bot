@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Runs omp inside omp-box for a bot whose roster entry has "box": true; bin/omp-bot calls it in place of omp.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+: "${OMP_BOT_NAME:?omp-bot-box runs from bin/omp-bot}" "${OMP_BOT_STATE:?omp-bot-box runs from bin/omp-bot}"
+[ -n "${OMP_BOT_BOX_SSH_CONFIG:-}" ] || { echo "omp-bot-box: OMP_BOT_BOX_SSH_CONFIG, the ssh config that reaches the box, is unset (see box.env in the README)" >&2; exit 1; }
+name=$OMP_BOT_NAME
+state=$OMP_BOT_STATE
+dir=$state/bots/$name
+tag=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._-')
+cache=$HOME/.cache/omp-bot/box
+sock=$cache/run/$tag.sock
+ssh=(ssh -F "$OMP_BOT_BOX_SSH_CONFIG")
+
+# Share the bot's folder and its persist paths into the box, at the same paths. A path the persist hook
+# has just mounted is shared again, so the box sees the persisted folder instead of the one it replaced.
+grants=$(omp-box list --json)
+fresh=$'\n'${OMP_BOT_PERSIST_FRESH:-}$'\n'
+grant() {
+	local path=$1 want=$2 have try i=1
+	mkdir -p "$path"
+	have=$(jq -r --arg p "$path" '[.[] | select(.path == $p) | .name][0] // empty' <<<"$grants")
+	if [ -n "$have" ]; then
+		case $fresh in *$'\n'"$path"$'\n'*) ;; *) return 0 ;; esac
+		omp-box rm "$have" >/dev/null
+		omp-box add "$path" --name "$have" >/dev/null
+	else
+		try=$want
+		while jq -e --arg n "$try" 'any(.[]; .name == $n)' <<<"$grants" >/dev/null; do
+			i=$((i + 1))
+			try=$want.$i
+		done
+		omp-box add "$path" --name "$try" >/dev/null
+	fi
+	grants=$(omp-box list --json)
+}
+grant "$dir" "omp-bot.$tag"
+i=0
+while IFS= read -r path; do
+	[ -n "$path" ] || continue
+	i=$((i + 1))
+	grant "$path" "omp-bot.$tag.$i"
+done <<<"${OMP_BOT_PERSIST_PATHS:-}"
+
+# The environment the bot gets in the box, and every store path it or the omp arguments name.
+fwd=()
+for k in $(compgen -e); do
+	case $k in
+	OMP_BOT_BOX_* | OMP_BOT_PERSIST* | OMP_BOT_SOCKET | OMP_BOT_PID) ;;
+	OMP_BOT_* | OMPD_* | OPTCHAT_* | PI_* | OMP_UNTIL | TERM | TERM_PROGRAM | TERM_PROGRAM_VERSION | COLORTERM | LANG | LC_*) fwd+=("$k") ;;
+	esac
+done
+declare -A tops=()
+scan() { if [[ $1 == /nix/store/* ]]; then local t=${1#/nix/store/}; tops[${t%%/*}]=1; fi; }
+scan "$root"
+for a in "$@"; do scan "$a"; done
+for k in "${fwd[@]}"; do scan "${!k}"; done
+
+# Make the box's state folder the bot's own (a share mounted with sudo leaves root-owned parents), hand it
+# the roster, clear a stale botd socket, and learn which store paths the box lacks.
+prelude='set -euo pipefail
+state=$1 dir=$2 cache=$3 sock=$4 root=$5
+shift 5
+own() {
+	local p=$1 chain=()
+	while [ "$p" != "$HOME" ] && [ "$p" != / ]; do chain=("$p" "${chain[@]}"); p=$(dirname "$p"); done
+	for p in "${chain[@]}"; do
+		if [ ! -e "$p" ]; then mkdir "$p"
+		elif [ ! -O "$p" ] && ! mountpoint -q "$p"; then sudo -n chown "$(id -u):$(id -g)" "$p"; fi
+	done
+}
+own "$state/bots"
+own "$cache/store"
+own "$cache/run"
+mountpoint -q "$dir" || { echo "omp-bot-box: $dir is not shared into the box (omp-box list)" >&2; exit 1; }
+case $root in /nix/store/*) ;; *) [ -e "$root" ] || { echo "omp-bot-box: $root is not in the box; share it with omp-box add" >&2; exit 1; } ;; esac
+rm -f "$sock"
+cat >"$state/bots.json.tmp"
+mv -f "$state/bots.json.tmp" "$state/bots.json"
+for t in "$@"; do
+	if [ -e "/nix/store/$t" ]; then echo "store $t"
+	elif [ ! -e "$cache/store/$t" ]; then echo "copy $t"
+	fi
+done'
+declare -A instore=()
+missing=()
+while read -r kind t; do
+	case $kind in store) instore[$t]=1 ;; copy) missing+=("$t") ;; esac
+done < <("${ssh[@]}" -T box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$state" "$dir" "$cache" "$sock" "$root" "${!tops[@]}")" <"$state/bots.json")
+if [ ${#missing[@]} -gt 0 ]; then
+	sync='set -euo pipefail
+t=$(mktemp -d "$1/.in.XXXXXX")
+tar -xf - -C "$t"
+for x in "$t"/*; do [ -e "$1/${x##*/}" ] || mv "$x" "$1/"; done
+chmod -R u+w "$t"
+rm -rf "$t"'
+	tar -C /nix/store -cf - "${missing[@]}" | "${ssh[@]}" -T box "bash -c $(printf %q "$sync") omp-bot-box $(printf %q "$cache/store")"
+fi
+map() {
+	local v=$1 t
+	if [[ $v == /nix/store/* ]]; then
+		t=${v#/nix/store/}
+		[ -n "${instore[${t%%/*}]:-}" ] || v=$cache/store/$t
+	fi
+	printf '%s' "$v"
+}
+
+cwd=${OMP_BOT_BOX_CWD:-$HOME}
+cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$(map "$root")/bin"):\"\$PATH\" && exec env"
+for k in "${fwd[@]}"; do cmd+=" $(printf %q "$k=$(map "${!k}")")"; done
+cmd+=" $(printf %q "OMP_BOT_SOCKET=$sock") OMP_BOT_PID=$$ omp"
+for a in "$@"; do cmd+=" $(printf %q "$(map "$a")")"; done
+tty=-T
+[ -t 0 ] && [ -t 1 ] && tty=-t
+exec "${ssh[@]}" "$tty" -o ExitOnForwardFailure=yes -R "$sock:${OMP_BOT_SOCKET:-$state/botd.sock}" box "$cmd"

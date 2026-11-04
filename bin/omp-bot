@@ -34,9 +34,26 @@ bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json") || 
 field() { printf '%s' "$bot" | jq -r --arg k "$1" '.[$k] // empty'; }
 dir=$state/bots/$name
 mkdir -p "$dir/sessions"
-cwd=$(field cwd)
-case $cwd in "~") cwd=$HOME ;; "~/"*) cwd=$HOME/${cwd#"~/"} ;; esac
-cd "${cwd:-$HOME}"
+home() { case $1 in "~") printf '%s\n' "$HOME" ;; "~/"*) printf '%s\n' "$HOME/${1#"~/"}" ;; *) printf '%s\n' "$1" ;; esac; }
+paths=$(printf '%s' "$bot" | jq -r '.persist // [] | .[]' | while IFS= read -r path; do
+	path=$(home "$path")
+	case $path in /*) printf '%s\n' "$path" ;; *) echo "omp-bot: $name's persist path '$path' is neither absolute nor under ~" >&2; exit 1 ;; esac
+done) || exit 1
+fresh=
+if [ -n "$paths" ] && [ -n "${OMP_BOT_PERSIST:-}" ]; then
+	fresh=$(printf '%s\n' "$paths" | while IFS= read -r path; do "$OMP_BOT_PERSIST" mount "$path" || exit 1; done) || { echo "omp-bot: $OMP_BOT_PERSIST could not persist $name's paths" >&2; exit 1; }
+fi
+cwd=$(home "$(field cwd)")
+omp=${OMP_BIN:-omp}
+if [ "$(field box)" = true ]; then
+	box=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/box.env
+	[ ! -r "$box" ] || . "$box"
+	export OMP_BOT_BOX_CWD="${cwd:-$HOME}" OMP_BOT_PERSIST_PATHS="$paths" OMP_BOT_PERSIST_FRESH="$fresh"
+	omp=$root/bin/omp-bot-box
+	cd "$HOME"
+else
+	cd "${cwd:-$HOME}"
+fi
 export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
@@ -65,7 +82,7 @@ esac
 set -- -e "$root/omp/core.ts" -e "$root/omp/ompd.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
-	exec flock -n -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" --mode rpc --no-ui --continue "$@"
+	exec flock -n -o "$dir/lock" omp-until "$dir" "$omp" --mode rpc --no-ui --continue "$@"
 fi
 "$root/bin/omp-bot-ctl" claim "$name" || true
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
@@ -74,7 +91,7 @@ waiting=
 while :; do
 	code=0
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
-	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
+	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
 	[ "$code" = 213 ] || break
 	holder=$("$root/bin/omp-bot-ctl" holder "$name" 2>/dev/null) || holder=none
 	case $holder in
