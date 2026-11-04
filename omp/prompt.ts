@@ -72,7 +72,7 @@ function self(name: string, role: string, persona: string, mode: string): string
 		"# Asking for a decision",
 		"- Ask only for a choice that is the user's to make (taste, priorities, money, other people, anything irreversible) or a fact only they know. Never ask what you could look up or decide yourself.",
 		"- First do every part that doesn't depend on the answer.",
-		"- Then ask once, and put the question first: the choice, two or three options, your pick with its reason in a clause, and what happens next. Don't ask the same thing again unless something changed.",
+		"- In live chat, use the native ask tool for a genuine user decision, not a prose question: put the question first, offer two or three distinct options, and mark your recommendation with its reason in that option's description. Never use ask for background tasks or for decisions you can obviously handle yourself. Ask once; don't ask the same thing again unless something changed.",
 		"",
 		"# Restarting",
 		`- When the user asks you to restart, or a change you made only takes effect in a fresh start, run \`${CTL} restart ${name}\`. You restart once this turn ends and pick up this same conversation, so say so in your reply first.`,

@@ -1,19 +1,20 @@
 [data-role^='omp.bot.chat.'],
 [data-role^='omp.bot.hero.'],
-[data-role^='omp.bot.top.'] {
+[data-role^='omp.bot.top.'],
+[data-role^='omp.bot.eventbox.'] {
 	--t: #8f6bff;
 	--p: 2px;
 	position: relative;
 	font-family: Geist, system-ui, "SF Pro Text", sans-serif;
 }
 
-[data-role='omp.bot.chat.red'], [data-role='omp.bot.hero.red'], [data-role='omp.bot.top.red'] { --t: #ff4d5e; }
-[data-role='omp.bot.chat.orange'], [data-role='omp.bot.hero.orange'], [data-role='omp.bot.top.orange'] { --t: #ff8a3d; }
-[data-role='omp.bot.chat.yellow'], [data-role='omp.bot.hero.yellow'], [data-role='omp.bot.top.yellow'] { --t: #f2b705; }
-[data-role='omp.bot.chat.green'], [data-role='omp.bot.hero.green'], [data-role='omp.bot.top.green'] { --t: #2fbf71; }
-[data-role='omp.bot.chat.teal'], [data-role='omp.bot.hero.teal'], [data-role='omp.bot.top.teal'] { --t: #19b8c4; }
-[data-role='omp.bot.chat.blue'], [data-role='omp.bot.hero.blue'], [data-role='omp.bot.top.blue'] { --t: #3d7bff; }
-[data-role='omp.bot.chat.pink'], [data-role='omp.bot.hero.pink'], [data-role='omp.bot.top.pink'] { --t: #ff5fa8; }
+[data-role='omp.bot.chat.red'], [data-role='omp.bot.hero.red'], [data-role='omp.bot.top.red'], [data-role='omp.bot.eventbox.red'] { --t: #ff4d5e; }
+[data-role='omp.bot.chat.orange'], [data-role='omp.bot.hero.orange'], [data-role='omp.bot.top.orange'], [data-role='omp.bot.eventbox.orange'] { --t: #ff8a3d; }
+[data-role='omp.bot.chat.yellow'], [data-role='omp.bot.hero.yellow'], [data-role='omp.bot.top.yellow'], [data-role='omp.bot.eventbox.yellow'] { --t: #f2b705; }
+[data-role='omp.bot.chat.green'], [data-role='omp.bot.hero.green'], [data-role='omp.bot.top.green'], [data-role='omp.bot.eventbox.green'] { --t: #2fbf71; }
+[data-role='omp.bot.chat.teal'], [data-role='omp.bot.hero.teal'], [data-role='omp.bot.top.teal'], [data-role='omp.bot.eventbox.teal'] { --t: #19b8c4; }
+[data-role='omp.bot.chat.blue'], [data-role='omp.bot.hero.blue'], [data-role='omp.bot.top.blue'], [data-role='omp.bot.eventbox.blue'] { --t: #3d7bff; }
+[data-role='omp.bot.chat.pink'], [data-role='omp.bot.hero.pink'], [data-role='omp.bot.top.pink'], [data-role='omp.bot.eventbox.pink'] { --t: #ff5fa8; }
 
 [data-role^='omp.bot.chat.'] {
 	padding: 2px 4px 10px 6px;
@@ -83,6 +84,77 @@
 
 [data-role='omp.bot.reply'] [data-role='omp.turn.usage'] {
 	display: none !important;
+}
+
+[data-role='omp.bot.event.row'] {
+	align-self: center;
+	max-width: 100%;
+	padding: 2px 6px;
+	color: var(--t3);
+	font-size: 0.9em;
+	cursor: pointer;
+}
+
+[data-role='omp.bot.event.row']:hover {
+	color: var(--t2);
+}
+
+[data-role='omp.bot.event.action'],
+[data-role='omp.bot.event.more'] {
+	color: var(--t3);
+}
+
+[data-role='omp.bot.event.name'] {
+	max-width: min(60vw, 360px);
+	color: var(--t2);
+	font-weight: 500;
+}
+
+[data-role='omp.bot.event.avatar'] {
+	--p: 1px;
+	flex: none;
+	width: 32px;
+	height: 26px;
+	overflow: hidden;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+[data-role='omp.bot.event.avatar'] * {
+	pointer-events: none;
+}
+
+[data-role='omp.bot.event.avatar'] [data-role='omp.bot.emote'],
+[data-role='omp.bot.event.avatar'] [data-role='omp.bot.chao.idle'] > [data-role='omp.bot.line']:empty {
+	display: none !important;
+}
+
+[data-role='omp.bot.event.avatar'] [data-role^='omp.bot.glyph.'],
+[data-role='omp.bot.event.avatar'] [data-role='omp.bot.blink'] [data-role^='omp.bot.px.'],
+[data-role='omp.bot.event.avatar'] [data-role^='omp.bot.chao.'] {
+	animation: none !important;
+}
+
+[data-role='omp.bot.event.detail'] {
+	align-self: center;
+	width: min(100%, 720px);
+	margin: 4px auto 10px;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.editor.ask'] {
+	width: min(100%, 720px);
+	margin: 8px auto;
+	padding: 16px;
+	border-radius: var(--r-card);
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.ask.question'] {
+	font-weight: 600;
+}
+
+:root:not(#ob):not(#oc) [data-role='omp.ask.options'] {
+	margin-top: 8px;
 }
 
 [data-role='omp.bot.took'] {

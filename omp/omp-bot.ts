@@ -298,6 +298,112 @@ class Marked {
 	}
 }
 
+function headText(block) {
+	return (block?.p?.head ?? []).map(part => part?.t ?? "").join("").trim();
+}
+
+function bodyText(block) {
+	if (block?.k === "md" && typeof block?.p?.text === "string") return block.p.text;
+	for (const child of block?.c ?? []) {
+		if (typeof child === "object") {
+			const body = bodyText(child);
+			if (body) return body;
+		}
+	}
+	return "";
+}
+
+function eventInfo(block, bot) {
+	const role = String(block?.p?.role ?? "");
+	const head = headText(block);
+	if (role.startsWith("omp.irc.")) {
+		if (role === "omp.irc.incoming") {
+			const name = head.replace(/^IRC\s+/, "").replace(/^[←\uE000-\uF8FF\s]+/, "").trim();
+			if (name) return { action: "Message from", name };
+		}
+		const routed = head.match(/^(?:IRC|Pool)\s+(.+?)\s*(?:→|->|›|[\uE000-\uF8FF])+\s*(.+)$/);
+		if (routed) return { action: "Messaged", name: routed[2].trim() };
+		const name = head.match(/^(?:IRC|Pool)\s+(.+)$/)?.[1]?.trim();
+		if (name) return { action: "Messaged", name };
+	}
+	const body = bodyText(block);
+	if (body.startsWith("[omp-bot task ")) {
+		const marker = body.slice(0, body.indexOf("]") + 1);
+		const origin = marker.match(/from (?:bot|reply):(.+?)(?:,|\])/)?.[1]?.trim();
+		return origin ? { action: "Task from", name: origin } : { action: "Task for", name: bot.name };
+	}
+	if (role === "omp.user.collab") {
+		const name = head.match(/^«(.+?)»/)?.[1]?.trim();
+		if (name) return { action: "Message from", name };
+	}
+	return undefined;
+}
+
+class BotEvent {
+	constructor(block, info, bot) {
+		this.block = block;
+		this.info = info;
+		this.bot = bot;
+		this.look = chaoOf(info.name);
+		this.open = false;
+	}
+
+	invalidate() {
+		this.block.invalidate?.();
+	}
+
+	setExpanded(expanded) {
+		this.open = expanded;
+		this.bot.render();
+	}
+
+	handleNativeEvent(event) {
+		if (event?.type === "action" && event.act === "toggle-event") {
+			this.setExpanded(!this.open);
+			return;
+		}
+		this.block.handleNativeEvent?.(event);
+	}
+
+	render(width) {
+		const summary = truncateToWidth(` ${this.info.action} ◉ ${this.info.name} ${this.open ? "−" : "+"}`, width);
+		return this.open ? [summary, ...this.block.render(width)] : [summary];
+	}
+
+	describe(cx) {
+		let detail;
+		if (this.open) {
+			const whole = this.block.describe(cx);
+			detail = col([whole.k === "card" ? { ...whole, p: { ...whole.p, collapsible: false, collapsed: false, preview: undefined } } : whole], {
+				role: "omp.bot.event.detail",
+			});
+		}
+		return col(
+			[
+				row(
+					[
+						text(this.info.action, { role: "omp.bot.event.action", wrap: "none" }),
+						col([drawChao(this.look, "idle")], { role: "omp.bot.event.avatar" }),
+						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
+						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
+					],
+					{
+						role: "omp.bot.event.row",
+						align: "center",
+						justify: "center",
+						gap: "xs",
+						actions: { click: "toggle-event" },
+						title: this.open ? "Hide full message" : "Show full message",
+						aria: this.open ? "Hide full message" : "Show full message",
+					},
+				),
+				detail,
+			].filter(Boolean),
+			{ role: `omp.bot.eventbox.${this.look.tint}`, align: "center", gap: "xs" },
+		);
+	}
+}
+
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
 	if (proto[PATCHED]) {
@@ -307,6 +413,7 @@ function patchTranscript(state) {
 	const inner = proto.nativeBlocks;
 	const shownBy = new WeakMap();
 	const wrapped = new WeakMap();
+	const events = new WeakMap();
 	const advice = new WeakMap();
 	proto[PATCHED] = { state };
 
@@ -323,10 +430,19 @@ function patchTranscript(state) {
 		if (block?.mode === "thinking" || advises(block)) return undefined;
 		const source = block?.source ?? block;
 		const reply = source instanceof AssistantMessageComponent;
-		if (!reply && !(block instanceof UserMessageComponent)) return block;
+		let event = reply ? null : events.get(block);
+		if (!reply && event === undefined) {
+			event = eventInfo(block.describe?.(), proto[PATCHED].state.bot) ?? null;
+			events.set(block, event);
+		}
+		if (!reply && !(block instanceof UserMessageComponent) && !event) return block;
 		let wrapper = wrapped.get(block);
 		if (!wrapper) {
-			wrapper = reply ? new BotReply(block) : new Marked([block], "omp.bot.you");
+			wrapper = reply
+				? new BotReply(block)
+				: event
+					? new BotEvent(block, event, proto[PATCHED].state.bot)
+					: new Marked([block], "omp.bot.you");
 			wrapped.set(block, wrapper);
 		}
 		if (isNativeSettled(block) && !isNativeSettled(wrapper)) settleNative(wrapper);
@@ -497,7 +613,14 @@ export default function ompBot(pi) {
 	pi.on("tool_execution_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
 		bot.running.set(event.toolCallId, true);
-		bot.set(event.toolName === "ask" ? "waiting" : "working", event.toolName === "ask" ? "Waiting on you" : "Working");
+		const target =
+			event.toolName === "write" && typeof event.args?.path === "string"
+				? event.args.path.match(/^agent:\/\/([^/]+)$/)?.[1]
+				: undefined;
+		bot.set(
+			event.toolName === "ask" ? "waiting" : "working",
+			event.toolName === "ask" ? "Waiting on you" : target ? `Messaging ${target}` : "Working",
+		);
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
