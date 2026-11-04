@@ -8,6 +8,7 @@ const UNKNOWN = "Previous OMP process exited before this tool returned";
 const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
 const TAIL_BYTES = 32 * 1024;
 const OMPD = join(ROOT, "bin", "ompd");
+const SERVICE = process.env.OMPD_SERVICE === "1";
 
 function cutOff(entries): Set<string> {
 	const started = new Set<string>();
@@ -62,7 +63,7 @@ function report(job: Job): string {
 let starting = 0;
 
 function startDaemon() {
-	if (Date.now() - starting < 5_000) return;
+	if (SERVICE || Date.now() - starting < 5_000) return;
 	starting = Date.now();
 	mkdirSync(join(STATE, "logs"), { recursive: true });
 	const log = openSync(join(STATE, "logs", "ompd.log"), "a");
@@ -79,7 +80,7 @@ async function call(message: Record<string, unknown>): Promise<any> {
 			return await request(message);
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code ?? "";
-			if (!["ENOENT", "ECONNREFUSED"].includes(code) || attempt >= 40) throw error;
+			if (!["ENOENT", "ECONNREFUSED"].includes(code) || attempt >= (SERVICE ? 240 : 40)) throw error;
 			startDaemon();
 			await Bun.sleep(250);
 		}
