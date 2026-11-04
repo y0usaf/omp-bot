@@ -62,6 +62,16 @@ flowchart LR
 
 State lives in `${OMP_BOT_STATE:-${XDG_STATE_HOME:-~/.local/state}/omp-bot}`: `bots.json`, `tasks.db`, `bots/NAME/` (`sessions/`, `optchat/`, `rules.md`), `logs/NAME.log` for background runs, `logs/NAME.optchat.log` for summarisers and `botd.sock`.
 
+## Durability (ompd)
+
+After a reboot, a crash or a restart, bots and their work carry on with no one re-tasking them. The model is Pi Durable: every step is journaled, a tool call is recorded before it runs, and a command cut off midway is never blindly run again.
+
+- **Turns resume.** A bot in a tab starts with omp's `--restore` on its newest session. omp records each tool call before running it, so a turn cut off by a kill goes on where it stopped, its unfinished tool calls marked outcome unknown rather than run again. `omp/core.ts` keeps the task it works on in `bots/NAME/task.json`, so the restored turn finishes that task instead of `omp-botd` handing it out again. A background bot runs omp in RPC mode, which has no `--restore`: it gets its task again as a new attempt, told to check what the last one did.
+- **ompd owns long jobs.** `omp/ompd.ts` replaces the bash tool, for a bot and its subagents: each command becomes an ompd job, a process outside the bot with a handle and a log on disk (`jobs/ID/`). The tool waits for it as bash would; one still running after `OMPD_FOREGROUND_S` seconds, or started with `async`, is left running and its result arrives in the conversation as a message when it ends, even if the bot restarted in between. Jobs outlive the bot and `bin/ompd` itself, which reattaches to them when it starts again. A host crash kills them: ompd then reruns only jobs marked rerunnable (Lean builds always are) and reports the rest as outcome unknown. Lean builds (`lake`, `lean`) wait for one of `OMPD_LEAN_SLOTS` slots, and a job whose processes pass `OMPD_JOB_MEMORY` of resident memory (12 GB) is killed.
+- **Journal rules,** as in Crest: a job is recorded before it starts; a shell command cut off by a crash is never rerun but reported outcome unknown; every state file is written to a temporary file and renamed, so a kill leaves the old or the new one; a record carries the version of the code that wrote it, and other code never replays it.
+- **One task list.** `omp-botd`'s queue is the one list of work, each task queued, running, waiting, done or failed. A task waits when its bot asks you to decide, or when its turn ended with ompd jobs of its own still running. You answer a waiting task with one of three actions, approve, deny or bot handles it (`omp-bot-ctl approve|deny|handle ID [NOTE]`), and it is queued again with your answer.
+- **Heartbeats.** Each attempt at a task gets its own token. The bot checks in with it while it works; an attempt that misses three check-ins is expired and the task retried, and a check-in or report carrying an expired attempt's token is ignored.
+
 ## Not built yet
 
 - Triggers other than `omp-bot-ctl`: schedules and GitHub issues, with replies posted back where they came from.
