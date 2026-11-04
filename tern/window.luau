@@ -117,7 +117,7 @@ end
 local function mini(kind: string): string
 	local rows = SPRITES[kind]
 	local left = (18 - #rows[1]) // 2
-	local top = 18 - #rows
+	local top = (18 - #rows) // 2
 	local shadows: { string } = {}
 	for y, line in ipairs(rows) do
 		for x = 1, #line do
