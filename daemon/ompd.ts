@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { accessSync, appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ROOT, STATE } from "./paths";
@@ -23,6 +23,7 @@ export type Job = {
 	state: "queued" | "running" | "done" | "lost";
 	runs: number;
 	pid: number | null;
+	cgroup?: string | null;
 	killing: string | null;
 	created: number;
 	started: number | null;
@@ -68,11 +69,30 @@ export function request(message: Record<string, unknown>): Promise<any> {
 	});
 }
 
+function cgroupBase(): string | undefined {
+	let base = process.env.OMPD_CGROUP;
+	if (!base) {
+		const own = /^0::(\/.*)$/m.exec(readFileSync("/proc/self/cgroup", "utf8"))?.[1];
+		if (!own || own === "/") return undefined;
+		base = join("/sys/fs/cgroup", own, "..");
+	}
+	try {
+		accessSync(base, constants.W_OK);
+		accessSync(join(base, "cgroup.procs"), constants.W_OK);
+		const control = join(base, "cgroup.subtree_control");
+		if (!readFileSync(control, "utf8").split(/\s+/).includes("memory")) writeFileSync(control, "+memory");
+		return base;
+	} catch {
+		return undefined;
+	}
+}
+
 function serve() {
 	const memory = size(process.env.OMPD_JOB_MEMORY || "12G");
 	const total = Number(/MemTotal:\s+(\d+)/.exec(readFileSync("/proc/meminfo", "utf8"))?.[1] ?? 0) * 1024;
 	const slots = Number(process.env.OMPD_LEAN_SLOTS) || Math.max(1, Math.floor(total / 2 / memory));
-	const page = Number(Bun.spawnSync(["getconf", "PAGESIZE"]).stdout.toString().trim()) || 4096;
+	const base = cgroupBase();
+	const over = `killed for going over the ${Math.round(memory / 2 ** 20)} MiB a job may use`;
 	const jobs = new Map<string, Job>();
 	const watchers = new Map<string, Set<Socket>>();
 
@@ -113,8 +133,8 @@ function serve() {
 		}
 	}
 
-	function sessions(): Map<number, { pids: number[]; rss: number }> {
-		const out = new Map<number, { pids: number[]; rss: number }>();
+	function sessions(): Map<number, number[]> {
+		const out = new Map<number, number[]>();
 		for (const name of readdirSync("/proc")) {
 			if (!/^\d+$/.test(name)) continue;
 			let stat: string;
@@ -125,10 +145,7 @@ function serve() {
 			}
 			const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
 			const sid = Number(fields[3]);
-			const entry = out.get(sid) ?? { pids: [], rss: 0 };
-			entry.pids.push(Number(name));
-			entry.rss += Number(fields[21]) * page;
-			out.set(sid, entry);
+			out.set(sid, [...(out.get(sid) ?? []), Number(name)]);
 		}
 		return out;
 	}
@@ -139,11 +156,48 @@ function serve() {
 		job.killing = reason;
 		save(job);
 		log(`kill ${job.id}: ${reason}`);
-		for (const each of sessions().get(p)?.pids ?? []) {
+		if (job.cgroup) {
+			try {
+				return writeFileSync(join(job.cgroup, "cgroup.kill"), "1");
+			} catch {}
+		}
+		for (const each of sessions().get(p) ?? []) {
 			try {
 				process.kill(each, "SIGKILL");
 			} catch {}
 		}
+	}
+
+	function cgroup(job: Job): string | null {
+		if (!base) return null;
+		const path = join(base, `job-${job.id}`);
+		try {
+			if (existsSync(path)) rmdirSync(path);
+			mkdirSync(path);
+			writeFileSync(join(path, "memory.max"), String(memory));
+			if (existsSync(join(path, "memory.swap.max"))) writeFileSync(join(path, "memory.swap.max"), "0");
+			writeFileSync(join(path, "memory.oom.group"), "1");
+			return path;
+		} catch (error) {
+			log(`no cgroup for ${job.id}: ${error instanceof Error ? error.message : error}`);
+			return null;
+		}
+	}
+
+	function oomKilled(job: Job): boolean {
+		if (!job.cgroup) return false;
+		try {
+			return Number(/^oom_kill (\d+)$/m.exec(readFileSync(join(job.cgroup, "memory.events"), "utf8"))?.[1] ?? 0) > 0;
+		} catch {
+			return false;
+		}
+	}
+
+	function release(job: Job) {
+		if (!job.cgroup) return;
+		try {
+			rmdirSync(job.cgroup);
+		} catch {}
 	}
 
 	function deliver(job: Job) {
@@ -155,6 +209,7 @@ function serve() {
 	function finish(job: Job, patch: Partial<Job>) {
 		Object.assign(job, { ended: Date.now(), ...patch });
 		save(job);
+		release(job);
 		log(`${job.state} ${job.id} code ${job.code}${job.reason ? `: ${job.reason}` : ""}`);
 		deliver(job);
 		dispatch();
@@ -168,13 +223,14 @@ function serve() {
 		job.started = Date.now();
 		job.pid = null;
 		job.killing = null;
+		job.cgroup = cgroup(job);
 		save(job);
 		const env = JSON.parse(readFileSync(join(path, "env.json"), "utf8"));
 		const out = openSync(join(path, "log"), "a");
 		if (job.runs > 1) appendFileSync(join(path, "log"), `\n[ompd: run ${job.runs}, started again after the last run was lost]\n`);
 		try {
 			if (!existsSync(job.cwd)) throw new Error(`no directory ${job.cwd}`);
-			const proc = Bun.spawn(["setsid", join(ROOT, "bin", "ompd-job"), path], { cwd: job.cwd, env, stdin: "ignore", stdout: out, stderr: out });
+			const proc = Bun.spawn(["setsid", join(ROOT, "bin", "ompd-job"), path, ...(job.cgroup ? [job.cgroup] : [])], { cwd: job.cwd, env, stdin: "ignore", stdout: out, stderr: out });
 			proc.unref();
 			job.pid = proc.pid;
 			save(job);
@@ -209,10 +265,14 @@ function serve() {
 	function tend() {
 		const running = [...jobs.values()].filter(job => job.state === "running");
 		if (running.length === 0) return dispatch();
-		const procs = sessions();
 		for (const job of running) {
 			const up = alive(job);
 			const code = exitCode(job);
+			if (!job.killing && oomKilled(job)) {
+				job.killing = over;
+				save(job);
+				log(`kill ${job.id}: ${over}`);
+			}
 			if (code !== undefined) {
 				finish(job, { state: "done", code, reason: job.killing ?? null });
 				continue;
@@ -222,10 +282,7 @@ function serve() {
 				else lost(job, "its processes ended without recording an exit status (killed, or the machine restarted)");
 				continue;
 			}
-			const p = pid(job)!;
-			const rss = procs.get(p)?.rss ?? 0;
-			if (rss > memory) kill(job, `killed for using ${Math.round(rss / 2 ** 20)} MiB, over the ${Math.round(memory / 2 ** 20)} MiB a job may use`);
-			else if (job.timeout > 0 && Date.now() - (job.started ?? 0) > job.timeout * 1000) kill(job, `killed after its ${job.timeout}s timeout`);
+			if (job.timeout > 0 && Date.now() - (job.started ?? 0) > job.timeout * 1000) kill(job, `killed after its ${job.timeout}s timeout`);
 		}
 		dispatch();
 	}
@@ -260,6 +317,7 @@ function serve() {
 			state: "queued",
 			runs: 0,
 			pid: null,
+			cgroup: null,
 			killing: null,
 			created: Date.now(),
 			started: null,
@@ -354,7 +412,7 @@ function serve() {
 		});
 	});
 	server.listen(SOCKET, () => {
-		log(`listening on ${SOCKET}, ${slots} Lean slots, ${Math.round(memory / 2 ** 30)} GiB per job`);
+		log(`listening on ${SOCKET}, ${slots} Lean slots, ${base ? `${Math.round(memory / 2 ** 20)} MiB per job, each in its own cgroup under ${base}` : "no cgroup to write, so jobs run without a memory limit"}`);
 		tend();
 		setInterval(tend, POLL_MS);
 	});

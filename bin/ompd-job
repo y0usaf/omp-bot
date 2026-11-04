@@ -1,4 +1,9 @@
 #!/bin/sh
+if [ -n "${2:-}" ] && ! printf '%s' "$$" >"$2/cgroup.procs"; then
+	echo "[ompd: could not enter the job's cgroup $2]"
+	printf '125\n' >"$1/exit.tmp" && mv -f "$1/exit.tmp" "$1/exit"
+	exit 125
+fi
 printf '%s' "$$" >"$1/pid.tmp" && mv -f "$1/pid.tmp" "$1/pid"
 bash -c "$(cat "$1/command")" </dev/null
 code=$?
