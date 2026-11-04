@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { dir, type Job, load, request, SOCKET, V } from "../daemon/ompd";
@@ -89,6 +89,17 @@ async function call(message: Record<string, unknown>): Promise<any> {
 let owner: string | undefined;
 const cut = new Set<string>();
 const awaited = new Set<string>();
+const sent = new Set<string>();
+
+function exited(job: Job): Job | undefined {
+	if (job.state === "done" || job.state === "lost") return job;
+	try {
+		const text = readFileSync(join(dir(job.id), "exit"), "utf8").trim();
+		return text === "" ? undefined : { ...job, state: "done", code: Number(text), ended: Date.now() };
+	} catch {
+		return undefined;
+	}
+}
 
 function ownerOf(ctx): string {
 	if (owner) return owner;
@@ -108,7 +119,7 @@ export default function ompd(pi) {
 	}
 
 	async function ended(job: Job) {
-		if (awaited.has(job.id)) return;
+		if (awaited.has(job.id) || load(job.id)?.delivered) return;
 		if (job.tool && cut.has(job.tool)) {
 			main.setTimeout(() => {
 				cut.delete(job.tool!);
@@ -117,7 +128,8 @@ export default function ompd(pi) {
 			}, 30_000);
 			return;
 		}
-		if (!delivered(job.id)) {
+		if (!sent.has(job.id) && !delivered(job.id)) {
+			sent.add(job.id);
 			pi.sendMessage({ customType: "ompd-job", content: report(job), display: true, details: { id: job.id } }, { deliverAs: "followUp", triggerTurn: true });
 		}
 		await call({ op: "ack", id: job.id });
@@ -209,14 +221,16 @@ export default function ompd(pi) {
 				const deadline = params.async ? 0 : Date.now() + FOREGROUND_S * 1000;
 				let shown = "";
 				for (;;) {
-					const now = load(job.id) ?? job;
-					if (now.state === "done" || now.state === "lost") {
+					const now = exited(load(job.id) ?? job);
+					if (now) {
 						await call({ op: "ack", id: job.id });
 						const out = tail(job.id).trimEnd() || "(no output)";
 						if (failed(now)) throw new Error(`${out}\n\n[${outcome(now)}]`);
 						return { content: [{ type: "text", text: out }], details: { job: job.id } };
 					}
 					if (signal?.aborted || Date.now() >= deadline) {
+						const last = exited(load(job.id) ?? job);
+						if (last) continue;
 						pi.events.emit("ompd:background", { id: job.id });
 						const why = signal?.aborted ? "Stopped waiting" : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
 						const out = tail(job.id, 4096).trimEnd();
@@ -230,7 +244,7 @@ export default function ompd(pi) {
 						shown = out;
 						onUpdate?.({ content: [{ type: "text", text: out }], details: { job: job.id } });
 					}
-					await Bun.sleep(250);
+					await Bun.sleep(100);
 				}
 			} finally {
 				awaited.delete(job.id);

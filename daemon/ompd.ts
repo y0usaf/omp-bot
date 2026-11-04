@@ -22,6 +22,8 @@ export type Job = {
 	lean: boolean;
 	state: "queued" | "running" | "done" | "lost";
 	runs: number;
+	pid: number | null;
+	killing: string | null;
 	created: number;
 	started: number | null;
 	ended: number | null;
@@ -73,7 +75,6 @@ function serve() {
 	const page = Number(Bun.spawnSync(["getconf", "PAGESIZE"]).stdout.toString().trim()) || 4096;
 	const jobs = new Map<string, Job>();
 	const watchers = new Map<string, Set<Socket>>();
-	const killed = new Map<string, string>();
 
 	function log(line: string) {
 		console.log(`${new Date().toISOString()} ${line}`);
@@ -87,9 +88,9 @@ function serve() {
 
 	function pid(job: Job): number | undefined {
 		try {
-			return Number(readFileSync(join(dir(job.id), "pid"), "utf8")) || undefined;
+			return Number(readFileSync(join(dir(job.id), "pid"), "utf8")) || job.pid || undefined;
 		} catch {
-			return undefined;
+			return job.pid || undefined;
 		}
 	}
 
@@ -135,7 +136,8 @@ function serve() {
 	function kill(job: Job, reason: string) {
 		const p = pid(job);
 		if (!p || !alive(job)) return;
-		killed.set(job.id, reason);
+		job.killing = reason;
+		save(job);
 		log(`kill ${job.id}: ${reason}`);
 		for (const each of sessions().get(p)?.pids ?? []) {
 			try {
@@ -145,6 +147,7 @@ function serve() {
 	}
 
 	function deliver(job: Job) {
+		if (job.delivered) return;
 		const { env: _env, ...shown } = job as Job & { env?: unknown };
 		for (const socket of watchers.get(job.owner) ?? []) if (!socket.destroyed) socket.write(`${JSON.stringify({ event: "ended", job: shown })}\n`);
 	}
@@ -163,6 +166,8 @@ function serve() {
 		job.state = "running";
 		job.runs += 1;
 		job.started = Date.now();
+		job.pid = null;
+		job.killing = null;
 		save(job);
 		const env = JSON.parse(readFileSync(join(path, "env.json"), "utf8"));
 		const out = openSync(join(path, "log"), "a");
@@ -171,6 +176,8 @@ function serve() {
 			if (!existsSync(job.cwd)) throw new Error(`no directory ${job.cwd}`);
 			const proc = Bun.spawn(["setsid", join(ROOT, "bin", "ompd-job"), path], { cwd: job.cwd, env, stdin: "ignore", stdout: out, stderr: out });
 			proc.unref();
+			job.pid = proc.pid;
+			save(job);
 			log(`start ${job.id} run ${job.runs}${job.lean ? " (lean)" : ""}: ${job.command.slice(0, 120)}`);
 		} catch (error) {
 			finish(job, { state: "done", code: null, reason: `could not start: ${error instanceof Error ? error.message : error}` });
@@ -207,15 +214,12 @@ function serve() {
 			const up = alive(job);
 			const code = exitCode(job);
 			if (code !== undefined) {
-				finish(job, { state: "done", code, reason: killed.get(job.id) ?? null });
-				killed.delete(job.id);
+				finish(job, { state: "done", code, reason: job.killing ?? null });
 				continue;
 			}
 			if (!up) {
-				if (killed.has(job.id)) {
-					finish(job, { state: "done", code: null, reason: killed.get(job.id)! });
-					killed.delete(job.id);
-				} else if (Date.now() - (job.started ?? 0) > 5_000 || pid(job)) lost(job, "its processes ended without recording an exit status (killed, or the machine restarted)");
+				if (job.killing) finish(job, { state: "done", code: null, reason: job.killing });
+				else lost(job, "its processes ended without recording an exit status (killed, or the machine restarted)");
 				continue;
 			}
 			const p = pid(job)!;
@@ -255,6 +259,8 @@ function serve() {
 			lean,
 			state: "queued",
 			runs: 0,
+			pid: null,
+			killing: null,
 			created: Date.now(),
 			started: null,
 			ended: null,
