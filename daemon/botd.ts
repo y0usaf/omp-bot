@@ -49,6 +49,7 @@ const q = {
 	answer: db.query("UPDATE tasks SET state = 'queued', attempts = 0, answer = $answer, wait = NULL, seen = 1, updated = $now WHERE id = $id AND state = 'waiting' AND wait = 'decision'"),
 	silent: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state = 'done' AND trim(result) = $silent"),
 	silentHeld: db.query<Task, { before: number }>(`SELECT * FROM tasks WHERE ${HELD} AND beat < $before`),
+	held: db.query<Task, []>(`SELECT * FROM tasks WHERE ${HELD}`),
 	grace: db.query(`UPDATE tasks SET beat = $now WHERE ${HELD}`),
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
 	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
@@ -65,10 +66,19 @@ const memoryRetry = new Map<string, number>();
 const restarts = new Map<string, { now: boolean }>();
 const respawn = new Set<string>();
 const dying = new Map<string, number>();
+const resumes = new Map<string, number>();
 let draining = false;
 
 function log(line: string) {
 	console.log(`${new Date().toISOString()} ${line}`);
+}
+
+function savedTask(bot: string): { id?: string; mode?: string } | undefined {
+	try {
+		return JSON.parse(readFileSync(join(STATE, "bots", bot, "task.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
 }
 
 function roster(): Set<string> {
@@ -261,12 +271,18 @@ function dropLink(link: Link, reason: string) {
 	if (links.get(link.bot) !== link) return;
 	links.delete(link.bot);
 	if (link.mode === "tui" && link.pid) dying.set(link.bot, link.pid);
-	if (link.task && link.mode === "tui" && !link.closing) {
+	if (link.task && !link.closing && (link.mode === "tui" || (resumes.get(link.task) ?? 0) < MAX_ATTEMPTS)) {
 		const { task: id, token } = link;
-		hold(link.bot);
+		if (link.mode === "tui") hold(link.bot);
+		else {
+			resumes.set(id, (resumes.get(id) ?? 0) + 1);
+			respawn.add(link.bot);
+			setTimeout(() => children.has(link.bot) || ensureRunning(link.bot, respawn.delete(link.bot)), 0);
+		}
 		log(`keep ${id} for ${link.bot} to resume: ${reason}`);
 		setTimeout(() => {
 			if (links.get(link.bot)?.task === id) return;
+			resumes.delete(id);
 			if (!q.release.run({ id, token: token ?? null, error: `${reason}, and ${link.bot} did not come back to resume it`, max: MAX_ATTEMPTS, now: Date.now() }).changes) return;
 			log(`release ${id} from ${link.bot}: not resumed`);
 			dispatch(link.bot);
@@ -360,6 +376,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (!link) return;
 			if (!q.finish.run({ id: message.id, token: String(message.token ?? ""), result: String(message.result ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
 			q.silent.run({ id: message.id, silent: SILENT });
+			resumes.delete(message.id);
 			if (link.task === message.id) link.task = link.token = undefined;
 			log(`done ${message.id} by ${link.bot}`);
 			replyToOrigin(message.id);
@@ -369,6 +386,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			const link = self.link;
 			if (!link) return;
 			if (!q.release.run({ id: message.id, token: String(message.token ?? ""), error: String(message.error ?? "failed"), max: message.final ? 0 : MAX_ATTEMPTS, now: Date.now() }).changes) return stale(socket, link, message);
+			resumes.delete(message.id);
 			if (link.task === message.id) link.task = link.token = undefined;
 			log(`fail ${message.id} by ${link.bot}: ${message.error}`);
 			replyToOrigin(message.id);
@@ -497,6 +515,10 @@ const server = createServer(socket => {
 server.listen(SOCKET, () => {
 	log(`listening on ${SOCKET}`);
 	for (const { bot } of q.queuedBots.all()) ensureRunning(bot);
+	for (const task of q.held.all()) {
+		const saved = savedTask(task.bot);
+		if (saved?.id === task.id && saved.mode === "headless") ensureRunning(task.bot, true);
+	}
 	tendMemory();
 	setInterval(tendMemory, MEMORY_POLL_MS);
 	setInterval(expire, HEARTBEAT_MS / 2);

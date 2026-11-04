@@ -8,7 +8,7 @@ const RESUME_GRACE_MS = 30_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
-type Task = { id: string; attempt: number; token: string; jobs: string[]; question?: string };
+type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string };
 
 function prompt(task) {
 	const lines = [`[omp-bot task ${task.id}, attempt ${task.attempt}${task.origin ? `, from ${task.origin}` : ""}${task.answer ? ", your question answered" : ""}]`, "", task.text];
@@ -34,7 +34,7 @@ export default function core(pi) {
 	let socket: Socket | undefined;
 	let ctx;
 	const taskFile = join(STATE, "bots", name, "task.json");
-	let current: Task | undefined = mode === "tui" ? saved() : undefined;
+	let current: Task | undefined = saved();
 	let since = Date.now();
 	let started = false;
 	let readySent = false;
@@ -57,7 +57,7 @@ export default function core(pi) {
 		if (task !== current) since = Date.now();
 		current = task;
 		if (!task) return rmSync(taskFile, { force: true });
-		writeFileSync(`${taskFile}.tmp`, JSON.stringify(task));
+		writeFileSync(`${taskFile}.tmp`, JSON.stringify({ ...task, mode }));
 		renameSync(`${taskFile}.tmp`, taskFile);
 	}
 
@@ -175,9 +175,19 @@ export default function core(pi) {
 		if (c.agent?.kind === "sub" || ctx) return;
 		ctx = c;
 		dial();
+		if (mode === "headless") c.setTimeout(() => void restore().catch(error => console.error(`omp-bot: could not restore the interrupted turn: ${error instanceof Error ? error.message : error}`)), 1000);
 		c.setInterval(tick, 1000);
 		c.setInterval(() => report({ op: "beat" }), HEARTBEAT_MS);
 	});
+
+	async function restore() {
+		const { AgentRegistry, MAIN_AGENT_ID } = await import("@oh-my-pi/pi-coding-agent/registry/agent-registry");
+		const { restoreSession } = await import("@oh-my-pi/pi-coding-agent/task/restore");
+		const session = AgentRegistry.global().get(MAIN_AGENT_ID)?.session;
+		if (!session) return;
+		const { turn, subagents } = await restoreSession(session);
+		if (turn || subagents.length) console.error(`omp-bot: restored the interrupted turn${subagents.length ? ` and ${subagents.length} subagents` : ""}`);
+	}
 
 	pi.on("session_shutdown", async () => {
 		stopped = true;
