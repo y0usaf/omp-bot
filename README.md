@@ -23,8 +23,8 @@ The Tern plugin sends two things to the daemon as they happen: a command that ex
 
 ```json
 {"rules": [
-  {"name": "failed-command", "kind": "command_finished", "when": {"status": "nonzero", "cwd": "~/dev"}, "bot": "Dev", "mandate": "diagnose"},
-  {"name": "agent-done", "kind": "agent_finished", "bot": "Dev", "mandate": "review"}
+  {"name": "failed-command", "kind": "command_finished", "when": {"status": "nonzero", "cwd": "~/dev"}, "bot": "Lloyd", "mandate": "diagnose"},
+  {"name": "agent-done", "kind": "agent_finished", "bot": "Lloyd", "mandate": "review"}
 ]}
 ```
 
@@ -52,7 +52,7 @@ flowchart LR
 - **Delivery is at least once, not exactly once.** A task is retried, up to 3 attempts, when its bot crashes, the model request fails or `omp-botd` restarts mid-task. A crash after a bot acted but before it reported back repeats the task, so each task carries its ID and attempt number. A retry is told to check what the earlier attempt did, and bots tag anything they post outside the conversation with `omp-bot:ID`. A task stopped by hand in Tern fails without a retry. Queuing the same `--key` twice queues it once.
 - **Bots asking bots.** Bots other than the chief of staff are told they can ask another bot with `omp-bot-ctl task`. A task queued with `--origin bot:NAME` answers that bot instead of your inbox: when it finishes or finally fails, its result is queued to `NAME` as a new task marked `reply:` with the answering bot's name, keyed so it arrives once. A reply never triggers another reply, so two bots can't loop.
 - **Attention.** A bot that has nothing worth your attention replies exactly "Nothing to report.", and that result skips the inbox.
-- **Prompt.** `omp/prompt.ts` adds each bot's identity to the end of omp's system prompt: its name, lane and persona as its voice, the roster, when to act, when to speak and how to ask for a decision, with live chat and background tasks told apart. A bot whose role is "Chief of staff" also triages: it does quick work itself, names the bot and the `omp-bot-ctl task` brief for the rest, and reads the inbox to tell you what waits on you. `omp/demo.yml` sets omp's personality to `none` so the persona sets the tone.
+- **Prompt.** `omp/prompt.ts` adds each bot's identity to the end of omp's system prompt: its name, lane and persona as its voice, the roster, when to act, how to see an ask through and keep its loops closed, when to speak and how to ask for a decision, with live chat and background tasks told apart. A bot whose role is "Chief of staff" also triages: it does quick work itself, names the bot and the `omp-bot-ctl task` brief for the rest, and reads the inbox to tell you what waits on you. `omp/demo.yml` sets omp's personality to `none` so the persona sets the tone.
 - **Removal.** Removing a bot stops its whole background process group mid-task and holds the bot's lock while it archives the conversation.
 - **Sleep.** A background bot stops after 5 idle minutes (`OMP_BOT_IDLE_EXIT_MS`). A bot is never killed mid-task to sleep.
 - **Stopping the daemon.** On SIGTERM or SIGINT `omp-botd` drains: it leases no new task and starts no bot, stops idle background bots, lets each busy one finish its task and then stops it, and exits once none is left, or after `OMP_BOT_DRAIN_MS` (120 s) by stopping them mid-task, whose tasks are retried. A second signal stops it at once. Bots in Tern tabs keep running and reconnect when it is back. The service manager must wait longer than the drain before it kills the daemon: finix's `omp-botd` service needs a `stop-timeout` above 120 s.
