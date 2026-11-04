@@ -1,7 +1,10 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
-import { SOCKET } from "../daemon/paths";
+import { join } from "node:path";
+import { SOCKET, STATE } from "../daemon/paths";
 import { identity } from "./prompt";
+
+const RESUME_GRACE_MS = 30_000;
 
 function prompt(task) {
 	const lines = [`[omp-bot task ${task.id}, attempt ${task.attempt}${task.origin ? `, from ${task.origin}` : ""}]`, "", task.text];
@@ -24,7 +27,9 @@ export default function core(pi) {
 	const mode = process.env.OMP_BOT_HEADLESS === "1" ? "headless" : "tui";
 	let socket: Socket | undefined;
 	let ctx;
-	let current: { id: string; attempt: number } | undefined;
+	const taskFile = join(STATE, "bots", name, "task.json");
+	let current: { id: string; attempt: number } | undefined = mode === "tui" ? saved() : undefined;
+	let since = Date.now();
 	let started = false;
 	let readySent = false;
 	let refused = false;
@@ -32,6 +37,23 @@ export default function core(pi) {
 	const until = Number(process.env.OMP_UNTIL) || 0;
 
 	pi.setLabel("Bot core");
+
+	function saved() {
+		try {
+			const task = JSON.parse(readFileSync(taskFile, "utf8"));
+			return typeof task?.id === "string" ? { id: task.id, attempt: Number(task.attempt) || 1 } : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	function keep(task) {
+		current = task;
+		since = Date.now();
+		if (!task) return rmSync(taskFile, { force: true });
+		writeFileSync(`${taskFile}.tmp`, JSON.stringify(task));
+		renameSync(`${taskFile}.tmp`, taskFile);
+	}
 
 	function send(message) {
 		if (socket && !socket.destroyed) socket.write(`${JSON.stringify(message)}\n`);
@@ -41,13 +63,17 @@ export default function core(pi) {
 		stopped = true;
 		if (mode === "tui" && process.env.OMP_BOT_RELAUNCH) writeFileSync(process.env.OMP_BOT_RELAUNCH, "");
 		if (now && !ctx.isIdle()) {
-			current = undefined;
+			keep(undefined);
 			ctx.abort();
 		}
 		ctx.shutdown();
 	}
 
 	function tick() {
+		if (socket && current && !started && ctx?.isIdle() && !ctx.hasPendingMessages() && Date.now() - since > RESUME_GRACE_MS) {
+			send({ op: "fail", id: current.id, error: "the bot restarted before its turn ran" });
+			keep(undefined);
+		}
 		if (until && !stopped && Date.now() >= until && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) return restart(false);
 		if (!socket || current || readySent || !ctx?.isIdle() || ctx.hasPendingMessages()) return;
 		readySent = true;
@@ -58,6 +84,7 @@ export default function core(pi) {
 		switch (message.op) {
 			case "welcome":
 				readySent = false;
+				if (current && message.task !== current.id) keep(undefined);
 				return;
 			case "refused":
 				refused = true;
@@ -67,14 +94,14 @@ export default function core(pi) {
 				restart(message.now);
 				return;
 			case "task":
-				current = { id: message.id, attempt: message.attempt };
+				keep({ id: message.id, attempt: message.attempt });
 				started = false;
 				readySent = false;
 				try {
 					pi.sendUserMessage(prompt(message));
 				} catch (error) {
-					send({ op: "fail", id: current.id, error: `could not start: ${error instanceof Error ? error.message : error}` });
-					current = undefined;
+					send({ op: "fail", id: message.id, error: `could not start: ${error instanceof Error ? error.message : error}` });
+					keep(undefined);
 				}
 				return;
 		}
@@ -137,13 +164,13 @@ export default function core(pi) {
 	});
 
 	pi.on("agent_end", async (event, c) => {
-		if (c.agent?.kind === "sub" || event.willContinue || !current || !started) return;
+		if (c.agent?.kind === "sub" || event.willContinue || !current || !started || stopped) return;
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
 		if (reason === "aborted") send({ op: "fail", id: current.id, error: "stopped by the user", final: true });
 		else if (reason === "error") send({ op: "fail", id: current.id, error: final?.errorMessage || "the model request failed" });
 		else send({ op: "done", id: current.id, result: textOf(final) });
-		current = undefined;
+		keep(undefined);
 		started = false;
 	});
 }

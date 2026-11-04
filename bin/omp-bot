@@ -40,7 +40,6 @@ cd "${cwd:-$HOME}"
 export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
-set -- --continue "$@"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
 [ -z "${OMP_BOT_CWD_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CWD_EXTENSION" "$@"
 [ -z "${OMP_BOT_SECRETS_EXTENSION:-}" ] || set -- -e "$OMP_BOT_SECRETS_EXTENSION" "$@"
@@ -63,10 +62,10 @@ optchat)
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
+set -- -e "$root/omp/core.ts" -e "$root/omp/ompd.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
-	exec flock -n -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" --mode rpc --no-ui "$@"
+	exec flock -n -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" --mode rpc --no-ui --continue "$@"
 fi
 "$root/bin/omp-bot-ctl" claim "$name" || true
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
@@ -74,7 +73,8 @@ rm -f "$OMP_BOT_RELAUNCH"
 waiting=
 while :; do
 	code=0
-	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" "$@" || code=$?
+	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
+	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "${OMP_BIN:-omp}" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
 	[ "$code" = 213 ] || break
 	holder=$("$root/bin/omp-bot-ctl" holder "$name" 2>/dev/null) || holder=none
 	case $holder in

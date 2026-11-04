@@ -248,7 +248,17 @@ function dropLink(link: Link, reason: string) {
 	if (links.get(link.bot) !== link) return;
 	links.delete(link.bot);
 	if (link.mode === "tui" && link.pid) dying.set(link.bot, link.pid);
-	if (link.task) {
+	if (link.task && link.mode === "tui" && !link.closing) {
+		const id = link.task;
+		hold(link.bot);
+		log(`keep ${id} for ${link.bot} to resume: ${reason}`);
+		setTimeout(() => {
+			if (links.get(link.bot)?.task === id) return;
+			q.release.run({ id, error: `${reason}, and ${link.bot} did not come back to resume it`, max: MAX_ATTEMPTS, now: Date.now() });
+			log(`release ${id} from ${link.bot}: not resumed`);
+			dispatch(link.bot);
+		}, CLAIM_MS);
+	} else if (link.task) {
 		q.release.run({ id: link.task, error: reason, max: MAX_ATTEMPTS, now: Date.now() });
 		log(`release ${link.task} from ${link.bot}: ${reason}`);
 	}
