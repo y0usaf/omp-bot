@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+box=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/box.env
+[ -r "$box" ] || { echo "there is no box: $box is missing"; exit 1; }
+. "$box"
+[ -n "${OMP_BOT_BOX_SSH_CONFIG:-}" ] || { echo "OMP_BOT_BOX_SSH_CONFIG is unset in $box"; exit 1; }
+state() {
+	[ -n "${OMP_BOT_BOX_STATUS:-}" ] && [ -r "$OMP_BOT_BOX_STATUS" ] || return 0
+	jq -r 'select(.state != "up") | "it is \(.state) after \(.failures) failed starts: \(.reason // "no reason given")"' "$OMP_BOT_BOX_STATUS" 2>/dev/null || true
+}
+if out=$(timeout 20 ssh -F "$OMP_BOT_BOX_SSH_CONFIG" -o ConnectTimeout=5 -T box 'echo ok' 2>&1) && [ "$out" = ok ]; then exit 0; fi
+out=${out//$'\r'/}
+why=$(state)
+[ -n "$why" ] || why="it does not answer over ssh${out:+ (${out##*$'\n'})}"
+echo "$why"
+exit 1

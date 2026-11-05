@@ -11,6 +11,7 @@ tag=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._-')
 cache=$HOME/.cache/omp-bot/box
 sock=$cache/run/$tag.sock
 ssh=(ssh -F "$OMP_BOT_BOX_SSH_CONFIG")
+why=$("$root/bin/omp-bot-health") || { echo "omp-bot-box: $name can't start because its box is down: $why" >&2; exit 1; }
 
 # Share the bot's folder and its persist paths into the box, at the same paths. A path the persist hook
 # has just mounted is shared again, so the box sees the persisted folder instead of the one it replaced.

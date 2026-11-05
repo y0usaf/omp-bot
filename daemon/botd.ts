@@ -13,12 +13,16 @@ const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const MEMORY_POLL_MS = Number(process.env.OMP_BOT_MEMORY_POLL_MS) || 5_000;
 const MEMORY_RETRY_MS = 60_000;
 const DRAIN_MS = Number(process.env.OMP_BOT_DRAIN_MS) || 120_000;
+const MAX_STARTS = Number(process.env.OMP_BOT_MAX_STARTS) || 3;
+const HEALTH_MS = Number(process.env.OMP_BOT_HEALTH_MS) || 60_000;
+const HEALTH_TIMEOUT_MS = 30_000;
 const SILENT = "Nothing to report.";
 const ACTIONS = { approve: "approved", deny: "denied", handle: "left it to you to decide" } as const;
 
 type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number; token: string | null; beat: number | null; wait: string | null; question: string | null; answer: string | null };
 type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; token?: string; closing?: boolean };
-type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout> };
+type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout>; hello?: boolean; tail: string };
+type Down = { reason: string; since: number; cause: "start" | "box" };
 
 mkdirSync(join(STATE, "logs"), { recursive: true });
 const db = new Database(join(STATE, "tasks.db"), { create: true, strict: true });
@@ -56,6 +60,9 @@ const q = {
 	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
 	ack: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state IN ('done', 'failed')"),
 	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('queued', 'running', 'waiting')"),
+	queued: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued'"),
+	drop: db.query("UPDATE tasks SET state = 'failed', error = $error, updated = $now WHERE id = $id AND state = 'queued'"),
+	notice: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, result, error, created, updated) VALUES ($id, $bot, $key, $text, 'botd', $state, $result, $error, $now, $now)"),
 };
 
 const links = new Map<string, Link>();
@@ -68,6 +75,9 @@ const restarts = new Map<string, { now: boolean }>();
 const respawn = new Set<string>();
 const dying = new Map<string, number>();
 const resumes = new Map<string, number>();
+const down = new Map<string, Down>();
+const startFails = new Map<string, number>();
+let boxHealthy: boolean | undefined;
 let draining = false;
 
 function log(line: string) {
@@ -79,6 +89,70 @@ function savedTask(bot: string): { id?: string; mode?: string } | undefined {
 		return JSON.parse(readFileSync(join(STATE, "bots", bot, "task.json"), "utf8"));
 	} catch {
 		return undefined;
+	}
+}
+
+function boxed(): string[] {
+	try {
+		return (JSON.parse(readFileSync(ROSTER, "utf8")) as Array<{ name: string; box?: boolean }>).filter(bot => bot.box === true).map(bot => bot.name);
+	} catch {
+		return [];
+	}
+}
+
+function lastLine(text: string): string {
+	return text.split("\n").map(line => line.trim()).filter(Boolean).at(-1) ?? "";
+}
+
+function markDown(bot: string, reason: string, cause: Down["cause"]) {
+	const was = down.get(bot);
+	if (was && (was.cause === cause || was.cause === "box")) return;
+	const now = Date.now();
+	down.set(bot, { reason, since: now, cause });
+	log(`down ${bot}: ${reason}`);
+	q.notice.run({ id: Bun.randomUUIDv7(), bot, key: `down-${bot}-${now}`, text: `${bot} is down`, state: "failed", result: null, error: reason, now });
+	for (const task of q.queued.all({ bot })) {
+		q.drop.run({ id: task.id, error: `${bot} is down: ${reason}`, now });
+		log(`drop ${task.id} for ${bot}: down`);
+		replyToOrigin(task.id);
+	}
+}
+
+function clearDown(bot: string, why: string, announce = true) {
+	startFails.delete(bot);
+	const was = down.get(bot);
+	if (!was) return;
+	down.delete(bot);
+	const now = Date.now();
+	log(`up ${bot}: ${why}`);
+	if (announce) q.notice.run({ id: Bun.randomUUIDv7(), bot, key: `up-${bot}-${now}`, text: `${bot} is back`, state: "done", result: `${bot} is back (${why}); it was down since ${new Date(was.since).toISOString()}: ${was.reason}`, error: null, now });
+}
+
+let probing = false;
+async function checkHealth() {
+	const bots = boxed();
+	if (probing || draining || bots.length === 0) return;
+	probing = true;
+	try {
+		const proc = Bun.spawn([join(ROOT, "bin", "omp-bot-health")], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+		const timer = setTimeout(() => proc.kill("SIGKILL"), HEALTH_TIMEOUT_MS);
+		const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+		clearTimeout(timer);
+		const healthy = code === 0;
+		const reason = lastLine(out) || lastLine(err) || (proc.signalCode ? `health check timed out after ${HEALTH_TIMEOUT_MS / 1000}s` : `health check exited ${code}`);
+		if (healthy !== boxHealthy) log(`box ${healthy ? "healthy" : `unhealthy: ${reason}`}`);
+		for (const bot of bots) {
+			if (!healthy) {
+				if (!links.has(bot)) markDown(bot, `its box is down: ${reason}`, "box");
+			}
+			else if (down.get(bot)?.cause === "box" || (boxHealthy === false && down.has(bot))) {
+				clearDown(bot, "its box answers again");
+				dispatch(bot);
+			}
+		}
+		boxHealthy = healthy;
+	} finally {
+		probing = false;
 	}
 }
 
@@ -174,7 +248,7 @@ function dispatch(bot: string) {
 }
 
 function ensureRunning(bot: string, force = false) {
-	if (draining || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
+	if (draining || down.has(bot) || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
 	const wait = (lastSpawn.get(bot) ?? 0) + RESPAWN_MS - Date.now();
 	if (wait > 0) {
 		setTimeout(() => ensureRunning(bot, force), wait);
@@ -184,19 +258,31 @@ function ensureRunning(bot: string, force = false) {
 	const logFile = join(STATE, "logs", `${bot}.log`);
 	appendFileSync(logFile, `\n=== ${new Date().toISOString()} headless start\n`);
 	const proc = Bun.spawn(["setsid", join(ROOT, "bin", "omp-bot"), bot, "--headless"], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
-	const child: Child = { proc };
+	const child: Child = { proc, tail: "" };
 	children.set(bot, child);
 	log(`spawn ${bot} pid ${proc.pid}`);
-	(async () => {
-		for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) appendFileSync(logFile, chunk);
+	const decoder = new TextDecoder();
+	const output = (async () => {
+		for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) {
+			appendFileSync(logFile, chunk);
+			child.tail = (child.tail + decoder.decode(chunk, { stream: true })).slice(-4000);
+		}
 	})().catch(() => {});
-	proc.exited.then(code => {
+	proc.exited.then(async code => {
+		await output;
 		clearTimeout(child.idleTimer);
 		if (children.get(bot) === child) children.delete(bot);
 		log(`exit ${bot} pid ${proc.pid} code ${code}`);
 		const link = links.get(bot);
 		if (link?.mode === "headless") dropLink(link, `headless exited with ${code}`);
 		settleClaim(bot);
+		if (!child.hello && code !== 0 && !draining) {
+			const fails = (startFails.get(bot) ?? 0) + 1;
+			startFails.set(bot, fails);
+			const why = lastLine(child.tail) || `exit code ${code}`;
+			log(`start ${bot} failed (${fails} of ${MAX_STARTS}): ${why}`);
+			if (fails >= MAX_STARTS) markDown(bot, `it failed to start ${fails} times in a row: ${why}`, "start");
+		}
 		ensureRunning(bot, respawn.delete(bot));
 	});
 }
@@ -325,6 +411,8 @@ function expire() {
 function enqueue(message: { bot?: string; text?: string; key?: string; origin?: string }) {
 	if (!message.bot || !roster().has(message.bot)) throw new Error(`no bot named ${message.bot}`);
 	if (!message.text?.trim()) throw new Error("empty task");
+	const isDown = down.get(message.bot);
+	if (isDown) throw new Error(`${message.bot} is down: ${isDown.reason} (omp-bot-ctl restart ${message.bot} to try again)`);
 	const id = Bun.randomUUIDv7();
 	const key = message.key || id;
 	q.insert.run({ id, bot: message.bot, key, text: message.text, origin: message.origin ?? null, now: Date.now() });
@@ -356,6 +444,9 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			self.link = link;
 			if (link.mode === "tui") claims.delete(link.bot);
 			dying.delete(link.bot);
+			const child = children.get(link.bot);
+			if (child && link.mode === "headless") child.hello = true;
+			clearDown(link.bot, `it connected (${link.mode})`);
 			if (draining && link.mode === "headless") link.closing = true;
 			if (message.task && q.resume.run({ id: String(message.task), token: String(message.token ?? ""), now: Date.now() }).changes) {
 				link.task = message.task;
@@ -445,7 +536,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "status":
 			return send(socket, {
 				ok: true,
-				bots: [...roster()].map(bot => ({ bot, link: links.get(bot)?.mode ?? null, task: links.get(bot)?.task ?? null, headless: children.get(bot)?.proc.pid ?? null })),
+				bots: [...roster()].map(bot => ({ bot, link: links.get(bot)?.mode ?? null, task: links.get(bot)?.task ?? null, headless: children.get(bot)?.proc.pid ?? null, down: down.get(bot) ?? null })),
 			});
 		case "retire": {
 			const bot = message.bot;
@@ -465,6 +556,11 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "restart": {
 			const bot = message.bot;
 			if (!roster().has(bot)) throw new Error(`no bot named ${bot}`);
+			if (down.has(bot)) {
+				clearDown(bot, "restart requested", false);
+				ensureRunning(bot, true);
+				return send(socket, { ok: true, state: "retrying" });
+			}
 			if (!links.has(bot) && !children.has(bot)) return send(socket, { ok: true, state: "asleep" });
 			const now = Boolean(message.now) || restarts.get(bot)?.now === true;
 			restarts.set(bot, { now });
@@ -532,6 +628,8 @@ server.listen(SOCKET, () => {
 	tendMemory();
 	setInterval(tendMemory, MEMORY_POLL_MS);
 	setInterval(expire, HEARTBEAT_MS / 2);
+	void checkHealth();
+	setInterval(() => void checkHealth(), HEALTH_MS);
 });
 
 function stop() {

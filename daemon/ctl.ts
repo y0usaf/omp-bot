@@ -8,8 +8,8 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   ack ID                                        acknowledge an inbox task
   approve|deny|handle ID [NOTE]                 answer a task waiting on your decision: approve, deny, or let its bot decide
   board                                         the task board's JSON: every decision waiting on you, the work in progress, the newest finished tasks
-  status                                        which bots are connected, and how
-  restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task)
+  status [--json]                               which bots are connected, and how, and which are down and why
+  restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task); a down BOT tries to start again
   claim BOT                                     wait until BOT's headless run has stopped
   holder BOT                                    what holds BOT's lock: tui PID, dying PID, headless PID or none
   event JSON                                    record a lifecycle event; the gate logs its decision, nothing runs
@@ -39,7 +39,7 @@ function flags(args: string[]): { rest: string[]; opts: Record<string, string> }
 	const rest: string[] = [];
 	const opts: Record<string, string> = {};
 	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--now") opts.now = "1";
+		if (args[i] === "--now" || args[i] === "--json") opts[args[i].slice(2)] = "1";
 		else if (args[i].startsWith("--")) opts[args[i].slice(2)] = args[++i];
 		else rest.push(args[i]);
 	}
@@ -102,9 +102,15 @@ try {
 			}));
 			break;
 		}
-		case "status":
-			for (const bot of (await request({ op: "status" })).bots) console.log(`${bot.bot}  ${bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : ""}`);
+		case "status": {
+			const { bots } = await request({ op: "status" });
+			if (opts.json) {
+				console.log(JSON.stringify(bots));
+				break;
+			}
+			for (const bot of bots) console.log(`${bot.bot}  ${bot.down ? `down since ${new Date(bot.down.since).toISOString().replace("T", " ").slice(0, 19)}: ${bot.down.reason}` : bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : ""}`);
 			break;
+		}
 		case "unretire":
 		case "retire":
 			if (!rest[0]) throw new Error(USAGE);
@@ -117,7 +123,7 @@ try {
 		case "restart": {
 			if (!rest[0]) throw new Error(USAGE);
 			const reply = await request({ op: "restart", bot: rest[0], now: Boolean(opts.now) });
-			console.log(reply.state === "asleep" ? `${rest[0]} is asleep; it starts fresh next time` : reply.state === "restarting" ? `restarting ${rest[0]}` : `${rest[0]} restarts once its turn ends`);
+			console.log(reply.state === "asleep" ? `${rest[0]} is asleep; it starts fresh next time` : reply.state === "retrying" ? `${rest[0]} was down; trying to start it again` : reply.state === "restarting" ? `restarting ${rest[0]}` : `${rest[0]} restarts once its turn ends`);
 			break;
 		}
 		case "holder": {

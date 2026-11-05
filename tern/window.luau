@@ -5,6 +5,7 @@ local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local TABS = tern.plugin.data .. "/../agent-tabs/kv.json"
+local HEALTH_POLL_MS = 15000
 
 local CHAO_EYES = { "oval", "round", "dot" }
 local CHAO_TYPES = { "neutral", "neutral", "hero", "dark" }
@@ -138,10 +139,23 @@ local function roster(): { Bot }
 	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
 end
 
+type Down = { reason: string, since: number }
+local down: { [string]: Down } = {}
+
 local function show_roles(bots: { Bot })
 	local rules = {}
+	local tints: { [string]: number } = {}
 	for _, bot in ipairs(bots) do
-		if bot.tint and bot.role then
+		if bot.tint then
+			tints[bot.tint] = (tints[bot.tint] or 0) + 1
+		end
+	end
+	for _, bot in ipairs(bots) do
+		local out = down[bot.name]
+		if bot.tint and out and tints[bot.tint] == 1 then
+			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
+			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode("down: " .. out.reason) .. "; color: #e5534b; }"
+		elseif bot.tint and bot.role then
 			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode(bot.role) .. "; }"
 		end
@@ -391,16 +405,73 @@ tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false
 end, run = stage })
 
-local cwds = {}
-
-local function forward(kind, payload)
+local function state_env(): { [string]: string }
 	local env = {}
 	local state = tern.getenv("OMP_BOT_STATE")
 	if state then
 		env.OMP_BOT_STATE = state
 	end
+	return env
+end
+
+local function poll()
+	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "status", "--json" }, { env = state_env(), timeout_ms = 10000 }, function(result, cx)
+		if result.status ~= 0 then
+			return
+		end
+		local ok, bots = pcall(tern.json.decode, result.stdout)
+		if not ok or type(bots) ~= "table" then
+			return
+		end
+		local now: { [string]: Down } = {}
+		for _, bot in ipairs(bots) do
+			if type(bot.down) == "table" then
+				now[bot.bot] = { reason = tostring(bot.down.reason), since = tonumber(bot.down.since) or 0 }
+			end
+		end
+		local changed = false
+		for name, out in now do
+			if not down[name] or down[name].since ~= out.since then
+				changed = true
+				if cx then
+					cx:toast("error", name .. " is down", out.reason)
+				end
+			end
+		end
+		for name in down do
+			if not now[name] then
+				changed = true
+				if cx then
+					cx:toast("info", name .. " is back")
+				end
+			end
+		end
+		if changed then
+			down = now
+			show_roles(roster())
+			tern.chrome.refresh()
+		end
+	end)
+end
+
+local function tick()
+	tern.timer(HEALTH_POLL_MS, tick)
+	poll()
+end
+
+tern.chrome.status(function(_pane)
+	local segments = {}
+	for name, out in down do
+		segments[#segments + 1] = { text = name .. " down: " .. out.reason, icon = "sparkle", tone = "error" }
+	end
+	return #segments > 0 and segments or nil
+end)
+
+local cwds = {}
+
+local function forward(kind, payload)
 	local event = tern.json.encode({ source = "tern", kind = kind, payload = payload })
-	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "event", event }, { env = env, timeout_ms = 5000 }, function() end)
+	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "event", event }, { env = state_env(), timeout_ms = 5000 }, function() end)
 end
 
 local legacy = tern.kv.get("open")
@@ -415,6 +486,7 @@ if legacy then
 end
 
 show(roster())
+tern.timer(0, tick)
 
 for _, event in ipairs({ "focus", "tab_created" }) do
 	tern.on(event, function()
