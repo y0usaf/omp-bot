@@ -55,6 +55,8 @@ else
 	cd "${cwd:-$HOME}"
 fi
 export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
+export OMP_BOT_REAL_GIT="$(command -v git)"
+export PATH="$root/git:$PATH"
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"

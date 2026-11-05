@@ -82,7 +82,8 @@ try {
 		case "deny":
 		case "handle":
 			if (!rest[0]) throw new Error(USAGE);
-			await request({ op: "answer", id: rest[0], action: command, note: rest.slice(1).join(" ") });
+			if (process.env.OMP_BOT_NAME) throw new Error("Only the user can answer a task decision, not a bot or helper");
+			await request({ op: "answer", source: "user", id: rest[0], action: command, note: rest.slice(1).join(" ") });
 			console.log(`${rest[0]} queued`);
 			break;
 		case "status": {

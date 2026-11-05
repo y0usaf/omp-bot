@@ -8,7 +8,7 @@ const RESUME_GRACE_MS = 30_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
-type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; approved?: boolean };
+type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; approved?: boolean; result?: string };
 type Decision = { id: string; question: string | null; text: string };
 
 const CHOICES = [
@@ -122,7 +122,7 @@ export default function core(pi) {
 				if (!controller.signal.aborted) dismissed.add(decision.id);
 				return;
 			}
-			send({ op: "answer", id: decision.id, action: choice.action, note: answer?.customInput ?? answer?.note ?? "" });
+			send({ op: "answer", source: "user", id: decision.id, action: choice.action, note: answer?.customInput ?? answer?.note ?? "" });
 			decisions = decisions.filter(each => each.id !== decision.id);
 		} catch (error) {
 			if (!controller.signal.aborted) {
@@ -205,8 +205,8 @@ export default function core(pi) {
 		if (current && !current.jobs.includes(id)) keep({ ...current, jobs: [...current.jobs, id] });
 	});
 
-	pi.events.on("ompd:ended", ({ id }) => {
-		if (current?.jobs.includes(id)) keep({ ...current, jobs: current.jobs.filter(job => job !== id) });
+	pi.events.on("ompd:ended", ({ id, failed }) => {
+		if (current?.jobs.includes(id)) keep({ ...current, result: failed ? undefined : current.result, jobs: current.jobs.filter(job => job !== id) });
 	});
 
 	pi.registerCommand("decisions", {
@@ -274,12 +274,15 @@ export default function core(pi) {
 		if (c.agent?.kind === "sub" || event.willContinue || !current || !started || stopped) return;
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
-		const result = textOf(final);
+		const result = current.result || textOf(final);
 		started = false;
 		if (reason === "aborted") report({ op: "fail", error: "stopped by the user", final: true });
 		else if (reason === "error") report({ op: "fail", error: final?.errorMessage || "the model request failed" });
 		else if (current.question) report({ op: "wait", wait: "decision", question: current.question, result });
-		else if (current.jobs.length > 0) return report({ op: "wait", wait: "jobs", result });
+		else if (current.jobs.length > 0) {
+			keep({ ...current, result });
+			return report({ op: "wait", wait: "jobs", result });
+		}
 		else report({ op: "done", result });
 		keep(undefined);
 	});

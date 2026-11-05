@@ -212,7 +212,7 @@ export default function helpers(pi) {
 				op: "run",
 				owner: owner(),
 				tool,
-				command: `rm -f ${quote(join(home, "stdin"))} && mkfifo ${quote(join(home, "stdin"))} && exec ${[...args, "--mode", "rpc", "--no-ui"].map(quote).join(" ")} <>${quote(join(home, "stdin"))}`,
+				command: `rm -f ${quote(join(home, "stdin"))} && mkfifo ${quote(join(home, "stdin"))} && printf '%s\n' ${quote(`Helper transcripts: ${join(home, "sessions")}; final result: report beside this log`)} && exec ${[...args, "--mode", "rpc", "--no-ui"].map(quote).join(" ")} <>${quote(join(home, "stdin"))} 2> >(head -c ${REPORT_BYTES}; cat >/dev/null) >/dev/null`,
 				cwd,
 				env,
 				timeout: 0,

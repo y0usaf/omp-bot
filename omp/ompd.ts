@@ -63,7 +63,7 @@ function failed(job: Job): boolean {
 	return job.state === "lost" || job.code !== 0;
 }
 
-function botTask(): { jobs?: string[]; approved?: boolean } | undefined {
+function botTask(): { jobs?: string[] } | undefined {
 	try {
 		return JSON.parse(readFileSync(join(STATE, "bots", BOT, "task.json"), "utf8"));
 	} catch {
@@ -71,21 +71,6 @@ function botTask(): { jobs?: string[]; approved?: boolean } | undefined {
 	}
 }
 
-function rewrite(command: string): string | undefined {
-	for (const segment of command.split(/[;&|()`\n]/)) {
-		const words = segment.trim().split(/\s+/);
-		let at = 0;
-		while (/^(?:\w+=\S*|env|sudo|command|exec|nice|nohup|time|timeout|\d+[smhd]?)$/.test(words[at] ?? "")) at++;
-		if (words[at] !== "git" && !words[at]?.endsWith("/git")) continue;
-		for (at++; words[at]?.startsWith("-"); at++) if (/^(?:-C|-c|--git-dir|--work-tree|--namespace)$/.test(words[at])) at++;
-		const [sub, ...rest] = words.slice(at);
-		if (sub === "push" && !rest.some(word => word === "--dry-run" || word === "-n")) return "git push";
-		if (sub === "rebase" && !rest.some(word => word === "--abort" || word === "--quit")) return "git rebase";
-		if (sub === "commit" && rest.includes("--amend")) return "git commit --amend";
-		if (sub === "filter-repo" || sub === "filter-branch") return `git ${sub}`;
-	}
-	return undefined;
-}
 
 function waking(job: Job): boolean {
 	if (!MAIN_BOT || failed(job) || existsSync(join(dir(job.id), "wake"))) return true;
@@ -186,12 +171,13 @@ export default function ompd(pi) {
 			}, 30_000);
 			return;
 		}
+		const wake = waking(job);
+		pi.events.emit("ompd:ended", { id: job.id, failed: failed(job) });
 		if (!sent.has(job.id) && !delivered(job.id)) {
 			sent.add(job.id);
-			pi.sendMessage({ customType: "ompd-job", content: report(job), display: !BOT, details: { id: job.id } }, waking(job) ? { deliverAs: "followUp", triggerTurn: true } : { deliverAs: "nextTurn" });
+			pi.sendMessage({ customType: "ompd-job", content: report(job), display: !BOT, details: { id: job.id } }, wake ? { deliverAs: "followUp", triggerTurn: true } : { deliverAs: "nextTurn" });
 		}
 		await call({ op: "ack", id: job.id });
-		pi.events.emit("ompd:ended", { id: job.id });
 	}
 
 	function watch() {
@@ -239,14 +225,6 @@ export default function ompd(pi) {
 	});
 
 	pi.on("tool_call", async event => {
-		const what = BOT && event.toolName === "bash" ? rewrite(String(event.input?.command ?? "")) : undefined;
-		const task = what ? botTask() : undefined;
-		if (task && !task.approved) {
-			return {
-				block: true,
-				reason: `${what} publishes or rewrites git history, and this runs inside a background task the user hasn't approved it for. Ask with ask_decision, naming the repo, branch and remote, end your turn, and run it once they approve.`,
-			};
-		}
 		if (!cut.delete(event.toolCallId)) return undefined;
 		if (event.toolName === "bash" && !event.input?.pty) return undefined;
 		if (event.toolName === "task" && (globalThis as any)[Symbol.for("omp-bot.helpers")]) return undefined;
