@@ -1,6 +1,6 @@
-:where([data-surface='plugin.task-board.board']) { --lane: var(--accent-ink); }
+.sf-region[data-surface='plugin.task-board.board'] { --tc: var(--accent-ink); }
 :where(.sf-region[data-surface='plugin.task-board.board']) { font: 400 13px/18px var(--sans); color: var(--t1); }
-:where(.sf-main[data-surface='plugin.task-board.board']) [data-lane='cu'] { --lane: var(--bad); }
+:where(.sf-main[data-surface='plugin.task-board.board']) [data-lane='cu'] { --tc: var(--bad); }
 
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-wrap { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 980px; margin: 0 auto; padding: 14px 24px 28px; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-loading { padding: 40px; font: 500 13px var(--sans); color: var(--t2); text-align: center; animation: tb-beat 900ms ease-in-out infinite alternate; }
@@ -34,7 +34,7 @@
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-row[data-state='waiting'] .tb-title { font-weight: 700; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 12px var(--tv-font, var(--mono)); color: var(--t2); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-bot { font-weight: 700; color: var(--t1); }
-:where(.sf-main[data-surface='plugin.task-board.board']) .tb-proj { padding: 0 6px; background: color-mix(in srgb, var(--lane) 12%, transparent); color: var(--lane); font: 700 10px/16px var(--tv-font, var(--mono)); text-transform: uppercase; }
+:where(.sf-main[data-surface='plugin.task-board.board']) .tb-proj { padding: 0 6px; background: color-mix(in srgb, var(--tc) 12%, transparent); color: var(--tc); font: 700 10px/16px var(--tv-font, var(--mono)); text-transform: uppercase; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-bumped { padding: 0 6px; background: var(--t1); color: var(--card); font: 700 10px/16px var(--tv-font, var(--mono)); animation: tb-hop 360ms var(--out) both; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-note { font-style: italic; color: var(--t2); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-body { max-height: 260px; overflow: hidden; margin-top: 4px; padding: 8px 12px; color: var(--t2); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-in 220ms var(--out) both; }
@@ -64,9 +64,9 @@
 
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-acts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-act { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border: none; background: var(--card); color: var(--t1); box-shadow: inset 0 0 0 1px var(--l2); font: 500 13px var(--sans); cursor: pointer; transition: transform 120ms var(--out), box-shadow 120ms var(--out); animation: tb-pop 260ms var(--out) both; }
-:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='approve'] { --c: var(--ok); }
-:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='deny'] { --c: var(--bad); animation-delay: 40ms; }
-:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='handle'] { --c: var(--accent-ink); animation-delay: 80ms; }
+:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='approve'] { --tc: var(--ok); }
+:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='deny'] { --tc: var(--bad); animation-delay: 40ms; }
+:where(.sf-main[data-surface='plugin.task-board.board']) .tb-act[data-act='handle'] { --tc: var(--accent-ink); animation-delay: 80ms; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-act:hover { background: var(--l1); box-shadow: inset 0 0 0 1px var(--l3); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-act:active { box-shadow: inset 0 0 0 1px var(--l2); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-quiet { box-shadow: inset 0 0 0 1px var(--l2); }
@@ -114,7 +114,7 @@
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub[data-depth='2'] { padding-left: 26px; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub[data-depth='3'] { padding-left: 44px; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub[data-depth='4'] { padding-left: 62px; }
-:where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub-dot { justify-self: center; width: 8px; height: 8px; background: var(--lane); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-pop 300ms var(--out) both, tb-beat 900ms 300ms ease-in-out 4 alternate; }
+:where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub-dot { justify-self: center; width: 8px; height: 8px; background: var(--tc); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-pop 300ms var(--out) both, tb-beat 900ms 300ms ease-in-out 4 alternate; }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-sub-name { flex: none; font: 600 12px var(--tv-font, var(--mono)); color: var(--t1); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-state[data-state='stopped'] { color: var(--t3); }
 :where(.sf-main[data-surface='plugin.task-board.board']) .tb-more { padding: 2px 8px; font: 500 12px var(--tv-font, var(--mono)); color: var(--t3); }
@@ -138,14 +138,14 @@
 
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-wrap { position: absolute; right: 24px; bottom: 18px; display: flex; justify-content: flex-end; pointer-events: none; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx { position: relative; display: flex; align-items: center; gap: 16px; padding: 14px 22px 14px 14px; background: var(--card); color: var(--t1); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-stamp 460ms var(--out) both, tb-out 300ms 1200ms ease-in both; }
-:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='approve'] { --fx: var(--ok); }
-:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='deny'] { --fx: var(--bad); animation: tb-nope 420ms ease-out both, tb-out 300ms 1200ms ease-in both; }
-:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='handle'] { --fx: var(--accent-ink); }
+:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='approve'] { --tc: var(--ok); }
+:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='deny'] { --tc: var(--bad); animation: tb-nope 420ms ease-out both, tb-out 300ms 1200ms ease-in both; }
+:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx[data-act='handle'] { --tc: var(--accent-ink); }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao { position: relative; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao[data-react='approve'] .sf-image { animation: tb-jump 700ms var(--out) both; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao[data-react='deny'] .sf-image { animation: tb-shake 560ms ease-out both; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao[data-react='handle'] .sf-image { animation: tb-spin 700ms var(--out) both; }
-:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao .tb-emote { position: absolute; right: -6px; top: -6px; min-width: 24px; height: 24px; font: 800 15px/24px var(--tv-font, var(--mono)); text-align: center; background: color-mix(in srgb, var(--fx) 12%, transparent); color: var(--fx); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-float 1000ms var(--out) both; }
+:where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-chao .tb-emote { position: absolute; right: -6px; top: -6px; min-width: 24px; height: 24px; font: 800 15px/24px var(--tv-font, var(--mono)); text-align: center; background: color-mix(in srgb, var(--tc) 12%, transparent); color: var(--tc); box-shadow: inset 0 0 0 1px var(--l2); animation: tb-float 1000ms var(--out) both; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-text { display: flex; flex-direction: column; gap: 2px; max-width: 380px; }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-verb { font: 600 34px/1.05 var(--sans); }
 :where(.sf-layer[data-surface='plugin.task-board.board']) .tb-fx-meta { font: 500 12px var(--tv-font, var(--mono)); color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
