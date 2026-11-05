@@ -56,6 +56,7 @@ const q = {
 	silentHeld: db.query<Task, { before: number }>(`SELECT * FROM tasks WHERE ${HELD} AND beat < $before`),
 	held: db.query<Task, []>(`SELECT * FROM tasks WHERE ${HELD}`),
 	decisions: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'waiting' AND wait = 'decision' ORDER BY updated"),
+	git: db.query<{ answer: string | null }, { bot: string }>("SELECT answer FROM tasks WHERE bot = $bot AND token IS NOT NULL AND state IN ('running', 'waiting', 'queued')"),
 	grace: db.query(`UPDATE tasks SET beat = $now WHERE ${HELD}`),
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
 	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
@@ -524,7 +525,10 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			send(socket, { op: "ack", id: message.id });
 			return wait === "decision" ? pushDecisions(link.bot) : undefined;
 		}
+		case "git-check":
+			return send(socket, { ok: true, allowed: !q.git.all({ bot: String(message.bot ?? "") }).some(task => !task.answer || JSON.parse(task.answer).action !== "approve") });
 		case "answer": {
+			if (message.source !== "user") throw new Error("Only the user can answer a task decision");
 			const action = String(message.action) as keyof typeof ACTIONS;
 			if (!(action in ACTIONS)) throw new Error(`answer is approve, deny or handle, not ${message.action}`);
 			const task = q.byId.get({ id: String(message.id) });

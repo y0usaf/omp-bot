@@ -1,4 +1,4 @@
-import { accessSync, appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ROOT, STATE } from "./paths";
@@ -56,6 +56,26 @@ export function load(id: string): Job | undefined {
 		return JSON.parse(readFileSync(join(dir(id), "job.json"), "utf8"));
 	} catch {
 		return undefined;
+	}
+}
+
+export function trimHelperLog(job: Job): number {
+	if ((job.state !== "done" && job.state !== "lost") || !job.command.includes("/helpers/") || !job.command.includes("rpc") || !job.command.includes("--append-system-prompt")) return 0;
+	const path = join(dir(job.id), "log");
+	let fd: number | undefined;
+	try {
+		fd = openSync(path, "r");
+		const size = fstatSync(fd).size;
+		if (size <= 64 * 1024) return 0;
+		const tail = Buffer.alloc(64 * 1024);
+		const length = readSync(fd, tail, 0, tail.length, size - tail.length);
+		writeFileSync(path, tail.subarray(0, length));
+		return size - length;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		return 0;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
 	}
 }
 
@@ -248,6 +268,7 @@ function serve() {
 		let swept = 0;
 		for (const job of jobs.values()) {
 			if (job.state === "running") continue;
+			trimHelperLog(job);
 			if (job.cgroup && existsSync(job.cgroup)) {
 				try {
 					rmdirSync(job.cgroup);
@@ -352,6 +373,11 @@ function serve() {
 			if (existing) return existing;
 		}
 		const lean = LEAN.test(command);
+		const env = { ...message.env };
+		if (env.OMP_BOT_NAME) {
+			env.OMP_BOT_REAL_GIT ||= Bun.which("git", { PATH: env.PATH });
+			env.PATH = `${join(ROOT, "git")}:${env.PATH ?? process.env.PATH ?? ""}`;
+		}
 		const job: Job = {
 			v: V,
 			id: Bun.randomUUIDv7(),
@@ -378,10 +404,10 @@ function serve() {
 		writeFileSync(join(dir(job.id), "command"), command, { mode: 0o600 });
 		save(job);
 		jobs.set(job.id, job);
-		envs.set(job.id, message.env ?? {});
+		envs.set(job.id, env);
 		log(`queue ${job.id} for ${owner}${tool ? ` call ${tool}` : ""}`);
 		dispatch();
-		if (job.state === "queued" || (job.state === "running" && job.rerunnable)) writeFileSync(join(dir(job.id), "env.json"), JSON.stringify(safeEnv(message.env ?? {})), { mode: 0o600 });
+		if (job.state === "queued" || (job.state === "running" && job.rerunnable)) writeFileSync(join(dir(job.id), "env.json"), JSON.stringify(safeEnv(env)), { mode: 0o600 });
 		return job;
 	}
 
