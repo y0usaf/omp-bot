@@ -1,4 +1,4 @@
-import { accessSync, appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ROOT, STATE } from "./paths";
@@ -8,7 +8,11 @@ export const JOBS = join(STATE, "jobs");
 export const SOCKET = process.env.OMPD_SOCKET || join(STATE, "ompd.sock");
 const POLL_MS = Number(process.env.OMPD_POLL_MS) || 1000;
 const MAX_RUNS = 3;
-const LEAN = /(^|[\s;&|(`])(lake|lean)(\s|$)/;
+export const LEAN = /(?:^|[\s;&|(`'"])(?<!\b(?:pgrep|pkill|grep)\b[^;&\n]*)(?:lake\s+(?:build|env\s+lean)|lean\s+(?:-\S+\s+)*[^\s-]\S*\.lean)(?=$|[\s;&|)`'"])/;
+const ENV_KEEP = /^(?:PATH|HOME|USER|LOGNAME|SHELL|LANG|TERM|COLORTERM|TZ|TZDIR|TMPDIR|EDITOR|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|SSH_AUTH_SOCK|SSL_CERT_FILE|CARGO_HOME|RUSTUP_HOME|ELAN_HOME|(?:LC|XDG|NIX|PI|OMP|OMPD)_\w+)$/;
+const SECRET = /TOKEN|SECRET|PASSW|KEY|CREDENTIAL|COOKIE|AUTH(?!_SOCK$)|^NIX_CONFIG$/i;
+const KEEP_MS = 7 * 86_400_000;
+const PRUNE_MS = 3_600_000;
 
 export type Job = {
 	v: number;
@@ -41,6 +45,10 @@ function size(text: string): number {
 
 export function dir(id: string): string {
 	return join(JOBS, id);
+}
+
+export function safeEnv(env: Record<string, unknown>): Record<string, string> {
+	return Object.fromEntries(Object.entries(env).filter(([key, value]) => typeof value === "string" && ENV_KEEP.test(key) && !SECRET.test(key))) as Record<string, string>;
 }
 
 export function load(id: string): Job | undefined {
@@ -95,6 +103,7 @@ function serve() {
 	const over = `killed for going over the ${Math.round(memory / 2 ** 20)} MiB a job may use`;
 	const jobs = new Map<string, Job>();
 	const watchers = new Map<string, Set<Socket>>();
+	const envs = new Map<string, Record<string, string>>();
 
 	function log(line: string) {
 		console.log(`${new Date().toISOString()} ${line}`);
@@ -210,9 +219,47 @@ function serve() {
 		Object.assign(job, { ended: Date.now(), ...patch });
 		save(job);
 		release(job);
+		envs.delete(job.id);
+		rmQuiet(join(dir(job.id), "env.json"));
 		log(`${job.state} ${job.id} code ${job.code}${job.reason ? `: ${job.reason}` : ""}`);
 		deliver(job);
 		dispatch();
+	}
+
+	function storedEnv(path: string): Record<string, string> {
+		try {
+			return JSON.parse(readFileSync(join(path, "env.json"), "utf8"));
+		} catch {
+			throw new Error("its environment was not kept across the ompd restart");
+		}
+	}
+
+	function scrubEnv(job: Job) {
+		const file = join(dir(job.id), "env.json");
+		if (job.state !== "queued" && !(job.state === "running" && job.rerunnable)) return rmQuiet(file);
+		try {
+			writeFileSync(file, JSON.stringify(safeEnv(JSON.parse(readFileSync(file, "utf8")))), { mode: 0o600 });
+		} catch {}
+	}
+
+	function prune() {
+		const before = Date.now() - KEEP_MS;
+		let pruned = 0;
+		let swept = 0;
+		for (const job of jobs.values()) {
+			if (job.state === "running") continue;
+			if (job.cgroup && existsSync(job.cgroup)) {
+				try {
+					rmdirSync(job.cgroup);
+					swept++;
+				} catch {}
+			}
+			if (job.state === "queued" || !job.delivered || (job.ended ?? job.created) > before) continue;
+			rmSync(dir(job.id), { recursive: true, force: true });
+			jobs.delete(job.id);
+			pruned++;
+		}
+		if (pruned || swept) log(`pruned ${pruned} delivered jobs that ended over ${KEEP_MS / 86_400_000} days ago, removed ${swept} empty job cgroups`);
 	}
 
 	function start(job: Job) {
@@ -225,11 +272,12 @@ function serve() {
 		job.killing = null;
 		job.cgroup = cgroup(job);
 		save(job);
-		const env = JSON.parse(readFileSync(join(path, "env.json"), "utf8"));
 		const out = openSync(join(path, "log"), "a");
 		if (job.runs > 1) appendFileSync(join(path, "log"), `\n[ompd: run ${job.runs}, started again after the last run was lost]\n`);
 		try {
 			if (!existsSync(job.cwd)) throw new Error(`no directory ${job.cwd}`);
+			const env = envs.get(job.id) ?? storedEnv(path);
+			if (!job.rerunnable) rmQuiet(join(path, "env.json"));
 			const proc = Bun.spawn(["setsid", join(ROOT, "bin", "ompd-job"), path, ...(job.cgroup ? [job.cgroup] : [])], { cwd: job.cwd, env, stdin: "ignore", stdout: out, stderr: out });
 			proc.unref();
 			job.pid = proc.pid;
@@ -312,7 +360,7 @@ function serve() {
 			command,
 			cwd: String(message.cwd ?? process.cwd()),
 			timeout: Math.max(0, Number(message.timeout) || 0),
-			rerunnable: Boolean(message.rerunnable) || lean,
+			rerunnable: Boolean(message.rerunnable),
 			lean,
 			state: "queued",
 			runs: 0,
@@ -328,11 +376,12 @@ function serve() {
 		};
 		mkdirSync(dir(job.id), { recursive: true, mode: 0o700 });
 		writeFileSync(join(dir(job.id), "command"), command, { mode: 0o600 });
-		writeFileSync(join(dir(job.id), "env.json"), JSON.stringify(message.env ?? {}), { mode: 0o600 });
 		save(job);
 		jobs.set(job.id, job);
+		envs.set(job.id, message.env ?? {});
 		log(`queue ${job.id} for ${owner}${tool ? ` call ${tool}` : ""}`);
 		dispatch();
+		if (job.state === "queued" || (job.state === "running" && job.rerunnable)) writeFileSync(join(dir(job.id), "env.json"), JSON.stringify(safeEnv(message.env ?? {})), { mode: 0o600 });
 		return job;
 	}
 
@@ -389,8 +438,10 @@ function serve() {
 			continue;
 		}
 		jobs.set(id, job);
+		scrubEnv(job);
 		if (job.state === "running") log(alive(job) ? `reattach ${id}` : `found ${id} not running`);
 	}
+	prune();
 	if (existsSync(SOCKET)) unlinkSync(SOCKET);
 	const server = createServer(socket => {
 		let buffer = "";
@@ -415,6 +466,7 @@ function serve() {
 		log(`listening on ${SOCKET}, ${slots} Lean slots, ${base ? `${Math.round(memory / 2 ** 20)} MiB per job, each in its own cgroup under ${base}` : "no cgroup to write, so jobs run without a memory limit"}`);
 		tend();
 		setInterval(tend, POLL_MS);
+		setInterval(prune, PRUNE_MS);
 	});
 	for (const signal of ["SIGTERM", "SIGINT"] as const)
 		process.on(signal, () => {

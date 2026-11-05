@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { dir, type Job, load, request } from "../daemon/ompd";
+import { dir, type Job, load, request, safeEnv } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
 
 const BOT = process.env.OMP_BOT_NAME ?? "";
@@ -10,6 +10,10 @@ const HELPERS = join(STATE, "bots", BOT, "helpers");
 const MAIL = join(HELPERS, "mail");
 const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
 const REPORT_BYTES = 64 * 1024;
+const DEPTH = Number(process.env.OMP_BOT_HELPER_DEPTH) || (SELF ? 1 : 0);
+const MAX_DEPTH = 2;
+const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
+const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
 const PATCHED = Symbol.for("omp-bot.helpers.send");
 const DELIVERED = { state: "done" } as Job;
 const awaited: Set<string> = ((globalThis as any)[Symbol.for("ompd.awaited")] ??= new Set());
@@ -184,13 +188,15 @@ export default function helpers(pi) {
 		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context));
 		writeAtomic(join(home, "assignment.md"), `Complete assignment thoroughly:\n\n${item.task.trim()}\n`);
 		let args = [...baseArgs(), "--session-dir", join(home, "sessions"), "--append-system-prompt", join(home, "system.md")];
-		const [{ formatModelString, resolveAgentModelPatterns }, { AgentRegistry }] = await Promise.all([
+		const [{ formatModelString, resolveAgentModelPatterns }, { AgentRegistry }, { getEnvApiKeyName }] = await Promise.all([
 			import("@oh-my-pi/pi-coding-agent/config/model-resolver"),
 			import("@oh-my-pi/pi-coding-agent/registry/agent-registry"),
+			import("@oh-my-pi/pi-ai"),
 		]);
 		const session = AgentRegistry.global().get(MAIN)?.session;
+		const inherits = [agent.model ?? []].flat().every(pattern => INHERITED.test(String(pattern).trim()));
 		const [model] = resolveAgentModelPatterns({
-			requestModel: item.model,
+			requestModel: item.model ?? (inherits ? "@smol" : undefined),
 			agentModel: agent.model,
 			settings: session?.settings,
 			activeModelPattern: session?.model ? formatModelString(session.model) : undefined,
@@ -198,8 +204,11 @@ export default function helpers(pi) {
 		if (model) args = withFlag(args, "--model", model);
 		const tools = item.tools ?? agent.tools;
 		if (Array.isArray(tools) && tools.length) args = withFlag(args, "--tools", tools.join(","));
-		const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPTCHAT_") && !["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"].includes(key)));
-		Object.assign(env, { OMP_BOT_HELPER: id, OMP_BOT_HELPER_PARENT: helper.parent, OMPD_OWNER: `helper:${BOT}/${id}` });
+		const env = safeEnv(process.env);
+		for (const key of ["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"]) delete env[key];
+		const keyName = model ? getEnvApiKeyName(model.split("/")[0]) : undefined;
+		if (keyName && process.env[keyName]) env[keyName] = process.env[keyName];
+		Object.assign(env, { OMP_BOT_HELPER: id, OMP_BOT_HELPER_PARENT: helper.parent, OMP_BOT_HELPER_DEPTH: String(DEPTH + 1), OMPD_OWNER: `helper:${BOT}/${id}` });
 		try {
 			const { job } = await call({
 				op: "run",
@@ -338,7 +347,7 @@ export default function helpers(pi) {
 	pi.registerTool({
 		name: "task",
 		label: "Task",
-		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one.`,
+		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the smol model role, not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
 		parameters: z.object({
 			context: z.string().optional(),
 			tasks: z.array(
@@ -354,6 +363,10 @@ export default function helpers(pi) {
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			if (!params.tasks.length) throw new Error("tasks is empty: give at least one task");
+			if (DEPTH >= MAX_DEPTH) throw new Error(`Helpers nest at most ${MAX_DEPTH} deep and this one is at depth ${DEPTH}, so it can't start helpers. Nothing was started: do the work yourself, or report back to ${SELF ? "your parent" : BOT} what still needs doing.`);
+			const fresh = params.tasks.filter((_, index) => !records().some(helper => helper.tool === `${toolCallId}#${index}`)).length;
+			const live = records().filter(running).length;
+			if (live + fresh > MAX_HELPERS) throw new Error(`${BOT} has ${live} helpers running and runs at most ${MAX_HELPERS} at once, so ${fresh} more would pass the cap. Nothing was started: wait for running helpers to finish (their results arrive here), or start fewer.`);
 			const known = await definitions(resolve(ctx.cwd));
 			const unknown = params.tasks.map(item => item.agent || "task").filter(name => !known.some(found => found.name === name));
 			if (unknown.length) throw new Error(`No agent named ${[...new Set(unknown)].join(", ")}; the agents are ${known.map(found => found.name).join(", ")}. Nothing was started.`);

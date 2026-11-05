@@ -8,7 +8,7 @@ const RESUME_GRACE_MS = 30_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
-type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string };
+type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; approved?: boolean };
 type Decision = { id: string; question: string | null; text: string };
 type Subagent = { id: string; agent: string; description: string; status: string; started: number };
 
@@ -166,20 +166,22 @@ export default function core(pi) {
 				return;
 			case "welcome":
 				readySent = false;
+				refused = false;
 				if (current && message.task !== current.id) keep(undefined);
 				return;
 			case "expired":
 				if (current?.id === message.id) keep(undefined);
 				return;
 			case "refused":
+				if (!refused) ctx?.ui?.notify?.(`omp-bot: ${message.reason}; trying again every few seconds`, "warning");
 				refused = true;
-				ctx?.ui?.notify?.(`omp-bot: ${message.reason}`, "warning");
+				socket?.end();
 				return;
 			case "restart":
 				restart(message.now);
 				return;
 			case "task":
-				keep({ id: message.id, attempt: message.attempt, token: message.token, jobs: [] });
+				keep({ id: message.id, attempt: message.attempt, token: message.token, jobs: [], approved: message.answer?.action === "approve" });
 				started = false;
 				readySent = false;
 				try {
@@ -193,7 +195,7 @@ export default function core(pi) {
 	}
 
 	function dial() {
-		if (stopped || refused || !ctx) return;
+		if (stopped || !ctx) return;
 		const s = connect(SOCKET);
 		socket = s;
 		s.unref();
@@ -220,7 +222,7 @@ export default function core(pi) {
 			if (socket !== s) return;
 			socket = undefined;
 			readySent = false;
-			if (!stopped && !refused) ctx?.setTimeout(dial, 2000);
+			if (!stopped) ctx?.setTimeout(dial, refused ? 5000 : 2000);
 		});
 	}
 

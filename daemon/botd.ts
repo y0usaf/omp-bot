@@ -8,6 +8,7 @@ import { record } from "./gate";
 const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
 const IDLE_EXIT_MS = Number(process.env.OMP_BOT_IDLE_EXIT_MS) || 300_000;
 const RESPAWN_MS = Number(process.env.OMP_BOT_RESPAWN_MS) || 5_000;
+const HELD_MAX_MS = Number(process.env.OMP_BOT_HELD_MAX_MS) || 300_000;
 const CLAIM_MS = Number(process.env.OMP_BOT_CLAIM_MS) || 60_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const MEMORY_POLL_MS = Number(process.env.OMP_BOT_MEMORY_POLL_MS) || 5_000;
@@ -80,7 +81,8 @@ const q = {
 const links = new Map<string, Link>();
 const children = new Map<string, Child>();
 const claims = new Map<string, { until: number; waiters: Array<() => void> }>();
-const lastSpawn = new Map<string, number>();
+const nextSpawn = new Map<string, number>();
+const held = new Map<string, number>();
 const summarisers = new Map<string, ReturnType<typeof Bun.spawn>>();
 const memoryRetry = new Map<string, number>();
 const restarts = new Map<string, { now: boolean }>();
@@ -267,12 +269,12 @@ function dispatch(bot: string) {
 
 function ensureRunning(bot: string, force = false) {
 	if (draining || down.has(bot) || (boxedBots.has(bot) && boxHealthy !== true) || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
-	const wait = (lastSpawn.get(bot) ?? 0) + RESPAWN_MS - Date.now();
+	const wait = (nextSpawn.get(bot) ?? 0) - Date.now();
 	if (wait > 0) {
 		setTimeout(() => ensureRunning(bot, force), wait);
 		return;
 	}
-	lastSpawn.set(bot, Date.now());
+	nextSpawn.set(bot, Date.now() + RESPAWN_MS);
 	const logFile = join(STATE, "logs", `${bot}.log`);
 	appendFileSync(logFile, `\n=== ${new Date().toISOString()} headless start\n`);
 	const proc = Bun.spawn(["setsid", join(ROOT, "bin", "omp-bot"), bot, "--headless"], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
@@ -294,7 +296,13 @@ function ensureRunning(bot: string, force = false) {
 		const link = links.get(bot);
 		if (link?.mode === "headless") dropLink(link, `headless exited with ${code}`);
 		settleClaim(bot);
-		if (code === 75) log(`start ${bot} skipped: its lock is held, so it is open elsewhere`);
+		if (code === 75) {
+			const tries = (held.get(bot) ?? 0) + 1;
+			const wait = Math.min(RESPAWN_MS * 2 ** tries, HELD_MAX_MS);
+			held.set(bot, tries);
+			nextSpawn.set(bot, Date.now() + wait);
+			log(`start ${bot} skipped: its lock is held, so it is open elsewhere; trying again in ${wait / 1000}s unless it connects first`);
+		}
 		else if (!child.hello && code !== 0 && !draining) {
 			const fails = (startFails.get(bot) ?? 0) + 1;
 			startFails.set(bot, fails);
@@ -477,6 +485,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			self.link = link;
 			if (link.mode === "tui") claims.delete(link.bot);
 			dying.delete(link.bot);
+			if (held.delete(link.bot)) nextSpawn.delete(link.bot);
 			const child = children.get(link.bot);
 			if (child && link.mode === "headless") child.hello = true;
 			clearDown(link.bot, `it connected (${link.mode})`);

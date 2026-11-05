@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { dir, type Job, load, request, SOCKET, V } from "../daemon/ompd";
@@ -12,6 +12,8 @@ const NOTICE_LINES = 50;
 const REPORT_BYTES = 64 * 1024;
 const OMPD = join(ROOT, "bin", "ompd");
 const SERVICE = process.env.OMPD_SERVICE === "1";
+const BOT = process.env.OMP_BOT_NAME ?? "";
+const MAIN_BOT = Boolean(BOT) && !process.env.OMP_BOT_HELPER;
 
 function cutOff(entries): Set<string> {
 	const started = new Set<string>();
@@ -59,6 +61,39 @@ function outcome(job: Job): string {
 
 function failed(job: Job): boolean {
 	return job.state === "lost" || job.code !== 0;
+}
+
+function botTask(): { jobs?: string[]; approved?: boolean } | undefined {
+	try {
+		return JSON.parse(readFileSync(join(STATE, "bots", BOT, "task.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+function rewrite(command: string): string | undefined {
+	for (const segment of command.split(/[;&|()`\n]/)) {
+		const words = segment.trim().split(/\s+/);
+		let at = 0;
+		while (/^(?:\w+=\S*|env|sudo|command|exec|nice|nohup|time|timeout|\d+[smhd]?)$/.test(words[at] ?? "")) at++;
+		if (words[at] !== "git" && !words[at]?.endsWith("/git")) continue;
+		for (at++; words[at]?.startsWith("-"); at++) if (/^(?:-C|-c|--git-dir|--work-tree|--namespace)$/.test(words[at])) at++;
+		const [sub, ...rest] = words.slice(at);
+		if (sub === "push" && !rest.some(word => word === "--dry-run" || word === "-n")) return "git push";
+		if (sub === "rebase" && !rest.some(word => word === "--abort" || word === "--quit")) return "git rebase";
+		if (sub === "commit" && rest.includes("--amend")) return "git commit --amend";
+		if (sub === "filter-repo" || sub === "filter-branch") return `git ${sub}`;
+	}
+	return undefined;
+}
+
+function waking(job: Job): boolean {
+	if (!MAIN_BOT || failed(job) || existsSync(join(dir(job.id), "report"))) return true;
+	const jobs = botTask()?.jobs ?? [];
+	return jobs.includes(job.id) && jobs.every(id => {
+		const other = id === job.id ? undefined : load(id);
+		return !other || exited(other) !== undefined;
+	});
 }
 
 function ownReport(job: Job): string | undefined {
@@ -153,7 +188,7 @@ export default function ompd(pi) {
 		}
 		if (!sent.has(job.id) && !delivered(job.id)) {
 			sent.add(job.id);
-			pi.sendMessage({ customType: "ompd-job", content: report(job), display: !process.env.OMP_BOT_NAME, details: { id: job.id } }, { deliverAs: "followUp", triggerTurn: true });
+			pi.sendMessage({ customType: "ompd-job", content: report(job), display: !BOT, details: { id: job.id } }, waking(job) ? { deliverAs: "followUp", triggerTurn: true } : { deliverAs: "nextTurn" });
 		}
 		await call({ op: "ack", id: job.id });
 		pi.events.emit("ompd:ended", { id: job.id });
@@ -204,6 +239,14 @@ export default function ompd(pi) {
 	});
 
 	pi.on("tool_call", async event => {
+		const what = BOT && event.toolName === "bash" ? rewrite(String(event.input?.command ?? "")) : undefined;
+		const task = what ? botTask() : undefined;
+		if (task && !task.approved) {
+			return {
+				block: true,
+				reason: `${what} publishes or rewrites git history, and this runs inside a background task the user hasn't approved it for. Ask with ask_decision, naming the repo, branch and remote, end your turn, and run it once they approve.`,
+			};
+		}
 		if (!cut.delete(event.toolCallId)) return undefined;
 		if (event.toolName === "bash" && !event.input?.pty) return undefined;
 		if (event.toolName === "task" && (globalThis as any)[Symbol.for("omp-bot.helpers")]) return undefined;
@@ -216,7 +259,7 @@ export default function ompd(pi) {
 	pi.registerTool({
 		name: "bash",
 		label: "Bash",
-		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll, sleep or wait for it. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); Lean builds always are, anything else defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.`,
+		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll, sleep or wait for it${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
 		parameters: z.object({
 			command: z.string(),
 			timeout: z.number().optional(),
