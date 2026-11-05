@@ -196,7 +196,7 @@ export default function helpers(pi) {
 		const session = AgentRegistry.global().get(MAIN)?.session;
 		const inherits = [agent.model ?? []].flat().every(pattern => INHERITED.test(String(pattern).trim()));
 		const [model] = resolveAgentModelPatterns({
-			requestModel: item.model ?? (inherits ? "@smol" : undefined),
+			requestModel: item.model ?? (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined),
 			agentModel: agent.model,
 			settings: session?.settings,
 			activeModelPattern: session?.model ? formatModelString(session.model) : undefined,
@@ -347,7 +347,7 @@ export default function helpers(pi) {
 	pi.registerTool({
 		name: "task",
 		label: "Task",
-		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the smol model role, not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
+		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
 		parameters: z.object({
 			context: z.string().optional(),
 			tasks: z.array(
