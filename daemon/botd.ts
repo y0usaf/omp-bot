@@ -69,6 +69,7 @@ const q = {
 	notice: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, result, error, created, updated) VALUES ($id, $bot, $key, $text, 'botd', $state, $result, $error, $now, $now)"),
 	subStart: db.query("INSERT INTO subagents (bot, id, task, agent, description, status, started) VALUES ($bot, $id, $task, $agent, $description, 'running', $started)"),
 	subNote: db.query("UPDATE subagents SET description = coalesce(nullif($description, ''), description), task = coalesce(task, $task) WHERE bot = $bot AND id = $id AND status = 'running'"),
+	subRevive: db.query("UPDATE subagents SET status = 'running', ended = NULL, description = coalesce(nullif($description, ''), description) WHERE rowid = (SELECT rowid FROM subagents WHERE bot = $bot AND id = $id AND status = 'stopped' ORDER BY started DESC LIMIT 1)"),
 	subEnd: db.query("UPDATE subagents SET status = $status, description = coalesce(nullif($description, ''), description), ended = $now WHERE bot = $bot AND id = $id AND status = 'running'"),
 	subGone: db.query("UPDATE subagents SET status = 'stopped', ended = $now WHERE bot = $bot AND status = 'running' AND id NOT IN (SELECT value FROM json_each($keep))"),
 	subRunning: db.query("SELECT * FROM subagents WHERE status = 'running' ORDER BY bot, id"),
@@ -407,7 +408,7 @@ function subagent(bot: string, task: unknown, sub: any) {
 	const now = Date.now();
 	const fields = { bot, id, description: String(sub.description ?? ""), task: typeof task === "string" ? task : null };
 	if (sub.status === "running") {
-		if (!q.subNote.run(fields).changes) q.subStart.run({ ...fields, agent: String(sub.agent ?? ""), started: Number(sub.started) || now });
+		if (!q.subNote.run(fields).changes && !q.subRevive.run({ bot, id, description: fields.description }).changes) q.subStart.run({ ...fields, agent: String(sub.agent ?? ""), started: Number(sub.started) || now });
 	} else if (["done", "failed", "stopped"].includes(sub.status)) {
 		q.subEnd.run({ bot, id, description: fields.description, status: sub.status, now });
 		q.subPrune.run({ before: now - 7 * 86_400_000 });

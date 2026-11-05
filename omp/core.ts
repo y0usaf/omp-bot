@@ -15,13 +15,13 @@ type Subagent = { id: string; agent: string; description: string; status: string
 const subagents: { running: Map<string, Subagent>; tell?: (sub: Subagent) => void } = ((globalThis as any)[Symbol.for("omp-bot.subagents")] ??= { running: new Map() });
 const ENDED = { completed: "done", failed: "failed" };
 
-function noteSubagent(id: unknown, agent: unknown, description: unknown, status: string) {
+function noteSubagent(id: unknown, agent: unknown, description: unknown, status: string, started?: unknown) {
 	if (typeof id !== "string" || !id) return;
 	const text = typeof description === "string" ? description.trim() : "";
 	const known = subagents.running.get(id);
 	if (status === "started") {
 		if (known) return;
-		const sub = { id, agent: typeof agent === "string" ? agent : "", description: text, status: "running", started: Date.now() };
+		const sub = { id, agent: typeof agent === "string" ? agent : "", description: text, status: "running", started: Number(started) || Date.now() };
 		subagents.running.set(id, sub);
 		return subagents.tell?.(sub);
 	}
@@ -224,7 +224,7 @@ export default function core(pi) {
 		});
 	}
 
-	pi.events.on("task:subagent:lifecycle", payload => noteSubagent(payload?.id, payload?.agent, payload?.description, String(payload?.status)));
+	pi.events.on("task:subagent:lifecycle", payload => noteSubagent(payload?.id, payload?.agent, payload?.description, String(payload?.status), payload?.started));
 	pi.events.on("task:subagent:progress", payload => noteSubagent(payload?.progress?.id, payload?.agent, payload?.progress?.description, "progress"));
 
 	pi.events.on("ompd:background", ({ id }) => {

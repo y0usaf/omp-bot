@@ -9,6 +9,7 @@ const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
 const TAIL_BYTES = 32 * 1024;
 const NOTICE_BYTES = 6 * 1024;
 const NOTICE_LINES = 50;
+const REPORT_BYTES = 64 * 1024;
 const OMPD = join(ROOT, "bin", "ompd");
 const SERVICE = process.env.OMPD_SERVICE === "1";
 
@@ -60,7 +61,18 @@ function failed(job: Job): boolean {
 	return job.state === "lost" || job.code !== 0;
 }
 
+function ownReport(job: Job): string | undefined {
+	try {
+		const text = readFileSync(join(dir(job.id), "report"), "utf8").trimEnd();
+		return text.length > REPORT_BYTES ? `${text.slice(0, REPORT_BYTES)}\n[cut at ${REPORT_BYTES} bytes; the whole report is in ${join(dir(job.id), "report")}]` : text;
+	} catch {
+		return undefined;
+	}
+}
+
 function report(job: Job): string {
+	const own = ownReport(job);
+	if (own !== undefined) return `[ompd job ${job.id} ended: ${outcome(job)} after ${seconds(job)}]\n${own}\n(log: ${join(dir(job.id), "log")})`;
 	const line = job.command.trim().replace(/\s*\n\s*/g, " ↵ ");
 	const command = line.length > 200 ? `${line.slice(0, 200)}…` : line;
 	const out = tail(job.id, NOTICE_BYTES, NOTICE_LINES).trimEnd();
@@ -96,7 +108,7 @@ async function call(message: Record<string, unknown>): Promise<any> {
 
 let owner: string | undefined;
 const cut = new Set<string>();
-const awaited = new Set<string>();
+const awaited: Set<string> = ((globalThis as any)[Symbol.for("ompd.awaited")] ??= new Set());
 const sent = new Set<string>();
 
 function exited(job: Job): Job | undefined {
@@ -112,6 +124,7 @@ function exited(job: Job): Job | undefined {
 function ownerOf(ctx): string {
 	if (ctx.agent?.kind === "sub") return `sub:${ctx.sessionManager.getSessionId()}`;
 	if (owner) return owner;
+	if (process.env.OMPD_OWNER) return process.env.OMPD_OWNER;
 	return process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : `session:${ctx.sessionManager.getSessionId()}`;
 }
 
@@ -129,9 +142,10 @@ export default function ompd(pi) {
 
 	async function ended(job: Job) {
 		if (awaited.has(job.id) || load(job.id)?.delivered) return;
-		if (job.tool && cut.has(job.tool)) {
+		const toolCall = job.tool?.replace(/#\d+$/, "");
+		if (toolCall && cut.has(toolCall)) {
 			main.setTimeout(() => {
-				cut.delete(job.tool!);
+				cut.delete(toolCall);
 				const now = load(job.id);
 				if (now && !now.delivered) void ended(now);
 			}, 30_000);
@@ -192,6 +206,7 @@ export default function ompd(pi) {
 	pi.on("tool_call", async event => {
 		if (!cut.delete(event.toolCallId)) return undefined;
 		if (event.toolName === "bash" && !event.input?.pty) return undefined;
+		if (event.toolName === "task" && (globalThis as any)[Symbol.for("omp-bot.helpers")]) return undefined;
 		return {
 			block: true,
 			reason: `This ${event.toolName} call was cut off when the last run ended, before it returned. Its outcome is unknown and it was not run again: check what it did before deciding to run it again.`,
