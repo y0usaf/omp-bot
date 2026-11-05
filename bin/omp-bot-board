@@ -64,8 +64,6 @@ if ! ctl state 2>/dev/null; then
 		rm -rf "$fixtures"
 		mkdir -p "$fixtures/tern" "$fixtures/plugins/fixtures"
 		ln -sfn "$root/task-board" "$fixtures/plugins/fixtures/task-board"
-		# the board's chao.luau reads the Chao art from ../tern/chao beside it
-		ln -sfn "$root/tern" "$fixtures/plugins/fixtures/tern"
 		[ ! -d "$TERN_CONFIG_DIR/plugins/ozette" ] || ln -sfn "$TERN_CONFIG_DIR/plugins/ozette" "$fixtures/plugins/fixtures/ozette"
 		STENCIL_FIXTURE_ROOT="$fixtures/tern" setsid -f tern serve --control "$sock" --out "$state/shots" >"$state/tern.log" 2>&1
 	else

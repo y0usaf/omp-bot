@@ -9,59 +9,94 @@ local HEALTH_POLL_MS = 15000
 
 local CHAO_EYES = { "oval", "round", "dot" }
 local CHAO_TYPES = { "neutral", "neutral", "hero", "dark" }
-local CHAO_ART = tern.plugin.dir .. "/chao/"
-local TINT_HEX: { [string]: string } = {
-	red = "#ff4d5e",
-	orange = "#ff8a3d",
-	yellow = "#f2b705",
-	green = "#2fbf71",
-	teal = "#19b8c4",
-	blue = "#3d7bff",
-	purple = "#8f6bff",
-	pink = "#ff5fa8",
+local SPRITES: { [string]: { string } } = {
+	neutral = {
+		"...........oo......",
+		".........ooddo.....",
+		".....oooodiaado....",
+		"...oonijjjjjjino...",
+		"..oembbbbbbbbbmeo..",
+		".osmbbbbbbbbbbbmso.",
+		".ombbbbbbbbbbbbbmo.",
+		"ocmbbwwbbbbbwwbbmco",
+		"osmbweewbbbweewbmso",
+		"osmbweewbbbweewbmso",
+		"osmmweewbbbweewmmso",
+		"ocmmweewbbbweewmmco",
+		"oesmmwwmmmmmwwmmseo",
+		".oecsssssssssssceo.",
+		"..oooecsssssceooo..",
+		".oosmcmmmmmmmcmsoo.",
+		"odjbmsmbbbbbmsmbjdo",
+		"oiaiecsmmmmmsceiaio",
+		"odinoecsssssceonido",
+		".ooodsseoooessdooo.",
+		"..odajmscocsmjado..",
+		"..ondimscocsmidno..",
+		"...oooooo.oooooo...",
+	},
+	hero = {
+		"........oo.....oo........",
+		".......oaao...oaao.......",
+		".......oajjo.ojjao.......",
+		"........ojbo.objo........",
+		".........obbobbo.........",
+		".........oocbcoo.........",
+		".......oocbbbbbcoo.......",
+		"......obbbbbbbbbbbo......",
+		".....ocbbbbbbbbbbbco.....",
+		"....osbbbbbbbbbbbbbso....",
+		"....obbbbbbbbbbbbbbbo....",
+		"...ocbbbccbbbbbccbbbco...",
+		"...osbbccbcbbbccbcbbso...",
+		"...osbbcbbcbbbcbbcbbso...",
+		"...osbbcbbcbbbcbbcbbso...",
+		"...osbbcbccbbbcbccbbso...",
+		"...ocsbbccbbbbbccbbsco...",
+		"..oooccsbbbbbbbbbsccooo..",
+		".oyyyooocccssscccoooyyyo.",
+		"oyyyoosbcsbbbbbscbsooyyyo",
+		"oyyoajjbsbbbbbbbsbjjaoyyo",
+		".oooajjjcsbbbbbscjjjaooo.",
+		"...oaaaoccsssssccoaaao...",
+		"....oooajscooocsjaooo....",
+		".....oajjjscocsjjjao.....",
+		".....oaaajscocsjaaao.....",
+		"......oooooo.oooooo......",
+	},
+	dark = {
+		"...........oooo........",
+		".......ooooooooooo.oo..",
+		"....ooooobbbbbbbboodao.",
+		"...ooobbbbbbbboobbbddao",
+		"..oobbbbbbbbbbbbobboodo",
+		".oobbbbbbbbbbbbbbobo...",
+		".obbbbbbbbbbbbbbbooo...",
+		"oobbbbbbbbbbbbbbboo....",
+		"oobbewbbbbbbbwebboo....",
+		"oobbewwbbbbbwwebboo....",
+		"oobbewwbbbbbwwebboo....",
+		"oobbewwebbbewwebboo....",
+		"oobbeweebbbeweebboo....",
+		"ooobbeebbbbbeebbooo....",
+		".oooobbbbbbbbboooo.....",
+		"..oooodooooodoooo......",
+		".ddoboaoooooaobodd.....",
+		"dadobobaaaaabobodao....",
+		"daddooooaaaooooddao....",
+		"daaaoooobbbooooaaao....",
+		".ooddoooooooooddoo.....",
+		"..oaddbboooboddao......",
+		"..oaaadbbobbdaaao......",
+		"...oooooo.oooooo.......",
+	},
 }
-local CHAO_EYES_ALL = { "oval", "round", "dot", "happy", "sad", "half", "shut" }
-local CHAO_GLYPHS = { "ask", "bang", "heart", "swirl", "droop", "z" }
-
-local function inner(name: string): string
-	return (tern.fs.read(CHAO_ART .. name .. ".svg"):match("<svg[^>]*>(.*)</svg>") or "")
-end
-
--- Tern's CSS loads an SVG only as a data URL with a size, its markup percent-escaped.
-local function art(body: string): string
-	local svg = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="32" viewBox="0 0 26 32">' .. body:gsub("%s*\n%s*", "") .. "</svg>"
-	return 'url("data:image/svg+xml,' .. svg:gsub('"', "'"):gsub("[%%<>#]", function(c)
-		return string.format("%%%02X", string.byte(c))
-	end) .. '")'
-end
-
--- Chao art (tern/chao/*.svg, drawn in purple) as CSS: each layer of a tab's Chao, each tint recoloured.
-local function chao_art()
-	local rules = {}
-	for _, kind in ipairs({ "neutral", "hero", "dark" }) do
-		local body = inner(kind)
-		rules[#rules + 1] = "[data-role='omp.bot.type." .. kind .. "'] [data-role='omp.bot.emote.ball'] { background-image: " .. art(inner("ball-" .. kind)) .. "; }"
-		for tint, hex in TINT_HEX do
-			local holders = {}
-			for _, holder in ipairs({ "chat", "hero", "top", "eventbox", "xrun", "xface" }) do
-				holders[#holders + 1] = "[data-role='omp.bot." .. holder .. "." .. tint .. "'] [data-role='omp.bot.type." .. kind .. "'] [data-role='omp.bot.skin']"
-			end
-			rules[#rules + 1] = table.concat(holders, ", ") .. " { background-image: " .. art((body:gsub(TINT_HEX.purple, hex))) .. "; }"
-		end
-	end
-	for _, eyes in ipairs(CHAO_EYES_ALL) do
-		rules[#rules + 1] = "[data-role$='.eyes.own." .. eyes .. "'], [data-role$='.eyes.mood." .. eyes .. "'] { background-image: " .. art(inner("eyes-" .. eyes)) .. "; }"
-	end
-	for _, glyph in ipairs(CHAO_GLYPHS) do
-		rules[#rules + 1] = "[data-role='omp.bot.emote." .. glyph .. "'] { background-image: " .. art(inner("glyph-" .. glyph)) .. "; }"
-	end
-	tern.css("chao", table.concat(rules, "\n"))
-end
-
--- The rail's mini Chao: body, ball and eyes in one picture.
-local function mini(kind: string, tint: string): string
-	return art(((inner(kind) .. inner("ball-" .. kind) .. inner("eyes-oval")):gsub(TINT_HEX.purple, TINT_HEX[tint] or TINT_HEX.purple)))
-end
+local INK: { [string]: string } = { o = "#000", w = "#f8f8f8", b = "var(--mb)", m = "var(--mm)", s = "var(--ms)", c = "var(--mc)", e = "var(--me)", a = "var(--ma)", i = "var(--mi)", d = "var(--md)", n = "var(--mn)", j = "var(--mj)", y = "var(--my)" }
+local TYPE_INK: { [string]: string } = {
+	neutral = "--mb: color-mix(in srgb, var(--bot) 35%, #fff); --mm: color-mix(in srgb, var(--bot) 50%, #fff); --ms: color-mix(in srgb, var(--bot) 70%, #fff); --mc: color-mix(in srgb, var(--bot) 82%, #000); --me: color-mix(in srgb, var(--bot) 55%, #000); --ma: #f8f820; --mi: #d8d868; --md: #c0b830; --mn: #88a850; --mj: #d8f8b0;",
+	hero = "--mb: #f8f8f8; --ms: #bec2bf; --mc: #647c9a; --mj: #c8ebf1; --ma: #89a8dd; --my: #f7df56;",
+	dark = "--mb: color-mix(in srgb, var(--bot) 22%, #152745); --me: #1c63a1; --ma: #d52b38; --md: #a71a30;",
+}
 
 local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
@@ -77,7 +112,23 @@ local function chao(bot: Bot): string
 	h = bit32.bxor(h, bit32.rshift(h, 16))
 	local kind = CHAO_TYPES[(h // #CHAO_EYES) % #CHAO_TYPES + 1]
 	local own = type(bot.chao) == "string" and { type = bot.chao } or (type(bot.chao) == "table" and bot.chao or {})
-	return table.find(CHAO_TYPES, own.type) and own.type or kind
+	return SPRITES[own.type] and own.type or kind
+end
+
+local function mini(kind: string): string
+	local rows = SPRITES[kind]
+	local left = (18 - #rows[1]) // 2
+	local top = (18 - #rows) // 2
+	local shadows: { string } = {}
+	for y, line in ipairs(rows) do
+		for x = 1, #line do
+			local ink = INK[line:sub(x, x)]
+			if ink then
+				shadows[#shadows + 1] = (left + x + 29) .. "px " .. (top + y + 29) .. "px 0 " .. ink
+			end
+		end
+	end
+	return table.concat(shadows, ", ")
 end
 
 local function quote(s: string): string
@@ -111,7 +162,7 @@ local function show_roles(bots: { Bot })
 		if bot.tint then
 			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
 			local kind = chao(bot)
-			rules[#rules + 1] = dot .. "::after { background-image: " .. mini(kind, bot.tint) .. "; }"
+			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(kind) .. "; }"
 		end
 	end
 	tern.css("roles", table.concat(rules, "\n"))
@@ -434,7 +485,6 @@ if legacy then
 	tern.kv.set("open", nil)
 end
 
-chao_art()
 show(roster())
 tern.timer(0, tick)
 
