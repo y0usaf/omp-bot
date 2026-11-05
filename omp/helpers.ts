@@ -169,10 +169,6 @@ export default function helpers(pi) {
 	let agents: Promise<any[]> | undefined;
 	pi.setLabel("Bot helpers");
 
-	function announce(helper: Helper, status: string) {
-		pi.events.emit("task:subagent:lifecycle", { id: helper.id, agent: helper.agent, description: helper.description, status, started: helper.started });
-	}
-
 	async function definitions(cwd: string): Promise<any[]> {
 		agents ??= import("@oh-my-pi/pi-coding-agent/task/discovery").then(({ discoverAgents }) => discoverAgents(cwd)).then(found => found.agents);
 		return agents;
@@ -228,7 +224,6 @@ export default function helpers(pi) {
 			throw error;
 		}
 		writeAtomic(join(home, "helper.json"), JSON.stringify(helper));
-		announce(helper, "started");
 		return helper;
 	}
 
@@ -292,19 +287,12 @@ export default function helpers(pi) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (ctx.agent?.kind === "sub" || main) return;
 		main = ctx;
-		for (const helper of records()) if (helper.parent === self() && running(helper)) announce(helper, "started");
 		try {
 			receive(await patchBus());
 		} catch (error) {
 			console.error(`omp-bot: helper messages are off: ${error instanceof Error ? error.message : error}`);
 		}
 		if (SELF) await finishWhenDone(ctx);
-	});
-
-	pi.events.on("ompd:ended", ({ id }) => {
-		const helper = records().find(found => found.job === id);
-		const job = load(id);
-		if (helper && job) announce(helper, job.state === "done" && job.code === 0 ? "completed" : "failed");
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -396,7 +384,6 @@ export default function helpers(pi) {
 						if (!job) continue;
 						done.set(helper.id, job);
 						await call({ op: "ack", id: helper.job });
-						announce(helper, job.state === "done" && job.code === 0 ? "completed" : "failed");
 					}
 					if (done.size < started.length) await Bun.sleep(250);
 				}
