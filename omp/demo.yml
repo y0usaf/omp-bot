@@ -1,6 +1,7 @@
 advisor:
   enabled: false
 display:
+  collapseCompacted: false
   hideToolActivity: true
 personality: none
 startup:
