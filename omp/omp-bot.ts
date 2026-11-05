@@ -763,6 +763,8 @@ function patchTranscript(state) {
 		return;
 	}
 	const inner = proto.nativeBlocks;
+	const removable = proto.canRemoveBlock;
+	const clear = proto.clear;
 	const shownBy = new WeakMap();
 	const wrapped = new WeakMap();
 	const events = new WeakMap();
@@ -771,6 +773,20 @@ function patchTranscript(state) {
 	const times = new WeakMap();
 	const mores = new WeakMap();
 	proto[PATCHED] = { state };
+
+	proto.canRemoveBlock = function (component) {
+		if (proto[PATCHED].state.on && String(component?.describe?.()?.p?.role ?? "").startsWith("omp.irc.")) return false;
+		return removable.call(this, component);
+	};
+
+	proto.clear = function () {
+		const s = proto[PATCHED].state;
+		if (s.clock) {
+			s.clock = new Clock(s.clock.session);
+			s.restoring = true;
+		}
+		return clear.call(this);
+	};
 
 	function advises(block) {
 		let is = advice.get(block);
