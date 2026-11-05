@@ -2,6 +2,7 @@ import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-messa
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
+import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 import { col, elapsed, md, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
@@ -11,6 +12,7 @@ import { chaoOf, drawChao } from "./chao.ts";
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
 const DOCK_PATCHED = Symbol.for("omp-bot.dock");
+const ASK_PATCHED = Symbol.for("omp-bot.ask");
 const NONE = col([], { role: "omp.bot.none" });
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
@@ -849,6 +851,38 @@ function patchDock(state) {
 	};
 }
 
+function findRole(native, role) {
+	if (!native || typeof native !== "object") return undefined;
+	if (native.p?.role === role) return native;
+	for (const child of native.c ?? []) {
+		const found = findRole(child, role);
+		if (found) return found;
+	}
+	return undefined;
+}
+
+function patchAskKeys(state) {
+	const proto = AskDialogComponent.prototype;
+	if (proto[ASK_PATCHED]) {
+		proto[ASK_PATCHED].state = state;
+		return;
+	}
+	const inner = proto.handleInput;
+	proto[ASK_PATCHED] = { state };
+	proto.handleInput = function (keyData) {
+		if (proto[ASK_PATCHED].state.on && /^[1-9]$/.test(keyData)) {
+			const native = this.describe({ supports: () => false });
+			const options = native?.p?.role === "omp.editor.ask" && !findRole(native, "omp.ask.summary") ? findRole(native, "omp.ask.options") : undefined;
+			const item = options?.c?.[Number(keyData) - 1];
+			if (item?.key) {
+				const multi = item.p?.role === "omp.ask.check";
+				return this.handleNativeEvent({ type: multi ? "select" : "activate", key: options.key, item: item.key });
+			}
+		}
+		return inner.call(this, keyData);
+	};
+}
+
 function patchWorkingRow(state) {
 	const proto = Loader.prototype;
 	if (proto[HUD_PATCHED]) {
@@ -942,6 +976,7 @@ export default function ompBot(pi) {
 		patchTranscript(state);
 		patchWorkingRow(state);
 		patchDock(state);
+		patchAskKeys(state);
 		listen();
 		mount();
 		bot.nap();
