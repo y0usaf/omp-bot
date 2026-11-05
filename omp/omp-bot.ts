@@ -474,6 +474,8 @@ class BotEvent {
 		this.open = false;
 		this.count = 1;
 		this.ts = undefined;
+		this.node = undefined;
+		this.drawn = undefined;
 	}
 
 	invalidate() {
@@ -505,19 +507,23 @@ class BotEvent {
 
 	describe(cx) {
 		if (cx) lastCx = cx;
+		const label = this.label();
+		const whole = this.open ? this.block.describe(cx) : undefined;
+		const drawn = this.drawn;
+		if (this.node && drawn.label === label && drawn.open === this.open && drawn.whole === whole) return this.node;
+		this.drawn = { label, open: this.open, whole };
 		const title = this.info.peer ? `Open the conversation with ${this.info.name}` : this.open ? "Hide full message" : "Show full message";
 		let detail;
-		if (this.open) {
-			const whole = this.block.describe(cx);
+		if (whole) {
 			detail = col([whole.k === "card" ? { ...whole, p: { ...whole.p, collapsible: false, collapsed: false, preview: undefined } } : whole], {
 				role: "omp.bot.event.detail",
 			});
 		}
-		return col(
+		this.node = col(
 			[
 				row(
 					[
-						text(this.label(), { role: "omp.bot.event.action", wrap: "none" }),
+						text(label, { role: "omp.bot.event.action", wrap: "none" }),
 						col([drawChao(this.look, "idle")], { role: "omp.bot.event.avatar" }),
 						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
 						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
@@ -536,6 +542,7 @@ class BotEvent {
 			].filter(Boolean),
 			{ role: `omp.bot.eventbox.${this.look.tint}`, align: "center", gap: "xs" },
 		);
+		return this.node;
 	}
 }
 
