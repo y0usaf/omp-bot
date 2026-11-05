@@ -146,14 +146,6 @@
 	font-weight: 500;
 }
 
-[data-role='omp.bot.event.command'] {
-	max-width: min(60vw, 420px);
-	color: var(--t2);
-	margin-left: 4px;
-	font-family: var(--mono, ui-monospace, monospace);
-	font-size: 0.95em;
-}
-
 [data-role='omp.bot.event.avatar'],
 [data-role^='omp.bot.xface.'],
 [data-role='omp.bot.xavatar'] {
@@ -183,10 +175,6 @@
 	align-self: center;
 	width: min(100%, 720px);
 	margin: 4px auto 10px;
-}
-
-[data-role='omp.bot.event.detail'] :is([data-role='omp.run.state'], [data-role='omp.run.time']) {
-	flex: none;
 }
 
 [data-role='omp.bot.xpage'] {

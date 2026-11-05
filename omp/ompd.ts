@@ -110,6 +110,7 @@ function exited(job: Job): Job | undefined {
 }
 
 function ownerOf(ctx): string {
+	if (ctx.agent?.kind === "sub") return `sub:${ctx.sessionManager.getSessionId()}`;
 	if (owner) return owner;
 	return process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : `session:${ctx.sessionManager.getSessionId()}`;
 }
@@ -138,7 +139,7 @@ export default function ompd(pi) {
 		}
 		if (!sent.has(job.id) && !delivered(job.id)) {
 			sent.add(job.id);
-			pi.sendMessage({ customType: "ompd-job", content: report(job), display: true, details: { id: job.id } }, { deliverAs: "followUp", triggerTurn: true });
+			pi.sendMessage({ customType: "ompd-job", content: report(job), display: !process.env.OMP_BOT_NAME, details: { id: job.id } }, { deliverAs: "followUp", triggerTurn: true });
 		}
 		await call({ op: "ack", id: job.id });
 		pi.events.emit("ompd:ended", { id: job.id });
@@ -226,7 +227,8 @@ export default function ompd(pi) {
 			});
 			awaited.add(job.id);
 			try {
-				const deadline = params.async ? 0 : Date.now() + FOREGROUND_S * 1000;
+				const sub = ctx.agent?.kind === "sub";
+				const deadline = sub ? Infinity : params.async ? 0 : Date.now() + FOREGROUND_S * 1000;
 				let shown = "";
 				for (;;) {
 					const now = exited(load(job.id) ?? job);
@@ -239,6 +241,11 @@ export default function ompd(pi) {
 					if (signal?.aborted || Date.now() >= deadline) {
 						const last = exited(load(job.id) ?? job);
 						if (last) continue;
+						if (sub) {
+							await call({ op: "kill", id: job.id });
+							await call({ op: "ack", id: job.id });
+							throw new Error(`${tail(job.id, 4096).trimEnd()}\n\n[Stopped: ompd job ${job.id} killed]`);
+						}
 						pi.events.emit("ompd:background", { id: job.id });
 						const why = signal?.aborted ? "Stopped waiting" : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
 						const out = tail(job.id, 4096).trimEnd();

@@ -5,7 +5,6 @@ import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, elapsed, md, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
-import { runBox, runFoot, runInput, runOutput } from "@oh-my-pi/pi-tui/tools/native-view";
 import { matchesKey, replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { chaoOf, drawChao } from "./chao.ts";
 
@@ -20,6 +19,7 @@ const THINKING = ["Thinking…", "Hmm, let me see…", "Mulling it over…", "Wo
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
 const PENDING = Symbol("pending");
+const HIDDEN = Symbol("hidden");
 let lastCx;
 
 function when(ts, hour12, now = new Date()) {
@@ -403,60 +403,6 @@ function bodyText(block) {
 	return "";
 }
 
-const JOB = /^\[ompd job (\S+?)(?: ended: (.*?)(?: after ((?:\d+m)?\d+s|-))?(?:, run (\d+))?)?\]?$/;
-
-function jobStatus(outcome) {
-	const exit = outcome.match(/^exit (-?\d+)$/);
-	if (exit) {
-		const code = Number(exit[1]);
-		return code === 0
-			? { label: "exit 0", state: "done", icon: "check", tone: "muted", mark: "✓" }
-			: { label: `exit ${code}`, state: "failed", exitCode: code, icon: "x-circle", tone: "error", mark: "✗" };
-	}
-	if (outcome.startsWith("outcome unknown")) return { label: "outcome unknown", state: "failed", icon: "warn", tone: "warning", mark: "?" };
-	if (outcome.includes("timeout")) return { label: "timed out", state: "timed-out", icon: "clock", tone: "warning", mark: "⏱" };
-	if (outcome.startsWith("killed")) return { label: "killed", state: "cancelled", icon: "clock", tone: "muted", mark: "⏱" };
-	return { label: outcome ? "failed" : "ended", state: "failed", icon: "x-circle", tone: "error", mark: "✗" };
-}
-
-function jobInfo(body) {
-	const lines = body.split("\n");
-	const head = lines[0].match(JOB);
-	if (head) lines.shift();
-	const [, id, outcome = "", took = "", runs] = head ?? [];
-	const log = lines.at(-1)?.match(/^\(log: (.+)\)$/)?.[1];
-	if (log) lines.pop();
-	const command = lines[0]?.startsWith("$ ") ? lines.shift().slice(2) : "";
-	const out = lines.join("\n");
-	const time = took.match(/^(?:(\d+)m)?(\d+)s$/);
-	return {
-		id,
-		outcome,
-		took,
-		ms: time ? (Number(time[1] ?? 0) * 60 + Number(time[2])) * 1000 : undefined,
-		runs: Number(runs ?? 1),
-		command,
-		output: out === "(no output)" ? "" : out,
-		log,
-		status: jobStatus(outcome),
-	};
-}
-
-function jobDetail(job) {
-	const facts = job.id ? [`job ${job.id}`] : [];
-	if (job.runs > 1) facts.push(`run ${job.runs}`);
-	if (job.outcome && !/^exit -?\d+$/.test(job.outcome)) facts.push(job.outcome);
-	if (job.log) facts.push(`log ${job.log}`);
-	return runBox(
-		[
-			job.command && runInput(job.command, { role: "omp.tool.bash.command", lang: "bash", wrap: true }),
-			job.output.length > 0 && runOutput(job.output, { role: "omp.tool.bash.output", previewLines: 16 }),
-			runFoot({ state: job.status.state, exitCode: job.status.exitCode, elapsedMs: job.ms, facts }),
-		],
-		{ key: "run", tone: job.status.tone === "muted" ? undefined : job.status.tone },
-	);
-}
-
 function spansText(spans) {
 	return (Array.isArray(spans) ? spans : []).map(part => part?.t ?? "").join("");
 }
@@ -501,7 +447,7 @@ function eventInfo(block, bot) {
 		if (name) return { action: "Messaged", name, peer: name, from: bot.name, body };
 	}
 	const body = bodyText(block);
-	if (head === "ompd-job" || body.startsWith("[ompd job ")) return { job: jobInfo(body) };
+	if (head === "ompd-job" || body.startsWith("[ompd job ")) return HIDDEN;
 	if (body.startsWith("[omp-bot task ")) {
 		const marker = body.slice(0, body.indexOf("]") + 1);
 		const origin = marker.match(/from (?:bot|reply):(.+?)(?:,|\])/)?.[1]?.trim();
@@ -522,7 +468,7 @@ class BotEvent {
 		this.info = info;
 		this.state = state;
 		this.bot = state.bot;
-		this.look = info.job ? undefined : chaoOf(info.name);
+		this.look = chaoOf(info.name);
 		this.open = false;
 		this.count = 1;
 		this.ts = undefined;
@@ -547,11 +493,7 @@ class BotEvent {
 	}
 
 	render(width) {
-		const job = this.info.job;
-		const line = job
-			? ` ${[`${job.status.mark} ${job.status.label}`, job.took, job.command].filter(Boolean).join(" · ")} ${this.open ? "−" : "+"}`
-			: ` ${this.label()} ◉ ${this.info.name} ${this.info.peer ? "›" : this.open ? "−" : "+"}`;
-		const summary = truncateToWidth(line, width);
+		const summary = truncateToWidth(` ${this.label()} ◉ ${this.info.name} ${this.info.peer ? "›" : this.open ? "−" : "+"}`, width);
 		return this.open ? [summary, ...this.block.render(width)] : [summary];
 	}
 
@@ -561,12 +503,9 @@ class BotEvent {
 
 	describe(cx) {
 		if (cx) lastCx = cx;
-		const job = this.info.job;
 		const title = this.info.peer ? `Open the conversation with ${this.info.name}` : this.open ? "Hide full message" : "Show full message";
 		let detail;
-		if (this.open && job) {
-			detail = col([jobDetail(job)], { role: "omp.bot.event.detail" });
-		} else if (this.open) {
+		if (this.open) {
 			const whole = this.block.describe(cx);
 			detail = col([whole.k === "card" ? { ...whole, p: { ...whole.p, collapsible: false, collapsed: false, preview: undefined } } : whole], {
 				role: "omp.bot.event.detail",
@@ -576,17 +515,9 @@ class BotEvent {
 			[
 				row(
 					[
-						...(job
-							? [
-									node("icon", { name: job.status.icon, tone: job.status.tone, aria: job.status.label }),
-									text([job.status.label, job.took].filter(Boolean).join(" · "), { role: "omp.bot.event.action", wrap: "none" }),
-									...(job.command ? [text(job.command, { role: "omp.bot.event.command", wrap: "none", truncate: "end", shrink: 1 })] : []),
-								]
-							: [
-									text(this.label(), { role: "omp.bot.event.action", wrap: "none" }),
-									col([drawChao(this.look, "idle")], { role: "omp.bot.event.avatar" }),
-									text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
-								]),
+						text(this.label(), { role: "omp.bot.event.action", wrap: "none" }),
+						col([drawChao(this.look, "idle")], { role: "omp.bot.event.avatar" }),
+						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
 						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
 					],
 					{
@@ -601,7 +532,7 @@ class BotEvent {
 				),
 				detail,
 			].filter(Boolean),
-			{ role: `omp.bot.eventbox.${this.look?.tint ?? this.bot.tint}`, align: "center", gap: "xs" },
+			{ role: `omp.bot.eventbox.${this.look.tint}`, align: "center", gap: "xs" },
 		);
 	}
 }
@@ -807,6 +738,7 @@ function patchTranscript(state) {
 			if (event !== PENDING) events.set(block, event);
 		}
 		if (event === PENDING) return block;
+		if (event === HIDDEN) return undefined;
 		if (!reply && !(block instanceof UserMessageComponent) && !event) return block;
 		let wrapper = wrapped.get(block);
 		if (!wrapper) {
