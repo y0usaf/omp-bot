@@ -66,12 +66,17 @@ type State = {
 	-- whether a render was asked for, and a view drawn, since the last read: see poll
 	asked: boolean,
 	viewed: boolean,
+	-- the minute of the last render, for the ages it shows
+	minute: number,
 	closed: boolean,
 	nfx: number,
 }
 
-local FINISHED = { done = true, failed = true }
-local WORKING = { running = true, queued = true, jobs = true }
+local FINISHED = { done = true, failed = true, stopped = true }
+local WORKING = { running = true, queued = true, jobs = true, sub = true }
+-- at work, a bot's tasks in this order: the one it runs, one waiting on its jobs, then its queue
+local WORK_ORDER = { running = 1, jobs = 2, queued = 3 }
+local WORK_ROWS = 40
 local STATE_LABEL = {
 	waiting = "waiting on you",
 	running = "running",
@@ -79,6 +84,7 @@ local STATE_LABEL = {
 	jobs = "on its jobs",
 	done = "done",
 	failed = "failed",
+	stopped = "stopped",
 	approve = "approved",
 	deny = "denied",
 	handle = "handled",
@@ -177,7 +183,7 @@ end
 local function build(state: State, board: tasks.Board)
 	local items: { Item } = {}
 	state.by_id = {}
-	for _, list in { board.decisions, board.working, board.finished } do
+	for _, list in { board.decisions, board.working, board.subagents, board.finished } do
 		for _, it in list do
 			it.bumped = state.bumped[it.id]
 			table.insert(items, it)
@@ -247,8 +253,11 @@ local function load(state: State)
 		return
 	end
 	state.loading = true
+	-- Renders only when the read changed something or a minute passed (the ages): a render redraws the board.
 	local function finish(err: string?, out: string?)
 		state.loading = false
+		local before = state.error
+		local changed = not state.loaded
 		state.loaded = true
 		if err then
 			state.error = err
@@ -258,13 +267,18 @@ local function load(state: State)
 				state.sig = out
 				state.error = nil
 				build(state, board)
+				changed = true
 			else
 				state.error = "omp-bot-ctl board: " .. tostring(board)
 			end
 		else
 			state.error = nil
 		end
-		render(state)
+		local minute = os.time() // 60
+		if changed or state.error ~= before or minute ~= state.minute then
+			state.minute = minute
+			render(state)
+		end
 		if state.again then
 			state.again = false
 			load(state)
@@ -283,7 +297,8 @@ local function load(state: State)
 end
 
 -- Reads the queue again every POLL_MS while the board is open. A closed block hears of no close, but Tern
--- stops asking it for views: a render since the last read that drew nothing means it is gone.
+-- stops asking it for views: a render since the last read that drew nothing means it is gone (renders come
+-- at least once a minute, for the ages).
 local function poll(state: State)
 	state.poll = tern.timer(POLL_MS, function()
 		state.poll = nil
@@ -606,6 +621,80 @@ local function list_view(state: State): Node
 	return el("tb-list", c, nil, "list")
 end
 
+-- What the bots are doing, bot by bot: its tasks, the one it runs first (or "in chat" when it has none),
+-- then each subagent it runs, nested ones under their parent, with how long it has run. Rows to read, never
+-- to answer.
+local function work_view(state: State, working: { Item }): Node
+	local groups: { [string]: { tasks: { Item }, subs: { Item } } } = {}
+	local bots: { string } = {}
+	for _, it in working do
+		local g = groups[it.bot]
+		if not g then
+			g = { tasks = {}, subs = {} }
+			groups[it.bot] = g
+			table.insert(bots, it.bot)
+		end
+		table.insert(if it.sub then g.subs else g.tasks, it)
+	end
+	table.sort(bots, function(a: string, b: string)
+		if (a == "CU-Bot") ~= (b == "CU-Bot") then
+			return a == "CU-Bot"
+		end
+		return a < b
+	end)
+	local rows: { Node } = {}
+	local shown = 0
+	local function add(node: Node)
+		shown += 1
+		if shown <= WORK_ROWS then
+			table.insert(rows, node)
+		end
+	end
+	for _, bot in bots do
+		local g = groups[bot]
+		table.sort(g.tasks, function(a: Item, b: Item)
+			local oa, ob = WORK_ORDER[a.state] or 9, WORK_ORDER[b.state] or 9
+			return if oa ~= ob then oa < ob else a.at < b.at
+		end)
+		table.sort(g.subs, function(a: Item, b: Item)
+			local sa, sb = a.sub :: any, b.sub :: any
+			return sa.path < sb.path
+		end)
+		local lane = if bot == "CU-Bot" then "cu" else "exp"
+		local first = g.tasks[1]
+		add(el("tb-work-row tb-work-bot", {
+			sprite(state, bot, 1),
+			el("tb-work-who", {
+				txt("tb-work-name", bot),
+				if first then txt("tb-work-title", first.title) else txt("tb-work-title tb-work-chat", "in chat"),
+			}),
+			if first then txt("tb-state", STATE_LABEL[first.state] or first.state, { ["data-state"] = first.state }) else el("tb-grow"),
+			txt("tb-age", if first then age(first.at) else ""),
+		}, { ["data-lane"] = lane }, "work" .. bot))
+		for k = 2, #g.tasks do
+			local it = g.tasks[k]
+			add(el("tb-work-row tb-work-task", {
+				el("tb-grow"),
+				txt("tb-work-title", it.title),
+				txt("tb-state", STATE_LABEL[it.state] or it.state, { ["data-state"] = it.state }),
+				txt("tb-age", age(it.at)),
+			}, { ["data-lane"] = lane }, "work" .. it.id))
+		end
+		for _, it in g.subs do
+			local sub = it.sub :: any
+			add(el("tb-work-row tb-sub", {
+				ui.el("span", { class = "tb-sub-dot" }),
+				el("tb-work-who", { txt("tb-sub-name", sub.name), txt("tb-work-title", it.title) }),
+				txt("tb-age", age(sub.started)),
+			}, { ["data-lane"] = lane, ["data-depth"] = tostring(math.min(sub.depth, 4)) }, "work" .. it.id))
+		end
+	end
+	if shown > WORK_ROWS then
+		table.insert(rows, txt("tb-more", string.format("+ %d more at work", shown - WORK_ROWS)))
+	end
+	return el("tb-work", rows, nil, "work")
+end
+
 -- The quiet line: what the bots are doing, what finished, and what slid onto Later.
 local function shelf_view(state: State): Node
 	local working, finished, shelved = {}, {}, {}
@@ -636,6 +725,9 @@ local function shelf_view(state: State): Node
 		}, { ["title"] = "asks untouched for 3 days" }, nil, "shelf"),
 	}
 	local out: { Node } = { el("tb-shelf", parts) }
+	if #working > 0 then
+		table.insert(out, work_view(state, working))
+	end
 	if state.history and #finished > 0 then
 		local c: { Node } = {}
 		for k = 1, math.min(HISTORY, #finished) do
@@ -643,7 +735,7 @@ local function shelf_view(state: State): Node
 			local label = if it.state == "done" and it.answer then it.answer else it.state
 			table.insert(c, el("tb-done", {
 				sprite(state, it.bot, 1),
-				txt("tb-done-title", it.title),
+				txt("tb-done-title", if it.sub then it.sub.name .. ": " .. it.title else it.title),
 				txt("tb-state", STATE_LABEL[label] or label, { ["data-state"] = label }),
 				txt("tb-age", age(it.at)),
 			}, nil, "done" .. it.id))
@@ -856,6 +948,7 @@ tern.block.define("board", {
 			bots = roster(),
 			asked = false,
 			viewed = false,
+			minute = 0,
 			closed = false,
 			nfx = 0,
 		}

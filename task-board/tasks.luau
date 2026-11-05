@@ -23,9 +23,11 @@ export type Item = {
 	note: string?,
 	-- net places bumped up (positive) or down
 	bumped: number?,
+	-- a bot's subagent: its own name, its dotted path under the bot (one dot per level) and when it started
+	sub: { name: string, path: string, depth: number, started: number }?,
 }
 
-export type Board = { decisions: { Item }, working: { Item }, finished: { Item } }
+export type Board = { decisions: { Item }, working: { Item }, subagents: { Item }, finished: { Item } }
 
 local PROJECTS = {
 	{ "Kaizen", "Kaizen" },
@@ -120,14 +122,52 @@ local function item(t: any): Item
 	}
 end
 
+-- A subagent reads as its goal: what the bot gave it to do. Running ones are at work; ended ones are
+-- finished: done, failed or stopped.
+local function subagent(t: any): Item
+	local path = str(t.id)
+	local bot = str(t.bot)
+	local goal = str(t.description)
+	local started = math.floor((tonumber(t.started) or 0) / 1000)
+	local _, dots = path:gsub("%.", "")
+	return {
+		id = "sub:" .. bot .. ":" .. path .. ":" .. tostring(started),
+		bot = bot,
+		state = if t.status == "running" then "sub" else str(t.status),
+		attempt = 1,
+		at = if t.ended then math.floor((tonumber(t.ended) or 0) / 1000) else started,
+		title = if goal ~= "" then M.title(goal) else "(no goal given)",
+		rest = "",
+		project = M.project(bot, goal),
+		lane = if bot == "CU-Bot" then "cu" else "exp",
+		sub = { name = path:match("([^%.]+)$") or path, path = path, depth = dots + 1, started = started },
+	}
+end
+
 function M.parse(json: string): Board
 	local data = tern.json.decode(json) :: any
-	local out: Board = { decisions = {}, working = {}, finished = {} }
+	local out: Board = { decisions = {}, working = {}, subagents = {}, finished = {} }
+	local function list(v: any): { any }
+		return if type(v) == "table" then v else {}
+	end
+	if type(data) ~= "table" then
+		return out
+	end
 	for _, key in { "decisions", "working", "finished" } do
-		for _, t in (if type(data) == "table" and type(data[key]) == "table" then data[key] else {}) :: any do
+		for _, t in list(data[key]) do
 			table.insert((out :: any)[key], item(t))
 		end
 	end
+	local subs = if type(data.subagents) == "table" then data.subagents else {}
+	for _, t in list(subs.running) do
+		table.insert(out.subagents, subagent(t))
+	end
+	for _, t in list(subs.finished) do
+		table.insert(out.finished, subagent(t))
+	end
+	table.sort(out.finished, function(a: Item, b: Item)
+		return a.at > b.at
+	end)
 	return out
 end
 

@@ -10,6 +10,30 @@ const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the c
 
 type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string };
 type Decision = { id: string; question: string | null; text: string };
+type Subagent = { id: string; agent: string; description: string; status: string; started: number };
+
+const subagents: { running: Map<string, Subagent>; tell?: (sub: Subagent) => void } = ((globalThis as any)[Symbol.for("omp-bot.subagents")] ??= { running: new Map() });
+const ENDED = { completed: "done", failed: "failed" };
+
+function noteSubagent(id: unknown, agent: unknown, description: unknown, status: string) {
+	if (typeof id !== "string" || !id) return;
+	const text = typeof description === "string" ? description.trim() : "";
+	const known = subagents.running.get(id);
+	if (status === "started") {
+		if (known) return;
+		const sub = { id, agent: typeof agent === "string" ? agent : "", description: text, status: "running", started: Date.now() };
+		subagents.running.set(id, sub);
+		return subagents.tell?.(sub);
+	}
+	if (!known) return;
+	if (status === "progress") {
+		if (!text || text === known.description) return;
+		known.description = text;
+		return subagents.tell?.(known);
+	}
+	subagents.running.delete(id);
+	subagents.tell?.({ ...known, description: text || known.description, status: ENDED[status] ?? "stopped" });
+}
 
 const CHOICES = [
 	{ label: "Approve", action: "approve", description: "Go ahead with what the bot proposes" },
@@ -175,7 +199,10 @@ export default function core(pi) {
 		s.unref();
 		s.setEncoding("utf8");
 		let buffer = "";
-		s.on("connect", () => send({ op: "hello", bot: name, mode, pid: Number(process.env.OMP_BOT_PID) || process.pid, task: current?.id ?? null, token: current?.token ?? null }));
+		s.on("connect", () => {
+			send({ op: "hello", bot: name, mode, pid: Number(process.env.OMP_BOT_PID) || process.pid, task: current?.id ?? null, token: current?.token ?? null });
+			send({ op: "subagents_now", task: current?.id ?? null, running: [...subagents.running.values()] });
+		});
 		s.on("data", chunk => {
 			buffer += chunk;
 			let nl: number;
@@ -196,6 +223,9 @@ export default function core(pi) {
 			if (!stopped && !refused) ctx?.setTimeout(dial, 2000);
 		});
 	}
+
+	pi.events.on("task:subagent:lifecycle", payload => noteSubagent(payload?.id, payload?.agent, payload?.description, String(payload?.status)));
+	pi.events.on("task:subagent:progress", payload => noteSubagent(payload?.progress?.id, payload?.agent, payload?.progress?.description, "progress"));
 
 	pi.events.on("ompd:background", ({ id }) => {
 		if (current && !current.jobs.includes(id)) keep({ ...current, jobs: [...current.jobs, id] });
@@ -230,6 +260,7 @@ export default function core(pi) {
 	pi.on("session_start", async (_event, c) => {
 		if (c.agent?.kind === "sub" || ctx) return;
 		ctx = c;
+		subagents.tell = sub => send({ op: "subagent", task: current?.id ?? null, ...sub });
 		dial();
 		if (mode === "headless") c.setTimeout(() => void restore().catch(error => console.error(`omp-bot: could not restore the interrupted turn: ${error instanceof Error ? error.message : error}`)), 1000);
 		c.setInterval(tick, 1000);
@@ -245,7 +276,9 @@ export default function core(pi) {
 		if (turn || subagents.length) console.error(`omp-bot: restored the interrupted turn${subagents.length ? ` and ${subagents.length} subagents` : ""}`);
 	}
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, c) => {
+		if (c?.agent?.kind === "sub") return;
+		subagents.tell = undefined;
 		stopped = true;
 		socket?.end();
 	});

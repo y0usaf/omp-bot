@@ -36,6 +36,10 @@ const columns = new Set(db.query<{ name: string }, []>("SELECT name FROM pragma_
 for (const column of ["token TEXT", "beat INTEGER", "wait TEXT", "question TEXT", "answer TEXT"]) if (!columns.has(column.split(" ")[0])) db.exec(`ALTER TABLE tasks ADD COLUMN ${column}`);
 db.exec("UPDATE tasks SET state = 'queued' WHERE state IN ('pending', 'leased')");
 db.exec("CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (bot, state, created)");
+db.exec(`CREATE TABLE IF NOT EXISTS subagents (
+	bot TEXT NOT NULL, id TEXT NOT NULL, task TEXT, agent TEXT, description TEXT, status TEXT NOT NULL,
+	started INTEGER NOT NULL, ended INTEGER)`);
+db.exec("CREATE INDEX IF NOT EXISTS subagents_running ON subagents (bot, status, id)");
 
 const HELD = "(state = 'running' OR (state = 'waiting' AND wait = 'jobs'))";
 const q = {
@@ -63,6 +67,13 @@ const q = {
 	queued: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued'"),
 	drop: db.query("UPDATE tasks SET state = 'failed', error = $error, updated = $now WHERE id = $id AND state = 'queued'"),
 	notice: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, result, error, created, updated) VALUES ($id, $bot, $key, $text, 'botd', $state, $result, $error, $now, $now)"),
+	subStart: db.query("INSERT INTO subagents (bot, id, task, agent, description, status, started) VALUES ($bot, $id, $task, $agent, $description, 'running', $started)"),
+	subNote: db.query("UPDATE subagents SET description = coalesce(nullif($description, ''), description), task = coalesce(task, $task) WHERE bot = $bot AND id = $id AND status = 'running'"),
+	subEnd: db.query("UPDATE subagents SET status = $status, description = coalesce(nullif($description, ''), description), ended = $now WHERE bot = $bot AND id = $id AND status = 'running'"),
+	subGone: db.query("UPDATE subagents SET status = 'stopped', ended = $now WHERE bot = $bot AND status = 'running' AND id NOT IN (SELECT value FROM json_each($keep))"),
+	subRunning: db.query("SELECT * FROM subagents WHERE status = 'running' ORDER BY bot, id"),
+	subFinished: db.query("SELECT * FROM subagents WHERE status != 'running' ORDER BY ended DESC LIMIT $limit"),
+	subPrune: db.query("DELETE FROM subagents WHERE status != 'running' AND ended < $before"),
 };
 
 const links = new Map<string, Link>();
@@ -385,8 +396,22 @@ function dropLink(link: Link, reason: string) {
 		q.release.run({ id: link.task, token: link.token ?? null, error: reason, max: MAX_ATTEMPTS, now: Date.now() });
 		log(`release ${link.task} from ${link.bot}: ${reason}`);
 	}
+	q.subGone.run({ bot: link.bot, keep: "[]", now: Date.now() });
 	if (!link.socket.destroyed) link.socket.destroy();
 	setTimeout(() => dispatch(link.bot), 0);
+}
+
+function subagent(bot: string, task: unknown, sub: any) {
+	const id = String(sub?.id ?? "");
+	if (!id) return;
+	const now = Date.now();
+	const fields = { bot, id, description: String(sub.description ?? ""), task: typeof task === "string" ? task : null };
+	if (sub.status === "running") {
+		if (!q.subNote.run(fields).changes) q.subStart.run({ ...fields, agent: String(sub.agent ?? ""), started: Number(sub.started) || now });
+	} else if (["done", "failed", "stopped"].includes(sub.status)) {
+		q.subEnd.run({ bot, id, description: fields.description, status: sub.status, now });
+		q.subPrune.run({ before: now - 7 * 86_400_000 });
+	}
 }
 
 function pushDecisions(bot: string) {
@@ -526,6 +551,19 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			dispatch(task.bot);
 			return send(socket, { ok: true, state: "queued" });
 		}
+		case "subagent":
+			if (self.link) subagent(self.link.bot, message.task, message);
+			return;
+		case "subagents_now": {
+			const link = self.link;
+			if (!link) return;
+			const running = Array.isArray(message.running) ? message.running : [];
+			q.subGone.run({ bot: link.bot, keep: JSON.stringify(running.map(sub => String(sub?.id ?? ""))), now: Date.now() });
+			for (const sub of running) subagent(link.bot, message.task, { ...sub, status: "running" });
+			return;
+		}
+		case "subagents":
+			return send(socket, { ok: true, running: q.subRunning.all(), finished: q.subFinished.all({ limit: message.limit ?? 40 }) });
 		case "enqueue":
 			return send(socket, { ok: true, ...enqueue(message) });
 		case "list":

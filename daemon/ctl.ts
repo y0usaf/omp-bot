@@ -7,7 +7,7 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   inbox                                         decisions waiting on you, and finished and failed tasks not yet acknowledged
   ack ID                                        acknowledge an inbox task
   approve|deny|handle ID [NOTE]                 answer a task waiting on your decision: approve, deny, or let its bot decide
-  board                                         the task board's JSON: every decision waiting on you, the work in progress, the newest finished tasks
+  board                                         the task board's JSON: every decision waiting on you, the work in progress and the bots' subagents, the newest finished tasks
   status [--json]                               which bots are connected, and how, and which are down and why
   restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task); a down BOT tries to start again
   claim BOT                                     wait until BOT's headless run has stopped
@@ -93,12 +93,13 @@ try {
 			break;
 		case "board": {
 			const list = async (state: string, limit: number): Promise<any[]> => (await request({ op: "list", state, limit })).tasks;
-			const [waiting, running, queued, done, failed] = await Promise.all([list("waiting", 1000), list("running", 1000), list("queued", 1000), list("done", 40), list("failed", 40)]);
+			const [waiting, running, queued, done, failed, subagents] = await Promise.all([list("waiting", 1000), list("running", 1000), list("queued", 1000), list("done", 40), list("failed", 40), request({ op: "subagents", limit: 40 })]);
 			const finished = [...done.filter(task => String(task.result ?? "").trim() !== "Nothing to report."), ...failed].sort((a, b) => b.updated - a.updated).slice(0, 40);
 			console.log(JSON.stringify({
 				decisions: waiting.filter(task => task.wait === "decision").map(card),
 				working: [...running, ...waiting.filter(task => task.wait !== "decision"), ...queued].map(card),
 				finished: finished.map(card),
+				subagents: { running: subagents.running, finished: subagents.finished },
 			}));
 			break;
 		}
