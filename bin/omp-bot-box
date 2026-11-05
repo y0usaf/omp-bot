@@ -51,7 +51,18 @@ for k in $(compgen -e); do
 	esac
 done
 declare -A tops=()
-scan() { if [[ $1 == /nix/store/* ]]; then local t=${1#/nix/store/}; tops[${t%%/*}]=1; fi; }
+# A path through a link into the store, like an omp extension finix links under ~/.omp/agent/ext, stands for
+# its store path, which the box can reach.
+real() {
+	local v=$1 r
+	if [[ $v == /* && $v != /nix/store/* && -e $v ]] && r=$(readlink -f -- "$v") && [[ $r == /nix/store/* ]]; then v=$r; fi
+	printf '%s' "$v"
+}
+scan() {
+	local v t
+	v=$(real "$1")
+	if [[ $v == /nix/store/* ]]; then t=${v#/nix/store/}; tops[${t%%/*}]=1; fi
+}
 scan "$root"
 for a in "$@"; do scan "$a"; done
 for k in "${fwd[@]}"; do scan "${!k}"; done
@@ -97,7 +108,8 @@ rm -rf "$t"'
 	tar -C /nix/store -cf - "${missing[@]}" | "${ssh[@]}" -T box "bash -c $(printf %q "$sync") omp-bot-box $(printf %q "$cache/store")"
 fi
 map() {
-	local v=$1 t
+	local v t
+	v=$(real "$1")
 	if [[ $v == /nix/store/* ]]; then
 		t=${v#/nix/store/}
 		[ -n "${instore[${t%%/*}]:-}" ] || v=$cache/store/$t
