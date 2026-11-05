@@ -78,6 +78,7 @@ const resumes = new Map<string, number>();
 const down = new Map<string, Down>();
 const startFails = new Map<string, number>();
 let boxHealthy: boolean | undefined;
+let boxedBots = new Set<string>();
 let draining = false;
 
 function log(line: string) {
@@ -131,6 +132,7 @@ function clearDown(bot: string, why: string, announce = true) {
 let probing = false;
 async function checkHealth() {
 	const bots = boxed();
+	boxedBots = new Set(bots);
 	if (probing || draining || bots.length === 0) return;
 	probing = true;
 	try {
@@ -138,6 +140,11 @@ async function checkHealth() {
 		const timer = setTimeout(() => proc.kill("SIGKILL"), HEALTH_TIMEOUT_MS);
 		const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 		clearTimeout(timer);
+		if (code === 2) {
+			if (boxHealthy !== undefined) log(`box ${lastLine(out) || "is starting"}`);
+			boxHealthy = undefined;
+			return;
+		}
 		const healthy = code === 0;
 		const reason = lastLine(out) || lastLine(err) || (proc.signalCode ? `health check timed out after ${HEALTH_TIMEOUT_MS / 1000}s` : `health check exited ${code}`);
 		if (healthy !== boxHealthy) log(`box ${healthy ? "healthy" : `unhealthy: ${reason}`}`);
@@ -145,12 +152,11 @@ async function checkHealth() {
 			if (!healthy) {
 				if (!links.has(bot)) markDown(bot, `its box is down: ${reason}`, "box");
 			}
-			else if (down.get(bot)?.cause === "box" || (boxHealthy === false && down.has(bot))) {
-				clearDown(bot, "its box answers again");
-				dispatch(bot);
-			}
+			else if (down.get(bot)?.cause === "box" || (boxHealthy === false && down.has(bot))) clearDown(bot, "its box answers again");
 		}
+		const was = boxHealthy;
 		boxHealthy = healthy;
+		if (healthy && was !== true) for (const bot of bots) dispatch(bot);
 	} finally {
 		probing = false;
 	}
@@ -248,7 +254,7 @@ function dispatch(bot: string) {
 }
 
 function ensureRunning(bot: string, force = false) {
-	if (draining || down.has(bot) || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
+	if (draining || down.has(bot) || (boxedBots.has(bot) && boxHealthy !== true) || links.has(bot) || children.has(bot) || claimed(bot) || (!force && !q.next.get({ bot }))) return;
 	const wait = (lastSpawn.get(bot) ?? 0) + RESPAWN_MS - Date.now();
 	if (wait > 0) {
 		setTimeout(() => ensureRunning(bot, force), wait);
@@ -276,7 +282,8 @@ function ensureRunning(bot: string, force = false) {
 		const link = links.get(bot);
 		if (link?.mode === "headless") dropLink(link, `headless exited with ${code}`);
 		settleClaim(bot);
-		if (!child.hello && code !== 0 && !draining) {
+		if (code === 75) log(`start ${bot} skipped: its lock is held, so it is open elsewhere`);
+		else if (!child.hello && code !== 0 && !draining) {
 			const fails = (startFails.get(bot) ?? 0) + 1;
 			startFails.set(bot, fails);
 			const why = lastLine(child.tail) || `exit code ${code}`;

@@ -82,7 +82,7 @@ esac
 set -- -e "$root/omp/core.ts" -e "${OMP_BOT_OMPD_EXTENSION:-$root/omp/ompd.ts}" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
-	exec flock -n -o "$dir/lock" omp-until "$dir" "$omp" --mode rpc --no-ui --continue "$@"
+	exec flock -n -E 75 -o "$dir/lock" omp-until "$dir" "$omp" --mode rpc --no-ui --continue "$@"
 fi
 "$root/bin/omp-bot-ctl" claim "$name" || true
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
