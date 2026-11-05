@@ -29,7 +29,7 @@ The roster is `bots.json` in the state folder below, copied from this repo's `bo
 - **The quiet line** under the list: the work in progress as a count, finished tasks (`v` shows the newest eight and how you answered them; `Nothing to report.` results are left out), and the **Later** shelf (`l`), asks untouched for three days, kept out of the list until you open it.
 - **Look.** Ozette's structure, coloured by the theme alone: the same paper cards, hairlines and offset shadows in light and dark, only the colours change, and the liveliness is in the motion.
 
-The Chao are omp-bot's rail sprites (`tern/window.luau`), drawn as SVG in `task-board/chao.luau`; a plugin can't require a file outside its folder, so keep the two in step. `bin/omp-bot-board` opens the board in a separate Tern window with its own config, daemon and Tern state under `$XDG_STATE_HOME/omp-bot-board` (copies of your Ozette plugin and themes when you have them), on the queue `OMP_BOT_STATE` names; `--headless` serves it offscreen and prints the control socket for `tern ctl … shot NAME`, and `--stop` closes it.
+The Chao are omp-bot's SVGs in `tern/chao/`, which `task-board/chao.luau` reads and recolours as `tern/window.luau` does; a plugin can't require a file outside its folder, so keep the name hash in step. `bin/omp-bot-board` opens the board in a separate Tern window with its own config, daemon and Tern state under `$XDG_STATE_HOME/omp-bot-board` (copies of your Ozette plugin and themes when you have them), on the queue `OMP_BOT_STATE` names; `--headless` serves it offscreen and prints the control socket for `tern ctl … shot NAME`, and `--stop` closes it.
 
 ## Persistence
 
