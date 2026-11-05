@@ -217,7 +217,7 @@ export default function core(pi) {
 		name: "ask_decision",
 		label: "Ask decision",
 		description:
-			"During an omp-bot task, puts a decision only the user can make to them and parks the task: when your turn ends it waits until they approve, deny, or leave the call to you, and then comes back to you with their answer. Give one plain question naming what you'd do. Do no work that depends on the answer, and end your turn after asking with where things stand. In live chat, just ask in your reply instead.",
+			"During an omp-bot task, puts a decision only the user can make to them (taste, priorities, money, other people, anything irreversible; never one you could make yourself) and parks the task: when your turn ends it waits until they approve, deny, or leave the call to you, and then comes back to you with their answer. Give one plain question naming what you'd do. Do no work that depends on the answer, and end your turn after asking with where things stand. In live chat, just ask in your reply instead.",
 		parameters: z.object({ question: z.string() }),
 		async execute(_toolCallId, params) {
 			const text = (message: string) => ({ content: [{ type: "text", text: message }], details: {} });
