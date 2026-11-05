@@ -760,14 +760,15 @@ function patchTranscript(state) {
 		}
 		if (event === PENDING) return block;
 		if (event === HIDDEN) return undefined;
-		if (!reply && !(block instanceof UserMessageComponent) && !event) return block;
+		const notice = !reply && !event && !(block instanceof UserMessageComponent) && block.describe?.(lastCx)?.p?.role === "omp.custom";
+		if (!reply && !(block instanceof UserMessageComponent) && !event && !notice) return block;
 		let wrapper = wrapped.get(block);
 		if (!wrapper) {
 			wrapper = reply
 				? new BotReply(block)
 				: event
 					? new BotEvent(block, event, proto[PATCHED].state)
-					: new Marked([block], "omp.bot.you");
+					: new Marked([block], notice ? "omp.bot.notice" : "omp.bot.you");
 			wrapped.set(block, wrapper);
 		}
 		if (isNativeSettled(block) && !isNativeSettled(wrapper)) settleNative(wrapper);
