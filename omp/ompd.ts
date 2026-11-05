@@ -88,7 +88,7 @@ function rewrite(command: string): string | undefined {
 }
 
 function waking(job: Job): boolean {
-	if (!MAIN_BOT || failed(job) || existsSync(join(dir(job.id), "report"))) return true;
+	if (!MAIN_BOT || failed(job) || existsSync(join(dir(job.id), "wake"))) return true;
 	const jobs = botTask()?.jobs ?? [];
 	return jobs.includes(job.id) && jobs.every(id => {
 		const other = id === job.id ? undefined : load(id);

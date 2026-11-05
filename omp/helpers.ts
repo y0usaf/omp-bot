@@ -15,6 +15,7 @@ const MAX_DEPTH = 2;
 const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
 const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
 const PATCHED = Symbol.for("omp-bot.helpers.send");
+const WAKE = /^\[wake\][^\S\n]*(?:\n\s*)?/;
 const DELIVERED = { state: "done" } as Job;
 const awaited: Set<string> = ((globalThis as any)[Symbol.for("ompd.awaited")] ??= new Set());
 
@@ -147,7 +148,8 @@ You are helper \`${helper.id}\` of the bot ${BOT}, started by \`${parent}\` with
 # Peers
 Message peers via \`write\` with \`path: "agent://<id>"\` and \`content\`. Your id is \`${helper.id}\`; \`${parent}\` is \`agent://${parent}\`${peers.length ? `, and the other helpers now running are:\n${peers.join("\n")}` : "."}
 Use peer messages only for quick coordination, never long-form content. Before editing a file a sibling may own, message that peer. \`write agent://<id>\` never blocks.
-Your final result reaches \`${parent}\` automatically. Message \`${parent}\` only for questions, blockers, or decisions — never progress or completion reports.
+Your final result reaches \`${parent}\` automatically. Message \`${parent}\` only for questions, blockers, or decisions — never progress or completion reports.${helper.parent === MAIN ? `
+Your result waits quietly for \`${parent}\`'s next turn instead of interrupting it. Only when \`${parent}\` must act now — it needs the user's decision, or other work is blocked on your result — make \`[wake]\` the first line of your final message: that starts its turn at once. Never ask to wake for a routine result; a failed run wakes it anyway.` : ""}
 
 § Completion
 No TODO tracking, no progress updates. Execute; your final message is your result.
@@ -309,11 +311,15 @@ export default function helpers(pi) {
 		if (!SELF || ctx.agent?.kind === "sub" || !process.env.OMPD_JOB_DIR) return;
 		const last = [...(event.messages ?? [])].reverse().find(message => message?.role === "assistant");
 		if (!last) return;
-		const said = (Array.isArray(last.content) ? last.content : []).filter(part => part?.type === "text").map(part => part.text).join("\n").trim();
+		const raw = (Array.isArray(last.content) ? last.content : []).filter(part => part?.type === "text").map(part => part.text).join("\n").trim();
+		const said = raw.replace(WAKE, "");
 		const failed = last.stopReason === "error" || last.stopReason === "aborted" ? `[its last turn ${last.stopReason === "error" ? "failed" : "was aborted"}${last.errorMessage ? `: ${last.errorMessage}` : ""}]` : "";
 		const text = [said, failed].filter(Boolean).join("\n\n");
 		if (!text) return;
 		const transcript = ctx.sessionManager.getSessionFile?.();
+		const wake = join(process.env.OMPD_JOB_DIR, "wake");
+		if (said !== raw || failed) writeAtomic(wake, "");
+		else rmSync(wake, { force: true });
 		writeAtomic(join(process.env.OMPD_JOB_DIR, "report"), `Result of helper ${SELF}:\n\n${text}\n${transcript ? `\n(transcript: ${transcript})\n` : ""}`);
 	});
 
@@ -347,7 +353,7 @@ export default function helpers(pi) {
 	pi.registerTool({
 		name: "task",
 		label: "Task",
-		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
+		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it${SELF ? "" : "; it waits quietly for your next turn unless the helper failed, asked to wake you (it was told to only when you must act now) or is the last job a background task waits on"}. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
 		parameters: z.object({
 			context: z.string().optional(),
 			tasks: z.array(
