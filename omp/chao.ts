@@ -200,7 +200,8 @@ export function chaoOf(name, tint) {
 	const own = typeof entry.chao === "string" ? { type: entry.chao } : (entry.chao ?? {});
 	if (SPRITES[own.type]) look.type = own.type;
 	if (TRAITS[0][1].includes(own.eyes)) look.eyes = own.eyes;
-	if (TINTS.includes(tint)) look.tint = tint;
+	const shade = tint ?? entry.tint;
+	if (TINTS.includes(shade)) look.tint = shade;
 	return look;
 }
 
