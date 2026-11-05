@@ -7,6 +7,8 @@ import { ROOT, STATE } from "../daemon/paths";
 const UNKNOWN = "Previous OMP process exited before this tool returned";
 const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
 const TAIL_BYTES = 32 * 1024;
+const NOTICE_BYTES = 6 * 1024;
+const NOTICE_LINES = 50;
 const OMPD = join(ROOT, "bin", "ompd");
 const SERVICE = process.env.OMPD_SERVICE === "1";
 
@@ -21,7 +23,7 @@ function cutOff(entries): Set<string> {
 	return started;
 }
 
-function tail(id: string, bytes = TAIL_BYTES): string {
+function tail(id: string, bytes = TAIL_BYTES, lines = Infinity): string {
 	const path = join(dir(id), "log");
 	let fd: number | undefined;
 	try {
@@ -30,8 +32,12 @@ function tail(id: string, bytes = TAIL_BYTES): string {
 		const buffer = Buffer.alloc(size - from);
 		fd = openSync(path, "r");
 		readSync(fd, buffer, 0, buffer.length, from);
-		const text = buffer.toString("utf8");
-		return from > 0 ? `[${from} earlier bytes in ${path}]\n${text.slice(text.indexOf("\n") + 1)}` : text;
+		let text = buffer.toString("utf8");
+		if (from > 0) text = text.slice(text.indexOf("\n") + 1);
+		const kept = text.trimEnd().split("\n");
+		if (kept.length > lines) text = kept.slice(-lines).join("\n");
+		const cut = size - Buffer.byteLength(text);
+		return cut > 0 && (from > 0 || kept.length > lines) ? `[${cut} earlier bytes in ${path}]\n${text}` : text;
 	} catch {
 		return "";
 	} finally {
@@ -55,8 +61,9 @@ function failed(job: Job): boolean {
 }
 
 function report(job: Job): string {
-	const command = job.command.length > 200 ? `${job.command.slice(0, 200)}…` : job.command;
-	const out = tail(job.id).trimEnd();
+	const line = job.command.trim().replace(/\s*\n\s*/g, " ↵ ");
+	const command = line.length > 200 ? `${line.slice(0, 200)}…` : line;
+	const out = tail(job.id, NOTICE_BYTES, NOTICE_LINES).trimEnd();
 	return `[ompd job ${job.id} ended: ${outcome(job)} after ${seconds(job)}${job.runs > 1 ? `, run ${job.runs}` : ""}]\n$ ${command}\n${out || "(no output)"}\n(log: ${join(dir(job.id), "log")})`;
 }
 
