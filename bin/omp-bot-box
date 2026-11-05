@@ -48,12 +48,11 @@ if command -v omp-secret >/dev/null && ! omp-secret sync --bot "$name" >&2; then
 	echo "omp-bot-box: could not copy the shared secrets into $name's store; it reads only its own" >&2
 fi
 
-# The environment the bot gets in the box, and every store path it or the omp arguments name.
 fwd=()
 for k in $(compgen -e); do
 	case $k in
 	OMP_BOT_BOX_* | OMP_BOT_PERSIST* | OMP_BOT_SOCKET | OMP_BOT_PID) ;;
-	OMP_BOT_* | OMPD_* | OPTCHAT_* | PI_* | OMP_UNTIL | TERM | TERM_PROGRAM | TERM_PROGRAM_VERSION | COLORTERM | LANG | LC_*) fwd+=("$k") ;;
+	OMP_BOT_* | OMPD_* | OPTCHAT_* | PI_* | TERM | TERM_PROGRAM | TERM_PROGRAM_VERSION | COLORTERM | LANG | LC_*) fwd+=("$k") ;;
 	esac
 done
 declare -A tops=()
@@ -137,7 +136,8 @@ map() {
 }
 
 cwd=${OMP_BOT_BOX_CWD:-$HOME}
-cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$(map "$root")/bin${OMP_BOT_BOX_PATH:+:$OMP_BOT_BOX_PATH}"):\"\$PATH\" && exec env"
+tools=$(map "$root")/tools/$name/bin
+cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$tools:$(map "$root")/bin${OMP_BOT_BOX_PATH:+:$OMP_BOT_BOX_PATH}"):\"\$PATH\" && exec env"
 for k in "${fwd[@]}"; do cmd+=" $(printf %q "$k=$(map "${!k}")")"; done
 # A boxed bot keeps its secrets in its own folder, which the box shares, encrypted with a key of its own there.
 cmd+=" $(printf %q "OMP_SECRETS_DIR=$dir/secrets") $(printf %q "OMP_BOT_SOCKET=$sock") OMP_BOT_PID=$$ omp"

@@ -3,17 +3,15 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
-import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
-import { col, elapsed, md, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
+import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
-import { matchesKey, replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
 const DOCK_PATCHED = Symbol.for("omp-bot.dock");
-const ASK_PATCHED = Symbol.for("omp-bot.ask");
 const NONE = col([], { role: "omp.bot.none" });
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
@@ -116,7 +114,6 @@ function same(a, b) {
 class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
-		this.role = process.env.OMP_BOT_ROLE || "Chief of staff";
 		this.look = chaoOf(this.name, process.env.OMP_BOT_TINT);
 		this.tint = this.look.tint;
 		this.mood = "idle";
@@ -241,7 +238,7 @@ class BotHero {
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
-						text(b.boop ?? b.role, { role: "omp.bot.say", wrap: "none" }),
+						text(b.boop ?? b.line, { role: "omp.bot.say", wrap: "none" }),
 					],
 					{ role: "omp.bot.words", align: "center", gap: "xs" },
 				),
@@ -275,7 +272,6 @@ class BotTop {
 			[
 				b.chao(),
 				text(b.name, { role: "omp.bot.name", wrap: "none" }),
-				text(b.role, { role: "omp.bot.role", wrap: "none" }),
 				b.active
 					? row([text("Stop", { wrap: "none" }), node("kbd", { keys: ["escape"] })], {
 							role: "omp.bot.stop",
@@ -433,21 +429,21 @@ function eventInfo(block, bot) {
 		if (!name || name === "…") return settled ? undefined : PENDING;
 		if (name === "all") return undefined;
 		const preview = withRole(block, "omp.tool.proc.preview");
-		return { action: "Messaged", name, peer: name, from: bot.name, body: spansText(preview?.p?.spans) || preview?.p?.text || "" };
+		return { action: "Messaged", name, from: bot.name, body: spansText(preview?.p?.spans) || preview?.p?.text || "" };
 	}
 	if (role.startsWith("omp.irc.")) {
 		const body = bodyText(block);
 		if (role === "omp.irc.incoming") {
 			const name = head.replace(/^IRC\s+/, "").replace(GLYPHS, "").trim();
-			if (name) return { action: "Message from", name, peer: name, from: name, body, card: true };
+			if (name) return { action: "Message from", name, from: name, body, card: true };
 		}
 		const routed = head.match(/^(?:IRC|Pool)\s+(.+?)\s*(?:→|->|›|[\uE000-\uF8FF])+\s*(.+)$/);
 		if (routed) {
 			const name = routed[2].trim();
-			return { action: "Messaged", name, peer: name, from: routed[1].replace(GLYPHS, "").trim() || bot.name, body };
+			return { action: "Messaged", name, from: routed[1].replace(GLYPHS, "").trim() || bot.name, body };
 		}
 		const name = head.match(/^(?:IRC|Pool)\s+(.+)$/)?.[1]?.replace(GLYPHS, "").trim();
-		if (name) return { action: "Messaged", name, peer: name, from: bot.name, body };
+		if (name) return { action: "Messaged", name, from: bot.name, body };
 	}
 	const body = bodyText(block);
 	if (head === "ompd-job" || body.startsWith("[ompd job ")) return HIDDEN;
@@ -455,7 +451,7 @@ function eventInfo(block, bot) {
 		const marker = body.slice(0, body.indexOf("]") + 1);
 		const origin = marker.match(/from (?:bot|reply):(.+?)(?:,|\])/)?.[1]?.trim();
 		return origin
-			? { action: "Task from", name: origin, peer: origin, from: origin, body: body.slice(marker.length).trim() }
+			? { action: "Task from", name: origin, from: origin, body: body.slice(marker.length).trim() }
 			: { action: "Task for", name: bot.name };
 	}
 	if (role === "omp.user.collab") {
@@ -469,12 +465,9 @@ class BotEvent {
 	constructor(block, info, state) {
 		this.block = block;
 		this.info = info;
-		this.state = state;
 		this.bot = state.bot;
 		this.look = chaoOf(info.name);
 		this.open = false;
-		this.count = 1;
-		this.ts = undefined;
 		this.node = undefined;
 		this.drawn = undefined;
 	}
@@ -487,23 +480,21 @@ class BotEvent {
 		this.open = expanded;
 		this.bot.render();
 	}
-
 	handleNativeEvent(event) {
 		if (event?.type === "action" && event.act === "toggle-event") {
-			if (this.info.peer) this.state.openExchange?.(this.info.peer);
-			else this.setExpanded(!this.open);
+			this.setExpanded(!this.open);
 			return;
 		}
 		this.block.handleNativeEvent?.(event);
 	}
 
 	render(width) {
-		const summary = truncateToWidth(` ${this.label()} ◉ ${this.info.name} ${this.info.peer ? "›" : this.open ? "−" : "+"}`, width);
+		const summary = truncateToWidth(` ${this.label()} ◉ ${this.info.name} ${this.open ? "−" : "+"}`, width);
 		return this.open ? [summary, ...this.block.render(width)] : [summary];
 	}
 
 	label() {
-		return this.count > 1 ? `${this.count} messages with` : this.info.action;
+		return this.info.action;
 	}
 
 	describe(cx) {
@@ -512,8 +503,7 @@ class BotEvent {
 		const whole = this.open ? this.block.describe(cx) : undefined;
 		const drawn = this.drawn;
 		if (this.node && drawn.label === label && drawn.open === this.open && drawn.whole === whole) return this.node;
-		this.drawn = { label, open: this.open, whole };
-		const title = this.info.peer ? `Open the conversation with ${this.info.name}` : this.open ? "Hide full message" : "Show full message";
+		const title = this.open ? "Hide full message" : "Show full message";
 		let detail;
 		if (whole) {
 			detail = col([whole.k === "card" ? { ...whole, p: { ...whole.p, collapsible: false, collapsed: false, preview: undefined } } : whole], {
@@ -547,155 +537,6 @@ class BotEvent {
 	}
 }
 
-class ExchangeBody {
-	constructor(view) {
-		this.view = view;
-	}
-
-	invalidate() {}
-
-	render(width) {
-		return this.view.lines(width);
-	}
-
-	describe(cx) {
-		return this.view.page(cx);
-	}
-}
-
-class ExchangeFoot {
-	constructor(view) {
-		this.view = view;
-		this.node = col([node("button", { text: "Close Chat", role: "omp.bot.xclose", title: "Close  esc", actions: { click: "close" } })], {
-			role: "omp.bot.xfoot",
-			align: "center",
-		});
-	}
-
-	invalidate() {}
-
-	render() {
-		return [];
-	}
-
-	handleNativeEvent(event) {
-		if (event?.type === "action" && event.act === "close") this.view.close();
-	}
-
-	describe() {
-		return this.node;
-	}
-}
-
-class ExchangeView {
-	constructor(bot, peer, items, done) {
-		this.bot = bot;
-		this.peer = peer;
-		this.items = items;
-		this.done = done;
-		this.looks = new Map([[bot.name, bot.look]]);
-		this.body = new ExchangeBody(this);
-		this.foot = new ExchangeFoot(this);
-	}
-
-	invalidate() {}
-
-	close() {
-		this.done(undefined);
-	}
-
-	handleInput(data) {
-		if (matchesKey(data, "escape") || matchesKey(data, "enter") || data === "q") this.close();
-	}
-
-	look(name) {
-		let look = this.looks.get(name);
-		if (!look) {
-			look = chaoOf(name);
-			this.looks.set(name, look);
-		}
-		return look;
-	}
-
-	face(name) {
-		return col([drawChao(this.look(name), "idle")], { role: `omp.bot.xface.${this.look(name).tint}` });
-	}
-
-	runs() {
-		const runs = [];
-		let run;
-		let last;
-		for (const item of this.items) {
-			if (item.ts != null && apart(item.ts, last)) {
-				runs.push({ time: item.ts });
-				run = undefined;
-			}
-			if (item.ts != null) last = item.ts;
-			if (!run || run.from !== item.from) {
-				run = { from: item.from, texts: [] };
-				runs.push(run);
-			}
-			run.texts.push(item.text);
-		}
-		return runs;
-	}
-
-	page(cx) {
-		const head = col(
-			[
-				row(
-					[
-						this.face(this.bot.name),
-						text(this.bot.name, { role: "omp.bot.xwho", wrap: "none", truncate: "end", shrink: 1 }),
-						text("⇄", { role: "omp.bot.xarrow", wrap: "none" }),
-						this.face(this.peer),
-						text(this.peer, { role: "omp.bot.xwho", wrap: "none", truncate: "end", shrink: 1 }),
-					],
-					{ role: "omp.bot.xhead", align: "center", gap: "sm", aria: `Bot exchange between ${this.bot.name} and ${this.peer}` },
-				),
-			],
-			{ role: "omp.bot.xtop", align: "center" },
-		);
-		const shown = this.runs().map(run =>
-			run.time !== undefined
-				? text(when(run.time, cx?.hour12), { role: "omp.bot.xtime", wrap: "none" })
-				: row(
-						[
-							col([drawChao(this.look(run.from), "idle")], { role: "omp.bot.xavatar" }),
-							col(
-								[
-									text(run.from, { role: "omp.bot.xname", wrap: "none", truncate: "end" }),
-									...run.texts.map(said => col([md(said || "…")], { role: "omp.bot.xmsg" })),
-								],
-								{ role: "omp.bot.xcol", gap: "none" },
-							),
-						],
-						{ role: `omp.bot.xrun.${this.look(run.from).tint}`, align: "end", gap: "sm" },
-					),
-		);
-		if (shown.length === 0) shown.push(text("No messages with this agent yet", { role: "omp.bot.xtime", wrap: "none" }));
-		shown[shown.length - 1] = { ...shown[shown.length - 1], reveal: "end" };
-		return col([head, ...shown], { role: "omp.bot.xpage", gap: "none" });
-	}
-
-	lines(width) {
-		const out = [truncateToWidth(` ${this.bot.name} ⇄ ${this.peer}`, width), ""];
-		for (const run of this.runs()) {
-			if (run.time !== undefined) out.push(truncateToWidth(` ${when(run.time)}`, width));
-			else for (const said of run.texts) out.push(...replaceTabs(`${run.from}: ${said}`).split("\n").map(line => truncateToWidth(` ${line}`, width)));
-		}
-		out.push("", truncateToWidth(" esc closes", width));
-		return out;
-	}
-
-	render(width) {
-		return this.lines(width);
-	}
-
-	describeScreen() {
-		return { role: "omp.bot.exchange", main: [this.body], dock: [this.foot] };
-	}
-}
 
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
@@ -721,7 +562,7 @@ function patchTranscript(state) {
 		const waited = !isPartial && result?.details?.op === "wait" ? result.details.waited : undefined;
 		if (typeof waited?.from === "string") {
 			const body = String(waited.body ?? "");
-			collected.set(this, { action: "Message from", name: waited.from, peer: waited.from, from: waited.from, body, ts: Number(waited.ts) || undefined });
+			collected.set(this, { action: "Message from", name: waited.from, from: waited.from, body, ts: Number(waited.ts) || undefined });
 		}
 		return updateResult.call(this, result, isPartial, toolCallId);
 	};
@@ -808,8 +649,6 @@ function patchTranscript(state) {
 		const s = proto[PATCHED].state;
 		if (!s.on || !s.top) return blocks;
 		const shownBlocks = [s.top];
-		const exchange = [];
-		let run;
 		let last;
 		let previous;
 		const taken = [];
@@ -828,24 +667,12 @@ function patchTranscript(state) {
 					continue;
 				}
 			}
-			const talk = item instanceof BotEvent && item.info.peer !== undefined;
-			if (talk) {
-				item.ts = stamp(item);
-				exchange.push(item);
-				if (run && run.info.peer === item.info.peer) {
-					run.count++;
-					continue;
-				}
-				item.count = 1;
-				run = item;
-			}
 			const visible = item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent;
 			if (!visible) {
 				shownBlocks.push(item);
 				continue;
 			}
-			if (!talk) run = undefined;
-			const ts = talk ? item.ts : stamp(item);
+			const ts = stamp(item);
 			const separated = ts !== undefined && apart(ts, last);
 			if (separated) shownBlocks.push(timeOf(item, ts));
 			if (ts !== undefined) last = ts;
@@ -854,7 +681,6 @@ function patchTranscript(state) {
 			shownBlocks.push(item);
 		}
 		if (blocks.length > 0) s.restoring = false;
-		s.exchange = exchange;
 		if (!s.bot.hero) shownBlocks.push(s.status);
 		const before = shownBy.get(this);
 		if (before && same(before, shownBlocks)) return before;
@@ -884,37 +710,6 @@ function patchDock(state) {
 	};
 }
 
-function findRole(native, role) {
-	if (!native || typeof native !== "object") return undefined;
-	if (native.p?.role === role) return native;
-	for (const child of native.c ?? []) {
-		const found = findRole(child, role);
-		if (found) return found;
-	}
-	return undefined;
-}
-
-function patchAskKeys(state) {
-	const proto = AskDialogComponent.prototype;
-	if (proto[ASK_PATCHED]) {
-		proto[ASK_PATCHED].state = state;
-		return;
-	}
-	const inner = proto.handleInput;
-	proto[ASK_PATCHED] = { state };
-	proto.handleInput = function (keyData) {
-		if (proto[ASK_PATCHED].state.on && /^[1-9]$/.test(keyData)) {
-			const native = this.describe({ supports: () => false });
-			const options = native?.p?.role === "omp.editor.ask" && !findRole(native, "omp.ask.summary") ? findRole(native, "omp.ask.options") : undefined;
-			const item = options?.c?.[Number(keyData) - 1];
-			if (item?.key) {
-				const multi = item.p?.role === "omp.ask.check";
-				return this.handleNativeEvent({ type: multi ? "select" : "activate", key: options.key, item: item.key });
-			}
-		}
-		return inner.call(this, keyData);
-	};
-}
 
 function patchWorkingRow(state) {
 	const proto = Loader.prototype;
@@ -942,30 +737,10 @@ export default function ompBot(pi) {
 		status: new BotStatus(bot),
 		clock: undefined,
 		restoring: false,
-		exchange: [],
-		openExchange,
 	};
 	let ui;
 	let abort;
 	let unlisten;
-	let exchangeOpen = false;
-
-	function openExchange(peer) {
-		if (!ui?.custom || exchangeOpen) return;
-		const items = state.exchange.filter(event => event.info.peer === peer).map(event => ({ from: event.info.from, text: event.info.body, ts: event.ts }));
-		exchangeOpen = true;
-		Promise.resolve(
-			ui.custom((_tui, _theme, _keys, done) => new ExchangeView(bot, peer, items, done), {
-				overlay: true,
-				overlayOptions: { width: "100%", maxHeight: "100%", margin: 0, fullscreen: true },
-			}),
-		)
-			.catch(() => {})
-			.finally(() => {
-				exchangeOpen = false;
-				bot.render();
-			});
-	}
 
 	pi.setLabel("Bot mode");
 
@@ -1006,10 +781,8 @@ export default function ompBot(pi) {
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		state.clock = new Clock(ctx.sessionManager);
 		state.restoring = true;
-		patchTranscript(state);
 		patchWorkingRow(state);
 		patchDock(state);
-		patchAskKeys(state);
 		listen();
 		mount();
 		bot.nap();

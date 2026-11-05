@@ -25,7 +25,7 @@ if [ -n "$tint" ]; then
 		flock 9
 		jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null && exit 0
 		tmp=$(mktemp "$state/bots.json.XXXXXX")
-		jq --arg n "$name" --arg t "$tint" '. + [{name: $n, role: "Assistant", tint: $t, cwd: "~"}]' "$state/bots.json" >"$tmp"
+		jq --arg n "$name" --arg t "$tint" '. + [{name: $n, tint: $t, cwd: "~"}]' "$state/bots.json" >"$tmp"
 		chmod 644 "$tmp"
 		mv -f "$tmp" "$state/bots.json"
 	) 9>"$state/bots.lock"
@@ -54,7 +54,8 @@ if [ "$(field box)" = true ]; then
 else
 	cd "${cwd:-$HOME}"
 fi
-export OMP_BOT_NAME="$name" OMP_BOT_ROLE="$(field role)" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
+export OMP_BOT_NAME="$name" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
+export PATH="$root/tools/$name/bin:$PATH"
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
@@ -82,7 +83,7 @@ esac
 set -- -e "$root/omp/core.ts" -e "${OMP_BOT_OMPD_EXTENSION:-$root/omp/ompd.ts}" -e "$root/omp/helpers.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
-	exec flock -n -E 75 -o "$dir/lock" omp-until "$dir" "$omp" --mode rpc --no-ui --continue "$@"
+	exec flock -n -E 75 -o "$dir/lock" "$omp" --mode rpc --no-ui --continue "$@"
 fi
 "$root/bin/omp-bot-ctl" claim "$name" || true
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
@@ -96,7 +97,7 @@ while :; do
 	code=0
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
 	started=$(date +%s)
-	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
+	flock -w 2 -E 213 -o "$dir/lock" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
 	if [ "$code" != 213 ]; then
 		[ -n "${boxed:-}" ] && [ "$code" != 0 ] && [ ! -e "$OMP_BOT_RELAUNCH" ] || break
 		[ $(($(date +%s) - started)) -lt 60 ] || cutoffs=0

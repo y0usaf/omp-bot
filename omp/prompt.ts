@@ -6,9 +6,9 @@ export const SILENT = "Nothing to report.";
 
 const CTL = join(ROOT, "bin/omp-bot-ctl");
 
-type Bot = { name: string; role?: string };
+type Bot = { name: string };
 
-function team(name: string, role: string, memory: boolean): string[] {
+function team(name: string, memory: boolean): string[] {
 	let bots: Bot[] = [];
 	try {
 		bots = JSON.parse(readFileSync(ROSTER, "utf8"));
@@ -17,11 +17,9 @@ function team(name: string, role: string, memory: boolean): string[] {
 	return [
 		"# Your team",
 		"Each bot owns one lane and keeps its own conversation. The roster right now:",
-		...bots.filter(bot => bot?.name).map(bot => `- ${bot.name}: ${bot.role || "Assistant"}${bot.name === name ? " (you)" : ""}`),
+		...bots.filter(bot => bot?.name).map(bot => `- ${bot.name}${bot.name === name ? " (you)" : ""}`),
 		"When something belongs in another bot's lane, say whose it is in a few words.",
-		...(/chief of staff/i.test(role)
-			? []
-			: [`When your own work needs something from another bot's lane, queue it a task with \`${CTL} task NAME "brief" --origin "bot:${name}"\`; its answer comes back to you as a task from "reply:NAME". Don't wait on it or poll for it.`]),
+		`Unless your persona specifies another handoff, when your work needs another bot's lane, queue it with \`${CTL} task NAME "brief" --origin "bot:${name}"\`; its answer comes back to you as a task from "reply:NAME". Don't wait on it or poll for it.`,
 		memory
 			? "You can read other bots' memory, read-only: memories lists the bots that keep one, and zoom, date and recent take a bot's name."
 			: "You can't see other bots' conversations.",
@@ -29,13 +27,13 @@ function team(name: string, role: string, memory: boolean): string[] {
 	];
 }
 
-function self(name: string, role: string, persona: string, mode: string): string[] {
+function self(name: string, persona: string, mode: string): string[] {
 	return [
 		`§ Bot: ${name}`,
 		`This section is who you are. Where it and the sections above disagree about your name, personality, tone or when to speak, this section wins. The engineering, tool and safety rules above still hold.`,
 		"",
 		"# Who you are",
-		`You are ${name}, one of the user's persistent bots. Your lane: ${role}.`,
+		`You are ${name}, one of the user's persistent bots.`,
 		...(persona ? [`Your character: ${persona}`] : []),
 		"This is your one conversation, and it carries on across restarts. What the user told you here still holds: their preferences, the rules they set you, the questions you left open.",
 		mode === "headless"
@@ -97,23 +95,6 @@ function self(name: string, role: string, persona: string, mode: string): string
 	];
 }
 
-function chief(name: string): string[] {
-	return [
-		"# Chief of staff",
-		"You're the front door. The user can bring you anything, and your job is to spend as little of their attention as possible: they hear about what only they can do, and nothing else.",
-		"- Triage every request into one of three: do it, route it, or set it aside.",
-		"- Do it yourself when it's quick (a few minutes of reading, searching or checking), when it spans several lanes, or when no bot owns it.",
-		"- Route it when it clearly sits in a specialist's lane and is more than quick. Name the bot and give the user a one-line brief they can queue: `omp-bot-ctl task NAME \"brief\"`. A brief is the goal, what done looks like, and any limit, in the user's own terms. Never add a plan; the specialist owns the method. You don't queue tasks yourself, and you never wait on or poll another bot's work.",
-		"- Set it aside when it doesn't serve what the user has said matters, and say so in one line.",
-		`- You can see the team's work: \`${CTL} inbox\` lists finished and failed tasks the user hasn't acknowledged, \`${CTL} tasks\` lists recent ones, and \`${CTL} status\` shows which bots are awake. Read them freely, through those commands only, not the files behind them, and never acknowledge anything for the user.`,
-		"- When asked what's going on or what needs them, check those and this conversation, then answer in this order: what waits on the user, then what's moving and who has it. Leave out what's fine. If nothing needs them, say so in one line. Never invent an item.",
-		"- When a specialist's result lands in the inbox, don't repeat it. Mention it only when it changes what the user should do.",
-		"",
-	];
-}
-
-export function identity({ name, role, persona, mode, memory }: { name: string; role: string; persona: string; mode: string; memory: boolean }): string {
-	const lines = ["", ...self(name, role, persona, mode), ...team(name, role, memory)];
-	if (/chief of staff/i.test(role)) lines.push(...chief(name));
-	return lines.join("\n");
+export function identity({ name, persona, mode, memory }: { name: string; persona: string; mode: string; memory: boolean }): string {
+	return ["", ...self(name, persona, mode), ...team(name, memory)].join("\n");
 }

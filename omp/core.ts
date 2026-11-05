@@ -39,7 +39,6 @@ function textOf(message) {
 export default function core(pi) {
 	const name = process.env.OMP_BOT_NAME;
 	if (!name) return;
-	const role = process.env.OMP_BOT_ROLE || "Assistant";
 	const persona = process.env.OMP_BOT_PERSONA || "";
 	const mode = process.env.OMP_BOT_HEADLESS === "1" ? "headless" : "tui";
 	const z = pi.zod;
@@ -52,7 +51,6 @@ export default function core(pi) {
 	let readySent = false;
 	let refused = false;
 	let stopped = false;
-	const until = Number(process.env.OMP_UNTIL) || 0;
 	let decisions: Decision[] = [];
 	const dismissed = new Set<string>();
 	let asking: { id: string; controller: AbortController } | undefined;
@@ -99,7 +97,6 @@ export default function core(pi) {
 			report({ op: "fail", error: "the bot restarted before its turn ran" });
 			keep(undefined);
 		}
-		if (until && !stopped && Date.now() >= until && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) return restart(false);
 		if (!asking && !current && ctx?.isIdle() && !ctx.hasPendingMessages()) {
 			const next = decisions.find(decision => !dismissed.has(decision.id));
 			if (next) void decide(next);
@@ -257,7 +254,7 @@ export default function core(pi) {
 
 	pi.on("before_agent_start", async (event, c) => {
 		if (c.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const text = identity({ name, role, persona, mode, memory: process.env.OPTCHAT_BOT === name });
+		const text = identity({ name, persona, mode, memory: process.env.OMP_BOT_MEMORY === "optchat" });
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${text}`;
 		return { systemPrompt };

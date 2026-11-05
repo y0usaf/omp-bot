@@ -142,7 +142,7 @@ end
 type Down = { reason: string, since: number }
 local down: { [string]: Down } = {}
 
-local function show_roles(bots: { Bot })
+local function show_health(bots: { Bot })
 	local rules = {}
 	local tints: { [string]: number } = {}
 	for _, bot in ipairs(bots) do
@@ -155,9 +155,6 @@ local function show_roles(bots: { Bot })
 		if bot.tint and out and tints[bot.tint] == 1 then
 			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode("down: " .. out.reason) .. "; color: #e5534b; }"
-		elseif bot.tint and bot.role then
-			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
-			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode(bot.role) .. "; }"
 		end
 		if bot.tint then
 			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
@@ -165,7 +162,7 @@ local function show_roles(bots: { Bot })
 			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(kind) .. "; }"
 		end
 	end
-	tern.css("roles", table.concat(rules, "\n"))
+	tern.css("health", table.concat(rules, "\n"))
 end
 
 local function open_names(cx: WindowCx): { [string]: number }
@@ -206,7 +203,7 @@ local function register(bots: { Bot })
 end
 
 local function show(bots: { Bot })
-	show_roles(bots)
+	show_health(bots)
 	register(bots)
 end
 
@@ -312,7 +309,7 @@ local function create(cx: WindowCx, bots: { Bot })
 							cx4:toast("error", "Could not clear " .. name, (result.stderr:gsub("%s+$", "")))
 							return
 						end
-						local bot = { name = name, role = "Assistant", tint = free_tint(), cwd = "~" }
+						local bot = { name = name, tint = free_tint(), cwd = "~" }
 						local now = roster()
 						now[#now + 1] = bot
 						show(now)
@@ -322,7 +319,7 @@ local function create(cx: WindowCx, bots: { Bot })
 				return
 			end
 		end
-		local bot = { name = name, role = "Assistant", tint = free_tint(), cwd = "~" }
+		local bot = { name = name, tint = free_tint(), cwd = "~" }
 		bots[#bots + 1] = bot
 		show(bots)
 		open(cx2, bot, true)
@@ -333,7 +330,7 @@ local function new_bot(cx: WindowCx)
 	local bots = roster()
 	local items = {}
 	for _, bot in ipairs(bots) do
-		items[#items + 1] = { label = bot.name, detail = bot.role, icon = "sparkle", bot = bot }
+		items[#items + 1] = { label = bot.name, icon = "sparkle", bot = bot }
 	end
 	items[#items + 1] = { label = "Someone new…", icon = "plus" }
 	cx:pick({ items = items, placeholder = "Which bot?", icon = "sparkle", action = "open" }):next(function(item, _, cx2)
@@ -356,7 +353,7 @@ end
 local function remove_bot(cx: WindowCx)
 	local items = {}
 	for _, bot in ipairs(roster()) do
-		items[#items + 1] = { label = bot.name, detail = bot.role, icon = "trash", bot = bot }
+		items[#items + 1] = { label = bot.name, icon = "trash", bot = bot }
 	end
 	cx:pick({ items = items, placeholder = "Remove which bot?", icon = "trash", action = "remove" }):next(function(item, _, cx2)
 		if not item or not cx2 then
@@ -448,7 +445,7 @@ local function poll()
 		end
 		if changed then
 			down = now
-			show_roles(roster())
+			show_health(roster())
 			tern.chrome.refresh()
 		end
 	end)
@@ -466,13 +463,6 @@ tern.chrome.status(function(_pane)
 	end
 	return #segments > 0 and segments or nil
 end)
-
-local cwds = {}
-
-local function forward(kind, payload)
-	local event = tern.json.encode({ source = "tern", kind = kind, payload = payload })
-	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "event", event }, { env = state_env(), timeout_ms = 5000 }, function() end)
-end
 
 local legacy = tern.kv.get("open")
 if legacy then
@@ -494,17 +484,3 @@ for _, event in ipairs({ "focus", "tab_created" }) do
 	end)
 end
 
-tern.on("cwd", function(ev)
-	cwds[ev.pane] = ev.path
-end)
-
-tern.on("command_finished", function(ev)
-	if ev.status == 0 then
-		return
-	end
-	forward("command_finished", { pane = ev.pane, line = ev.line, status = ev.status, took_ms = ev.took_ms, cwd = cwds[ev.pane] })
-end)
-
-tern.on("agent_finished", function(ev)
-	forward("agent_finished", { pane = ev.pane, result = ev.result })
-end)
