@@ -48,7 +48,7 @@ claim() {
 	local token=$1 hash url code=000 rc=0
 	hash=$(printf '%s' "$token" | sha256sum | cut -c1-16)
 	if [ -f "$dir/claims.log" ] && grep -q "^$hash " "$dir/claims.log"; then
-		die "SIMPLEFIN is a setup token that was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: make a new setup token in SimpleFIN Bridge, add it as SIMPLEFIN for ${OMP_BOT_NAME:-this bot} in Tern's palette (Secrets: Add) and, if the old one shows as claimed, disable that connection."
+		die "SIMPLEFIN is a setup token that was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: ask y0usaf for a new setup token from SimpleFIN Bridge (forget SIMPLEFIN with the secret tool and request a new one, so the masked box opens in your chat) and, if the old one shows as claimed, to disable that connection."
 	fi
 	url=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "SIMPLEFIN is neither an access URL (https://user:pass@…) nor a base64 setup token; nothing was claimed"
 	[[ $url == https://* ]] || die "SIMPLEFIN is neither an access URL nor a setup token that decodes to an https claim URL; nothing was claimed"
@@ -121,7 +121,7 @@ fetch() {
 	case $code in
 	200) ;;
 	402) rm -f "$out"; die "SimpleFIN answered 402 Payment required: the SimpleFIN Bridge subscription needs paying" ;;
-	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Make a new setup token in SimpleFIN Bridge and add it as SIMPLEFIN for ${OMP_BOT_NAME:-this bot} in Tern's palette (Secrets: Add), which replaces this one" ;;
+	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Ask y0usaf for a new setup token from SimpleFIN Bridge: forget SIMPLEFIN with the secret tool and request a new one, so the masked box opens in your chat" ;;
 	*) rm -f "$out"; die "SimpleFIN answered HTTP $code; the cache is unchanged" ;;
 	esac
 	jq -e '.accounts | arrays' "$out" >/dev/null 2>&1 || { rm -f "$out"; die "SimpleFIN's answer is not an account set; the cache is unchanged"; }
