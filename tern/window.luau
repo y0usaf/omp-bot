@@ -178,7 +178,7 @@ local function open_names(cx: WindowCx): { [string]: number }
 	return names
 end
 
-local function command(name: string, tint: string?): string
+local function prefix(): string
 	local env = {}
 	for _, key in ipairs({ "OMP_BIN", "OMP_BOT_MODEL", "OMP_BOT_STATE", "OMP_BOT_NO_TOOLS" }) do
 		local value = tern.getenv(key)
@@ -186,9 +186,12 @@ local function command(name: string, tint: string?): string
 			env[#env + 1] = key .. "=" .. quote(value)
 		end
 	end
-	local prefix = #env > 0 and "env " .. table.concat(env, " ") .. " " or ""
+	return #env > 0 and "env " .. table.concat(env, " ") .. " " or ""
+end
+
+local function command(name: string, tint: string?): string
 	local create = tint and " --create " .. quote(tint) or ""
-	return prefix .. quote(ROOT .. "/bin/omp-bot") .. " " .. quote(name) .. create
+	return prefix() .. quote(ROOT .. "/bin/omp-bot") .. " " .. quote(name) .. create
 end
 
 local registered = ""
@@ -398,9 +401,48 @@ local function remove_bot(cx: WindowCx)
 	end)
 end
 
+-- Secrets: Add asks for a name and who gets it, then opens bin/omp-bot-secret in a tab of its own: omp's masked
+-- secret box, which stores it never expiring and closes the tab. Shared secrets reach every bot, boxed ones too,
+-- unless a bot holds its own copy.
+local function add_secret(cx: WindowCx)
+	cx:prompt({ placeholder = "Secret name, like SIMPLEFIN", icon = "lock", action = "next" }):next(function(text, _, cx2)
+		if not text or not cx2 then
+			return
+		end
+		local name = (text:match("^%s*(.-)%s*$") :: string):upper():gsub("[%s%-]", "_")
+		if name == "" then
+			return
+		end
+		if #name > 64 or not name:match("^[A-Z][A-Z0-9_]*$") then
+			cx2:toast("error", "Secret names use capitals, digits and _, starting with a capital, like SIMPLEFIN")
+			return
+		end
+		local items = { { label = "All bots", detail = "shared, unless a bot holds its own", icon = "lock", scope = "" } }
+		for _, bot in ipairs(roster()) do
+			items[#items + 1] = { label = bot.name, detail = "only " .. bot.name .. (bot.box and ", in its box" or ""), icon = "sparkle", scope = bot.name }
+		end
+		cx2:pick({ items = items, placeholder = "Who gets " .. name .. "?", icon = "lock", action = "choose" }):next(function(item, _, cx3)
+			if not item or not cx3 then
+				return
+			end
+			local line = prefix() .. quote(ROOT .. "/bin/omp-bot-secret") .. " " .. quote(name)
+			if item.scope ~= "" then
+				line = line .. " " .. quote(item.scope)
+			end
+			local id = cx3.layout:new_tab({ command = line })
+			if not id then
+				cx3:toast("error", "Could not open the secret box")
+				return
+			end
+			cx3.layout:name_tab(cx3.session:tab_of(id) or id, "Secret " .. name)
+		end)
+	end)
+end
+
 tern.command({ id = "new", title = "Bots: Open bot", icon = "sparkle", run = new_bot })
 tern.command({ id = "remove", title = "Bots: Remove bot", icon = "trash", run = remove_bot })
 tern.command({ id = "open_all", title = "Bots: Open all", icon = "sparkle", run = open_all })
+tern.command({ id = "secret_add", title = "Secrets: Add", icon = "lock", run = add_secret })
 tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false
 end, run = stage })

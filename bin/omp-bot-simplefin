@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Read-only SimpleFIN client for Regal (https://www.simplefin.org/protocol.html): claims an access URL from a
-# setup token once, and fetches /accounts into a cache, so a conversation reads the cache instead of the bank.
+# Read-only SimpleFIN client for Regal (https://www.simplefin.org/protocol.html): takes an access URL or a setup
+# token (claimed once) as the one secret SIMPLEFIN, and fetches /accounts into a cache, so a conversation reads the
+# cache instead of the bank.
 # It never moves money: SimpleFIN is read-only, and this only ever POSTs the one-shot claim.
 set -euo pipefail
-usage='usage: omp-bot-simplefin claim | fetch [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--force] | status
-  claim   SIMPLEFIN_SETUP_TOKEN=$SECRET_SIMPLEFIN_SETUP_TOKEN omp-bot-simplefin claim
-          sends the setup token to its claim URL once (a token is never sent twice, whatever happened), stores
-          the access URL it returns as the secret SIMPLEFIN_ACCESS_URL and forgets SIMPLEFIN_SETUP_TOKEN
-  fetch   SIMPLEFIN_ACCESS_URL=$SECRET_SIMPLEFIN_ACCESS_URL omp-bot-simplefin fetch
-          GET /accounts with pending transactions, from 5 days before the newest cached transaction (90 days
-          back the first time) to now, merged into the cache; served from the cache when the last fetch is under
-          4 hours old (--force fetches anyway, --start/--end fetch that window, at most 90 days)
+usage='usage: omp-bot-simplefin fetch [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--force] | status
+  fetch   SIMPLEFIN=$SECRET_SIMPLEFIN omp-bot-simplefin fetch
+          SIMPLEFIN is an access URL (https://user:pass@host/path) or a SimpleFIN Bridge setup token. A setup token
+          is claimed first, once ever (never resent, whatever happened), and the access URL it returns is stored as
+          the bot'"'"'s own secret SIMPLEFIN, which wins over a shared one from then on. Then GET /accounts with pending
+          transactions, from 5 days before the newest cached transaction (90 days back the first time) to now,
+          merged into the cache; served from the cache when the last fetch is under 4 hours old (--force fetches
+          anyway, --start/--end fetch that window, at most 90 days)
   status  the cache, the last fetch and how many requests the last 24 hours used (Bridge expects 24 a day)
 The cache is $SIMPLEFIN_DIR (~/.local/state/regal/simplefin): accounts.json, transactions.json, raw/ responses.'
 umask 077
@@ -21,8 +22,9 @@ mkdir -p "$dir/raw"
 now=$(date +%s)
 
 die() { echo "omp-bot-simplefin: $*" >&2; exit 1; }
+access='^https://[^/@[:space:]]+@[^[:space:]]+$'
 used() { [ -f "$dir/requests.log" ] && awk -v since=$((now - 86400)) '$1 > since' "$dir/requests.log" | wc -l || echo 0; }
-# A secret is stored for the bot this runs in (omp-secret --bot), or for your own omp chats outside a bot.
+# A secret is stored for the bot this runs in (omp-secret --bot), or shared (your own omp chats) outside a bot.
 scope() { if [ -n "${OMP_BOT_NAME:-}" ]; then printf '%s\n' --bot "$OMP_BOT_NAME"; else printf '%s\n' --user; fi; }
 # curl reads the URL and the credentials from stdin, so they never show in a process listing; only https is
 # allowed and certificates are always checked.
@@ -40,17 +42,16 @@ call() {
 	} | curl -q -sS --proto =https --max-time 120 -o "$out" -w '%{http_code}' -K -
 }
 
+# Claims setup token $1 and prints the access URL it returns, kept as the bot's own SIMPLEFIN. Runs under the lock.
 claim() {
-	[ -n "${SIMPLEFIN_SETUP_TOKEN:-}" ] || die "SIMPLEFIN_SETUP_TOKEN is unset; run it as SIMPLEFIN_SETUP_TOKEN=\$SECRET_SIMPLEFIN_SETUP_TOKEN omp-bot-simplefin claim"
 	command -v omp-secret >/dev/null || die "omp-secret is not on PATH, so the access URL could not be stored; nothing was claimed"
-	local token hash url code=000 rc=0
-	token=$(printf '%s' "$SIMPLEFIN_SETUP_TOKEN" | tr -d ' \n\r\t')
+	local token=$1 hash url code=000 rc=0
 	hash=$(printf '%s' "$token" | sha256sum | cut -c1-16)
 	if [ -f "$dir/claims.log" ] && grep -q "^$hash " "$dir/claims.log"; then
-		die "this setup token was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: make a new setup token in SimpleFIN Bridge and, if the old one shows as claimed, disable that connection."
+		die "SIMPLEFIN is a setup token that was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: make a new setup token in SimpleFIN Bridge, add it as SIMPLEFIN for ${OMP_BOT_NAME:-this bot} in Tern's palette (Secrets: Add) and, if the old one shows as claimed, disable that connection."
 	fi
-	url=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "the setup token is not base64; nothing was claimed"
-	[[ $url == https://* ]] || die "the setup token does not decode to an https claim URL; nothing was claimed"
+	url=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "SIMPLEFIN is neither an access URL (https://user:pass@…) nor a base64 setup token; nothing was claimed"
+	[[ $url == https://* ]] || die "SIMPLEFIN is neither an access URL nor a setup token that decodes to an https claim URL; nothing was claimed"
 	body=$(mktemp "$dir/.claim.XXXXXX")
 	trap 'rm -f "$body"' EXIT
 	# Written before the POST: from here on the outcome may be unknown, and the token is never sent again.
@@ -64,17 +65,17 @@ claim() {
 		printf '%s refused 403 %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
 		die "SimpleFIN refused the claim (403): the token does not exist or was already claimed. If you did not claim it yourself it may be compromised: disable it in SimpleFIN Bridge and make a new one."
 	fi
-	if [ "$code" != 200 ] || ! grep -qE '^https://[^/@[:space:]]+@[^[:space:]]+$' "$body"; then
+	if [ "$code" != 200 ] || ! grep -qE "$access" "$body"; then
 		printf '%s failed http %s %s\n' "$hash" "$code" "$(date -Is)" >>"$dir/claims.log"
 		die "the claim answered HTTP $code without an access URL. It is not retried: make a new setup token in SimpleFIN Bridge, and disable the old one if it shows as claimed."
 	fi
-	if ! tr -d '\n' <"$body" | omp-secret SIMPLEFIN_ACCESS_URL $(scope) --ttl never >/dev/null 2>&1; then
+	if ! tr -d '\n' <"$body" | omp-secret SIMPLEFIN $(scope) --ttl never >/dev/null 2>&1; then
 		printf '%s claimed-unsaved %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
 		die "SimpleFIN gave an access URL but storing it as a secret failed, so it was discarded. Disable that connection in SimpleFIN Bridge and make a new setup token."
 	fi
 	printf '%s claimed %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
-	omp-secret forget SIMPLEFIN_SETUP_TOKEN $(scope) >/dev/null 2>&1 || true
-	echo "Claimed: the access URL is stored as the secret SIMPLEFIN_ACCESS_URL (use \$SECRET_SIMPLEFIN_ACCESS_URL) and the setup token is forgotten."
+	echo "omp-bot-simplefin: claimed the setup token; the access URL is now ${OMP_BOT_NAME:-this bot}'s own secret SIMPLEFIN" >&2
+	tr -d '\n' <"$body"
 }
 
 day() { date -u -d "$1" +%s 2>/dev/null || die "'$1' is not a date (YYYY-MM-DD)"; }
@@ -89,10 +90,13 @@ fetch() {
 		*) die "$usage" ;;
 		esac
 	done
-	[ -n "${SIMPLEFIN_ACCESS_URL:-}" ] || die "SIMPLEFIN_ACCESS_URL is unset; run it as SIMPLEFIN_ACCESS_URL=\$SECRET_SIMPLEFIN_ACCESS_URL omp-bot-simplefin fetch"
+	[ -n "${SIMPLEFIN:-}" ] || die "SIMPLEFIN is unset; run it as SIMPLEFIN=\$SECRET_SIMPLEFIN omp-bot-simplefin fetch"
 	exec 9>"$dir/.lock"
 	flock 9
-	local last
+	local secret base last
+	secret=$(printf '%s' "$SIMPLEFIN" | tr -d ' \n\r\t')
+	if [[ $secret =~ $access ]]; then base=$secret; else base=$(claim "$secret") || exit 1; fi
+	base=${base%/}
 	last=$(jq -r '.fetched // 0' "$dir/accounts.json" 2>/dev/null || echo 0)
 	if [ -z "$start$end" ] && [ "$force" = 0 ] && [ $((now - last)) -lt "$fresh_s" ]; then
 		echo "omp-bot-simplefin: served from the cache fetched $(date -d "@$last" '+%F %R'); --force fetches anyway" >&2
@@ -108,7 +112,7 @@ fetch() {
 	fi
 	[ "$start" -lt "$end" ] || die "--start must come before --end"
 	[ $((end - start)) -le $((90 * 86400 + 86400)) ] || die "SimpleFIN Bridge serves at most 90 days a request; fetch a longer stretch in 90-day windows"
-	local base=${SIMPLEFIN_ACCESS_URL%/} stamp out code rc=0
+	local stamp out code rc=0
 	stamp=$(date -u +%Y%m%dT%H%M%SZ)
 	out=$dir/raw/$stamp.json
 	echo "$now" >>"$dir/requests.log"
@@ -117,7 +121,7 @@ fetch() {
 	case $code in
 	200) ;;
 	402) rm -f "$out"; die "SimpleFIN answered 402 Payment required: the SimpleFIN Bridge subscription needs paying" ;;
-	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Make a new setup token in SimpleFIN Bridge" ;;
+	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Make a new setup token in SimpleFIN Bridge and add it as SIMPLEFIN for ${OMP_BOT_NAME:-this bot} in Tern's palette (Secrets: Add), which replaces this one" ;;
 	*) rm -f "$out"; die "SimpleFIN answered HTTP $code; the cache is unchanged" ;;
 	esac
 	jq -e '.accounts | arrays' "$out" >/dev/null 2>&1 || { rm -f "$out"; die "SimpleFIN's answer is not an account set; the cache is unchanged"; }
@@ -162,7 +166,6 @@ status() {
 }
 
 case ${1:-} in
-claim) claim ;;
 fetch) shift; fetch "$@" ;;
 status) status ;;
 -h | --help) echo "$usage" ;;

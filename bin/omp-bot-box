@@ -43,6 +43,11 @@ while IFS= read -r path; do
 	grant "$path" "omp-bot.$tag.$i"
 done <<<"${OMP_BOT_PERSIST_PATHS:-}"
 
+# The secrets shared with every bot reach a boxed bot as a copy in its own store, sealed with its own key.
+if command -v omp-secret >/dev/null && ! omp-secret sync --bot "$name" >&2; then
+	echo "omp-bot-box: could not copy the shared secrets into $name's store; it reads only its own" >&2
+fi
+
 # The environment the bot gets in the box, and every store path it or the omp arguments name.
 fwd=()
 for k in $(compgen -e); do
