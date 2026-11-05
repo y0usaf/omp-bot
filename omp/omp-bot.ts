@@ -1,4 +1,5 @@
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
@@ -438,7 +439,7 @@ function eventInfo(block, bot) {
 		const body = bodyText(block);
 		if (role === "omp.irc.incoming") {
 			const name = head.replace(/^IRC\s+/, "").replace(GLYPHS, "").trim();
-			if (name) return { action: "Message from", name, peer: name, from: name, body };
+			if (name) return { action: "Message from", name, peer: name, from: name, body, card: true };
 		}
 		const routed = head.match(/^(?:IRC|Pool)\s+(.+?)\s*(?:→|->|›|[\uE000-\uF8FF])+\s*(.+)$/);
 		if (routed) {
@@ -712,7 +713,18 @@ function patchTranscript(state) {
 	const stamps = new WeakMap();
 	const times = new WeakMap();
 	const mores = new WeakMap();
+	const collected = new WeakMap();
 	proto[PATCHED] = { state };
+
+	const updateResult = ToolExecutionComponent.prototype.updateResult;
+	ToolExecutionComponent.prototype.updateResult = function (result, isPartial, toolCallId) {
+		const waited = !isPartial && result?.details?.op === "wait" ? result.details.waited : undefined;
+		if (typeof waited?.from === "string") {
+			const body = String(waited.body ?? "");
+			collected.set(this, { action: "Message from", name: waited.from, peer: waited.from, from: waited.from, body, ts: Number(waited.ts) || undefined });
+		}
+		return updateResult.call(this, result, isPartial, toolCallId);
+	};
 
 	proto.canRemoveBlock = function (component) {
 		if (proto[PATCHED].state.on && String(component?.describe?.()?.p?.role ?? "").startsWith("omp.irc.")) return false;
@@ -741,7 +753,7 @@ function patchTranscript(state) {
 		if (block?.mode === "thinking" || advises(block)) return undefined;
 		const source = block?.source ?? block;
 		const reply = source instanceof AssistantMessageComponent;
-		let event = reply ? null : events.get(block);
+		let event = reply ? null : (collected.get(block) ?? events.get(block));
 		if (!reply && event === undefined) {
 			event = eventInfo(block.describe?.(lastCx), proto[PATCHED].state.bot) ?? null;
 			if (event !== PENDING) events.set(block, event);
@@ -767,7 +779,7 @@ function patchTranscript(state) {
 		if (!block) return undefined;
 		if (stamps.has(block)) return stamps.get(block) ?? undefined;
 		const s = proto[PATCHED].state;
-		const ts = s.restoring ? (s.clock?.find(block.describe?.(lastCx)) ?? (s.bot.hero ? Date.now() : null)) : Date.now();
+		const ts = item.info?.ts ?? (s.restoring ? (s.clock?.find(block.describe?.(lastCx)) ?? (s.bot.hero ? Date.now() : null)) : Date.now());
 		stamps.set(block, ts);
 		return ts ?? undefined;
 	}
@@ -799,9 +811,22 @@ function patchTranscript(state) {
 		let run;
 		let last;
 		let previous;
+		const taken = [];
+		for (const block of blocks) {
+			const waited = collected.get(block);
+			if (waited) taken.push(waited);
+		}
 		for (const block of blocks) {
 			const item = shown(block);
 			if (!item) continue;
+			if (taken.length > 0 && item instanceof BotEvent && item.info.card) {
+				const body = item.info.body.trim();
+				const at = taken.findIndex(waited => waited.from === item.info.from && waited.body.trim() === body);
+				if (at >= 0) {
+					taken.splice(at, 1);
+					continue;
+				}
+			}
 			const talk = item instanceof BotEvent && item.info.peer !== undefined;
 			if (talk) {
 				item.ts = stamp(item);
