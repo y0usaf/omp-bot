@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { connect } from "node:net";
 import { SOCKET } from "./paths";
 
@@ -28,6 +29,7 @@ try {
 	});
 	const git = process.env.OMP_BOT_REAL_GIT;
 	if (!git) throw new Error("OMP_BOT_REAL_GIT is unset");
+	if (realpathSync(git) === realpathSync(`${import.meta.dir}/../git/git`)) throw new Error(`OMP_BOT_REAL_GIT points at this wrapper (${git}), not git`);
 	process.exit(await Bun.spawn([git, ...args], { stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exited);
 } catch (error) {
 	console.error(`omp-bot: ${error instanceof Error ? error.message : error}`);
