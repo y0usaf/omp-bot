@@ -49,7 +49,7 @@ if [ "$(field box)" = true ]; then
 	box=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/box.env
 	[ ! -r "$box" ] || . "$box"
 	export OMP_BOT_BOX_CWD="${cwd:-$HOME}" OMP_BOT_PERSIST_PATHS="$paths" OMP_BOT_PERSIST_FRESH="$fresh"
-	omp=$root/bin/omp-bot-box
+	omp=$root/bin/omp-bot-box boxed=1
 	cd "$HOME"
 else
 	cd "${cwd:-$HOME}"
@@ -88,11 +88,25 @@ fi
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
 rm -f "$OMP_BOT_RELAUNCH"
 waiting=
+# A boxed bot cut off by its box going away (ssh exits 255) or refused a start while its box is down waits in
+# its tab for the box to answer again and carries on there, restoring its session. Five such cut-offs in a row
+# while the box answers, each within a minute of starting, give up instead of looping.
+cutoffs=0
 while :; do
 	code=0
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
+	started=$(date +%s)
 	flock -w 2 -E 213 -o "$dir/lock" omp-until "$dir" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
-	[ "$code" = 213 ] || break
+	if [ "$code" != 213 ]; then
+		[ -n "${boxed:-}" ] && [ "$code" != 0 ] && [ ! -e "$OMP_BOT_RELAUNCH" ] || break
+		[ $(($(date +%s) - started)) -lt 60 ] || cutoffs=0
+		why=$("$root/bin/omp-bot-health") && { [ "$code" != 255 ] || [ "$cutoffs" -ge 5 ]; } && break
+		cutoffs=$((cutoffs + 1))
+		echo "omp-bot: $name lost its box${why:+ ($why)}; it carries on here once the box answers again…" >&2
+		until "$root/bin/omp-bot-health" >/dev/null; do sleep 5; done
+		"$root/bin/omp-bot-ctl" claim "$name" || true
+		continue
+	fi
 	holder=$("$root/bin/omp-bot-ctl" holder "$name" 2>/dev/null) || holder=none
 	case $holder in
 	headless*) "$root/bin/omp-bot-ctl" claim "$name" || true ;;

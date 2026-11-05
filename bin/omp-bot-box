@@ -69,10 +69,13 @@ for a in "$@"; do scan "$a"; done
 for k in "${fwd[@]}"; do scan "${!k}"; done
 
 # Make the box's state folder the bot's own (a share mounted with sudo leaves root-owned parents), hand it
-# the roster, clear a stale botd socket, and learn which store paths the box lacks.
+# the roster, clear a stale botd socket, and learn which store paths the box lacks. A store path one of the links
+# in OMP_BOT_BOX_EXT (finix's seed share: NAME -> a copy of a store path, the names the box's own omp config
+# loads its extensions by) points at is named by that link, so the bot and the box name an extension alike and
+# omp loads it once; one neither there nor in the box's store is copied.
 prelude='set -euo pipefail
-state=$1 dir=$2 cache=$3 sock=$4 root=$5
-shift 5
+state=$1 dir=$2 cache=$3 sock=$4 root=$5 ext=$6
+shift 6
 own() {
 	local p=$1 chain=()
 	while [ "$p" != "$HOME" ] && [ "$p" != / ]; do chain=("$p" "${chain[@]}"); p=$(dirname "$p"); done
@@ -89,16 +92,23 @@ case $root in /nix/store/*) ;; *) [ -e "$root" ] || { echo "omp-bot-box: $root i
 rm -f "$sock"
 cat >"$state/bots.json.tmp"
 mv -f "$state/bots.json.tmp" "$state/bots.json"
+declare -A named=()
+if [ -n "$ext" ]; then
+	for link in "$ext"/*; do
+		if [ -L "$link" ]; then named[$(basename "$(readlink "$link")")]=$link; fi
+	done
+fi
 for t in "$@"; do
-	if [ -e "/nix/store/$t" ]; then echo "store $t"
+	if [ -n "${named[$t]:-}" ]; then echo "named $t ${named[$t]}"
+	elif [ -e "/nix/store/$t" ]; then echo "store $t"
 	elif [ ! -e "$cache/store/$t" ]; then echo "copy $t"
 	fi
 done'
-declare -A instore=()
+declare -A instore=() named=()
 missing=()
-while read -r kind t; do
-	case $kind in store) instore[$t]=1 ;; copy) missing+=("$t") ;; esac
-done < <("${ssh[@]}" -T box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$state" "$dir" "$cache" "$sock" "$root" "${!tops[@]}")" <"$state/bots.json")
+while read -r kind t link; do
+	case $kind in store) instore[$t]=1 ;; named) named[$t]=$link ;; copy) missing+=("$t") ;; esac
+done < <("${ssh[@]}" -T box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$state" "$dir" "$cache" "$sock" "$root" "${OMP_BOT_BOX_EXT:-}" "${!tops[@]}")" <"$state/bots.json")
 if [ ${#missing[@]} -gt 0 ]; then
 	sync='set -euo pipefail
 t=$(mktemp -d "$1/.in.XXXXXX")
@@ -109,11 +119,14 @@ rm -rf "$t"'
 	tar -C /nix/store -cf - "${missing[@]}" | "${ssh[@]}" -T box "bash -c $(printf %q "$sync") omp-bot-box $(printf %q "$cache/store")"
 fi
 map() {
-	local v t
+	local v t top
 	v=$(real "$1")
 	if [[ $v == /nix/store/* ]]; then
 		t=${v#/nix/store/}
-		[ -n "${instore[${t%%/*}]:-}" ] || v=$cache/store/$t
+		top=${t%%/*}
+		if [ -n "${named[$top]:-}" ]; then v=${named[$top]}${t#"$top"}
+		elif [ -z "${instore[$top]:-}" ]; then v=$cache/store/$t
+		fi
 	fi
 	printf '%s' "$v"
 }
