@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs omp inside omp-box for a bot whose roster entry has "box": true; bin/omp-bot calls it in place of omp.
 set -euo pipefail
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd -P "$(dirname "$0")/.." && pwd)
 : "${OMP_BOT_NAME:?omp-bot-box runs from bin/omp-bot}" "${OMP_BOT_STATE:?omp-bot-box runs from bin/omp-bot}"
 [ -n "${OMP_BOT_BOX_SSH_CONFIG:-}" ] || { echo "omp-bot-box: OMP_BOT_BOX_SSH_CONFIG, the ssh config that reaches the box, is unset (see box.env in the README)" >&2; exit 1; }
 name=$OMP_BOT_NAME
@@ -132,9 +132,10 @@ map() {
 }
 
 cwd=${OMP_BOT_BOX_CWD:-$HOME}
-cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$(map "$root")/bin"):\"\$PATH\" && exec env"
+cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$(map "$root")/bin${OMP_BOT_BOX_PATH:+:$OMP_BOT_BOX_PATH}"):\"\$PATH\" && exec env"
 for k in "${fwd[@]}"; do cmd+=" $(printf %q "$k=$(map "${!k}")")"; done
-cmd+=" $(printf %q "OMP_BOT_SOCKET=$sock") OMP_BOT_PID=$$ omp"
+# A boxed bot keeps its secrets in its own folder, which the box shares, encrypted with a key of its own there.
+cmd+=" $(printf %q "OMP_SECRETS_DIR=$dir/secrets") $(printf %q "OMP_BOT_SOCKET=$sock") OMP_BOT_PID=$$ omp"
 for a in "$@"; do cmd+=" $(printf %q "$(map "$a")")"; done
 tty=-T
 [ -t 0 ] && [ -t 1 ] && tty=-t

@@ -2,7 +2,7 @@
 set -eu
 usage="usage: omp-bot NAME [--headless | --create TINT] [omp args...]"
 [ $# -ge 1 ] || { echo "$usage" >&2; exit 2; }
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd -P "$(dirname "$0")/.." && pwd)
 name=$1
 shift
 case $name in

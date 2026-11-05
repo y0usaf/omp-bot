@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# Read-only SimpleFIN client for Regal (https://www.simplefin.org/protocol.html): claims an access URL from a
+# setup token once, and fetches /accounts into a cache, so a conversation reads the cache instead of the bank.
+# It never moves money: SimpleFIN is read-only, and this only ever POSTs the one-shot claim.
+set -euo pipefail
+usage='usage: omp-bot-simplefin claim | fetch [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--force] | status
+  claim   SIMPLEFIN_SETUP_TOKEN=$SECRET_SIMPLEFIN_SETUP_TOKEN omp-bot-simplefin claim
+          sends the setup token to its claim URL once (a token is never sent twice, whatever happened), stores
+          the access URL it returns as the secret SIMPLEFIN_ACCESS_URL and forgets SIMPLEFIN_SETUP_TOKEN
+  fetch   SIMPLEFIN_ACCESS_URL=$SECRET_SIMPLEFIN_ACCESS_URL omp-bot-simplefin fetch
+          GET /accounts with pending transactions, from 5 days before the newest cached transaction (90 days
+          back the first time) to now, merged into the cache; served from the cache when the last fetch is under
+          4 hours old (--force fetches anyway, --start/--end fetch that window, at most 90 days)
+  status  the cache, the last fetch and how many requests the last 24 hours used (Bridge expects 24 a day)
+The cache is $SIMPLEFIN_DIR (~/.local/state/regal/simplefin): accounts.json, transactions.json, raw/ responses.'
+umask 077
+dir=${SIMPLEFIN_DIR:-$HOME/.local/state/regal/simplefin}
+fresh_s=$((4 * 3600))
+daily=24
+mkdir -p "$dir/raw"
+now=$(date +%s)
+
+die() { echo "omp-bot-simplefin: $*" >&2; exit 1; }
+used() { [ -f "$dir/requests.log" ] && awk -v since=$((now - 86400)) '$1 > since' "$dir/requests.log" | wc -l || echo 0; }
+# A secret is stored for the bot this runs in (omp-secret --bot), or for your own omp chats outside a bot.
+scope() { if [ -n "${OMP_BOT_NAME:-}" ]; then printf '%s\n' --bot "$OMP_BOT_NAME"; else printf '%s\n' --user; fi; }
+# curl reads the URL and the credentials from stdin, so they never show in a process listing; only https is
+# allowed and certificates are always checked.
+call() {
+	local method=$1 url=$2 out=$3 user=
+	if [[ $url =~ ^(https://)([^/@]+)@(.*)$ ]]; then
+		user=${BASH_REMATCH[2]}
+		url=${BASH_REMATCH[1]}${BASH_REMATCH[3]}
+	fi
+	quote() { local v=${1//\\/\\\\}; printf '"%s"' "${v//\"/\\\"}"; }
+	{
+		printf 'url = %s\n' "$(quote "$url")"
+		[ -z "$user" ] || printf 'user = %s\n' "$(quote "$user")"
+		if [ "$method" = POST ]; then printf '%s\n' 'request = "POST"' 'header = "Content-Length: 0"'; else echo location; fi
+	} | curl -q -sS --proto =https --max-time 120 -o "$out" -w '%{http_code}' -K -
+}
+
+claim() {
+	[ -n "${SIMPLEFIN_SETUP_TOKEN:-}" ] || die "SIMPLEFIN_SETUP_TOKEN is unset; run it as SIMPLEFIN_SETUP_TOKEN=\$SECRET_SIMPLEFIN_SETUP_TOKEN omp-bot-simplefin claim"
+	command -v omp-secret >/dev/null || die "omp-secret is not on PATH, so the access URL could not be stored; nothing was claimed"
+	local token hash url code=000 rc=0
+	token=$(printf '%s' "$SIMPLEFIN_SETUP_TOKEN" | tr -d ' \n\r\t')
+	hash=$(printf '%s' "$token" | sha256sum | cut -c1-16)
+	if [ -f "$dir/claims.log" ] && grep -q "^$hash " "$dir/claims.log"; then
+		die "this setup token was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: make a new setup token in SimpleFIN Bridge and, if the old one shows as claimed, disable that connection."
+	fi
+	url=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "the setup token is not base64; nothing was claimed"
+	[[ $url == https://* ]] || die "the setup token does not decode to an https claim URL; nothing was claimed"
+	body=$(mktemp "$dir/.claim.XXXXXX")
+	trap 'rm -f "$body"' EXIT
+	# Written before the POST: from here on the outcome may be unknown, and the token is never sent again.
+	printf '%s sent %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
+	code=$(call POST "$url" "$body") || rc=$?
+	if [ "$rc" != 0 ]; then
+		printf '%s unknown (curl exit %s) %s\n' "$hash" "$rc" "$(date -Is)" >>"$dir/claims.log"
+		die "the claim request failed midway (curl exit $rc), so whether SimpleFIN accepted it is unknown. It is not retried: make a new setup token in SimpleFIN Bridge, and disable the old one if it shows as claimed."
+	fi
+	if [ "$code" = 403 ]; then
+		printf '%s refused 403 %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
+		die "SimpleFIN refused the claim (403): the token does not exist or was already claimed. If you did not claim it yourself it may be compromised: disable it in SimpleFIN Bridge and make a new one."
+	fi
+	if [ "$code" != 200 ] || ! grep -qE '^https://[^/@[:space:]]+@[^[:space:]]+$' "$body"; then
+		printf '%s failed http %s %s\n' "$hash" "$code" "$(date -Is)" >>"$dir/claims.log"
+		die "the claim answered HTTP $code without an access URL. It is not retried: make a new setup token in SimpleFIN Bridge, and disable the old one if it shows as claimed."
+	fi
+	if ! tr -d '\n' <"$body" | omp-secret SIMPLEFIN_ACCESS_URL $(scope) --ttl never >/dev/null 2>&1; then
+		printf '%s claimed-unsaved %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
+		die "SimpleFIN gave an access URL but storing it as a secret failed, so it was discarded. Disable that connection in SimpleFIN Bridge and make a new setup token."
+	fi
+	printf '%s claimed %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
+	omp-secret forget SIMPLEFIN_SETUP_TOKEN $(scope) >/dev/null 2>&1 || true
+	echo "Claimed: the access URL is stored as the secret SIMPLEFIN_ACCESS_URL (use \$SECRET_SIMPLEFIN_ACCESS_URL) and the setup token is forgotten."
+}
+
+day() { date -u -d "$1" +%s 2>/dev/null || die "'$1' is not a date (YYYY-MM-DD)"; }
+
+fetch() {
+	local start= end= force=0
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--start) start=$(day "${2:?--start needs a date}"); shift 2 ;;
+		--end) end=$(day "${2:?--end needs a date}"); shift 2 ;;
+		--force) force=1; shift ;;
+		*) die "$usage" ;;
+		esac
+	done
+	[ -n "${SIMPLEFIN_ACCESS_URL:-}" ] || die "SIMPLEFIN_ACCESS_URL is unset; run it as SIMPLEFIN_ACCESS_URL=\$SECRET_SIMPLEFIN_ACCESS_URL omp-bot-simplefin fetch"
+	exec 9>"$dir/.lock"
+	flock 9
+	local last
+	last=$(jq -r '.fetched // 0' "$dir/accounts.json" 2>/dev/null || echo 0)
+	if [ -z "$start$end" ] && [ "$force" = 0 ] && [ $((now - last)) -lt "$fresh_s" ]; then
+		echo "omp-bot-simplefin: served from the cache fetched $(date -d "@$last" '+%F %R'); --force fetches anyway" >&2
+		summary
+		return
+	fi
+	[ "$(used)" -lt "$daily" ] || die "$daily requests in the last 24 hours already, SimpleFIN Bridge's daily limit; going over it can get the access disabled. Read the cache, or wait."
+	end=${end:-$((now + 86400))}
+	if [ -z "$start" ]; then
+		start=$(jq -r 'map(.posted | select(. > 0)) | max // empty' "$dir/transactions.json" 2>/dev/null || true)
+		start=${start:+$((start - 5 * 86400))}
+		start=${start:-$((now - 90 * 86400))}
+	fi
+	[ "$start" -lt "$end" ] || die "--start must come before --end"
+	[ $((end - start)) -le $((90 * 86400 + 86400)) ] || die "SimpleFIN Bridge serves at most 90 days a request; fetch a longer stretch in 90-day windows"
+	local base=${SIMPLEFIN_ACCESS_URL%/} stamp out code rc=0
+	stamp=$(date -u +%Y%m%dT%H%M%SZ)
+	out=$dir/raw/$stamp.json
+	echo "$now" >>"$dir/requests.log"
+	code=$(call GET "$base/accounts?version=2&pending=1&start-date=$start&end-date=$end" "$out") || rc=$?
+	[ "$rc" = 0 ] || { rm -f "$out"; die "the request failed (curl exit $rc); the cache is unchanged"; }
+	case $code in
+	200) ;;
+	402) rm -f "$out"; die "SimpleFIN answered 402 Payment required: the SimpleFIN Bridge subscription needs paying" ;;
+	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Make a new setup token in SimpleFIN Bridge" ;;
+	*) rm -f "$out"; die "SimpleFIN answered HTTP $code; the cache is unchanged" ;;
+	esac
+	jq -e '.accounts | arrays' "$out" >/dev/null 2>&1 || { rm -f "$out"; die "SimpleFIN's answer is not an account set; the cache is unchanged"; }
+	chmod 600 "$out"
+	# Balances replace the old ones; transactions merge by account and id, a newer copy replacing an older one, and
+	# a fetch up to now replaces its accounts' pending ones, since a pending one posts under a new id or is dropped.
+	jq --argjson now "$now" '{fetched: $now, errlist: (.errlist // []), errors: (.errors // []), connections: (.connections // []), accounts: [.accounts[] | del(.transactions)]}' "$out" >"$dir/accounts.json.tmp"
+	mv -f "$dir/accounts.json.tmp" "$dir/accounts.json"
+	[ -f "$dir/transactions.json" ] || echo '[]' >"$dir/transactions.json"
+	jq --slurpfile new "$out" --argjson end "$end" --argjson now "$now" '
+		def when: if (.transacted_at // 0) > 0 then .transacted_at elif .posted > 0 then .posted else $now end;
+		($new[0].accounts | map(.id)) as $fetched
+		| [$new[0].accounts[] as $a | ($a.transactions // [])[]
+			| {account_id: $a.id, account: $a.name, currency: $a.currency, id, posted, transacted_at, amount, description,
+				payee, memo, pending: (.pending // false), date: (when | todate[:10])}
+			| with_entries(select(.value != null))] as $add
+		| ($add | map({key: (.account_id + "\u0000" + .id), value: true}) | from_entries) as $seen
+		| map(select(
+			($seen[.account_id + "\u0000" + .id] | not)
+			and ((.pending and $end >= $now and (.account_id | IN($fetched[]))) | not)))
+		| . + $add
+		| sort_by(.date, .account, .id)' "$dir/transactions.json" >"$dir/transactions.json.tmp"
+	mv -f "$dir/transactions.json.tmp" "$dir/transactions.json"
+	summary
+}
+
+summary() {
+	jq --slurpfile tx "$dir/transactions.json" '{
+		fetched: (.fetched | todate),
+		errors: ([.errlist[]? | .msg] + [.errors[]?] | map(gsub("[\\u0000-\\u001f]"; " "))),
+		accounts: [.accounts[] | {name, currency, balance, "available-balance", "balance-date": (."balance-date" | todate)}],
+		transactions: {count: ($tx[0] | length), pending: ($tx[0] | map(select(.pending)) | length), first: ($tx[0] | first.date), last: ($tx[0] | last.date)}
+	} | with_entries(select(.value != null))' "$dir/accounts.json"
+}
+
+status() {
+	jq -n --arg dir "$dir" --argjson used "$(used)" --argjson daily "$daily" \
+		--argjson fetched "$(jq '.fetched // null' "$dir/accounts.json" 2>/dev/null || echo null)" \
+		--argjson count "$(jq length "$dir/transactions.json" 2>/dev/null || echo 0)" \
+		--arg claims "$(cut -d' ' -f2- "$dir/claims.log" 2>/dev/null | tail -n 3)" \
+		'{cache: $dir, fetched: (if $fetched then $fetched | todate else null end), transactions: $count, requests_last_24h: $used, daily_limit: $daily, claims: ($claims | split("\n") | map(select(. != "")))}'
+}
+
+case ${1:-} in
+claim) claim ;;
+fetch) shift; fetch "$@" ;;
+status) status ;;
+-h | --help) echo "$usage" ;;
+*) die "$usage" ;;
+esac
