@@ -71,7 +71,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_EXTENSION`, `OMP_BOT_CWD_EXTENSION`, `OMP_BOT_SECRETS_EXTENSION`, `OMP_BOT_WORK_FOLD_EXTENSION`, `OMP_BOT_CHAT_LOOK_EXTENSION` | none | Extra omp extensions every bot loads. |
 | `OMP_BOT_OMPD_EXTENSION` | `omp/ompd.ts` | Path bots load ompd's extension from (lets finix use one stable link). |
 | `OMP_BOT_NO_TOOLS` | unset | `1` starts bots with `--no-tools`. |
-| `OMP_BOT_PREWALK` | unset | `1` makes helpers without a model plan on Opus and hand off to the `task` model. Needs finix's omp prewalk patch. |
+| `OMP_BOT_PREWALK` | unset | `1` makes helpers start on DeepSeek V4.1 Flash 1017 Fast and hand off to Opus 5.5 (or the helper's given model) at the first edit. Needs finix's omp prewalk patch. |
 | `OMP_BOT_IDLE_EXIT_MS` | 300000 | Idle time before a background bot sleeps. |
 | `OMP_BOT_HEARTBEAT_MS` | 30000 | Task check-in interval; three misses retry the task. |
 | `OMP_BOT_MAX_ATTEMPTS` | 3 | Attempts per task. |
