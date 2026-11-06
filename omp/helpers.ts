@@ -15,8 +15,8 @@ const DEPTH = Number(process.env.OMP_BOT_HELPER_DEPTH) || (SELF ? 1 : 0);
 const MAX_DEPTH = 2;
 const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
 const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
-const PREWALK_START = "vercel-ai-gateway/deepseek/deepseek-v4.1-flash-1017-fast";
-const PREWALK_INTO = "anthropic/claude-opus-5-5";
+const PREWALK_START = "anthropic/claude-opus-5-5";
+const PREWALK_INTO = "vercel-ai-gateway/deepseek/deepseek-v4.1-flash-1017-fast";
 const PATCHED = Symbol.for("omp-bot.helpers.send");
 const WAKE = /^\[wake\][^\S\n]*(?:\n\s*)?/;
 const DELIVERED = { state: "done" } as Job;
@@ -220,10 +220,10 @@ export default function helpers(pi) {
 		const config = join(home, "prewalk.json");
 		writeAtomic(config, JSON.stringify({ prewalk: { enabled: false, auto: "off" } }));
 		args.push("--config", config);
-		const into = item.model ? model : PREWALK_INTO;
+		const start = item.model ? model : PREWALK_START;
 		if (prewalk) {
-			if (!into) throw new Error("Prewalk helpers require a target model");
-			args = [...withFlag(args, "--model", PREWALK_START), "--prewalk-into", into];
+			if (!start) throw new Error("Prewalk helpers require a starting model");
+			args = [...withFlag(args, "--model", start), "--prewalk-into", PREWALK_INTO];
 		} else {
 			if (model) args = withFlag(args, "--model", model);
 			args.push("--no-prewalk");
@@ -232,7 +232,7 @@ export default function helpers(pi) {
 		if (Array.isArray(tools)) args = withFlag(args, "--tools", tools.join(","));
 		const env = safeEnv(process.env);
 		for (const key of ["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"]) delete env[key];
-		for (const selected of prewalk ? [PREWALK_START, into] : [model]) {
+		for (const selected of prewalk ? [start, PREWALK_INTO] : [model]) {
 			const provider = selected?.split("/")[0];
 			const keys = provider === "anthropic" ? ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY"] : [provider ? getEnvApiKeyName(provider) : undefined];
 			for (const key of keys) if (key && process.env[key]) env[key] = process.env[key];
