@@ -4,6 +4,15 @@ omp-bot runs named omp agents ("bots") that each keep one conversation for good 
 
 A bot is an omp session with extensions from this repo loaded. Each bot is drawn as a Chao, a small pixel-art creature whose colour and mood show the bot's state. A supervisor daemon queues tasks and starts bots when they have work. A job daemon, ompd, runs their shell commands and helpers outside the bot's process, so a restart or crash doesn't lose them.
 
+![A bot chat in Tern under the Grok look](docs/chat.png)
+*Lloyd's chat in Tern under the Grok look, with the bot roster on the left and Ekko's system rail on the right.*
+
+![A decision card waiting on the user](docs/decision.png)
+*R3-D3 parked a task on a decision: Approve, Deny or Handle answers it from the bot's tab.*
+
+![Picking the Grok look](docs/looks.png)
+*Ctrl+Alt+, opens the Settings menu; Look › Grok gives the bots Grok-style avatars and chat. All three show demo bots and conversations.*
+
 ## Run
 
 | Command | Does |
