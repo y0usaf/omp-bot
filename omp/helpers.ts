@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { escapeHarnessTags } from "@oh-my-pi/pi-coding-agent/session/harness-tags";
 import { dir, type Job, load, request, safeEnv } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
 
@@ -149,7 +150,8 @@ You are helper \`${helper.id}\` of the bot ${BOT}, started by \`${parent}\` with
 Message peers via \`write\` with \`path: "agent://<id>"\` and \`content\`. Your id is \`${helper.id}\`; \`${parent}\` is \`agent://${parent}\`${peers.length ? `, and the other helpers now running are:\n${peers.join("\n")}` : "."}
 Use peer messages only for quick coordination, never long-form content. Before editing a file a sibling may own, message that peer. \`write agent://<id>\` never blocks.
 Your final result reaches \`${parent}\` automatically. Message \`${parent}\` only for questions, blockers, or decisions — never progress or completion reports.${helper.parent === MAIN ? `
-Your result waits quietly for \`${parent}\`'s next turn instead of interrupting it. Only when \`${parent}\` must act now — it needs the user's decision, or other work is blocked on your result — make \`[wake]\` the first line of your final message: that starts its turn at once. Never ask to wake for a routine result; a failed run wakes it anyway.` : ""}
+Messages you send to \`agent://${parent}\` are held quietly for its next turn by default. To wake it now, put \`[wake]\` on the first line of the message's \`content\`: use this only when blocked, needing the user, reporting a failure, or delivering the final result it is waiting on. Routine acknowledgements and coordination stay held.
+Your final result also waits quietly for \`${parent}\`'s next turn. Put \`[wake]\` on its first line only for the same urgent cases; a failed run or the final job of a parked task wakes it automatically.` : ""}
 
 § Completion
 No TODO tracking, no progress updates. Execute; your final message is your result.
@@ -274,8 +276,14 @@ export default function helpers(pi) {
 						continue;
 					}
 					const from = SELF && message.from === MAIN ? BOT : String(message.from);
-					const receipt = await send({ from, to: MAIN, body: String(message.body ?? "") });
-					if (receipt?.outcome === "failed") break;
+					const body = String(message.body ?? "");
+					if (!SELF && record(message.from)?.parent === MAIN) {
+						const text = body.replace(WAKE, "");
+						pi.sendMessage({ customType: "irc:incoming", content: `<irc>\nIncoming IRC message from agent \`${from}\`:\n\n${escapeHarnessTags(text)}\n</irc>`, display: true, details: { id: file, from, message: text } }, text !== body ? { deliverAs: "followUp", triggerTurn: true } : { deliverAs: "nextTurn" });
+					} else {
+						const receipt = await send({ from, to: MAIN, body });
+						if (receipt?.outcome === "failed") break;
+					}
 					rmSync(path, { force: true });
 				}
 			} finally {
