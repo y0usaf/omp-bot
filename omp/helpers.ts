@@ -227,7 +227,7 @@ export default function helpers(pi) {
 			args.push("--no-prewalk");
 		}
 		const tools = item.tools ?? agent.tools;
-		if (Array.isArray(tools) && tools.length) args = withFlag(args, "--tools", tools.join(","));
+		if (Array.isArray(tools)) args = withFlag(args, "--tools", tools.join(","));
 		const env = safeEnv(process.env);
 		for (const key of ["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"]) delete env[key];
 		for (const selected of prewalk ? [PREWALK_MODEL, model] : [model]) {
