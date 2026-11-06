@@ -10,6 +10,7 @@ const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const START = "\n# Code Mode\n";
 const END = "\n# End Code Mode\n";
 const COVERED: Readonly<Record<string, true>> = { read: true, write: true, grep: true, glob: true, bash: true };
+const EXTRA_EVAL = "Only the first eval call of an assistant message runs. Put the work in one cell: background commands with & and wait in bash, or asyncio.gather in Python.";
 const DRIVER = readFileSync(new URL("bash-cell.py", import.meta.url), "utf8");
 const SHIM = readFileSync(new URL("bash-tool.py", import.meta.url), "utf8");
 let builtins: Set<string> | undefined;
@@ -42,9 +43,9 @@ function commands(pi: ExtensionAPI, ctx: ExtensionContext): Array<[string, ToolI
 		});
 }
 
-function bashCells(pi: ExtensionAPI, ctx: ExtensionContext): string {
-	if (!enabled(pi, ctx).has("bash")) return "";
-	return ` A cell can instead be bash: {"language": "bash", "code": "..."} runs the code as a bash script in this session's cwd with stdin closed, using the shell's own cat, rg, sed, git, jq and the rest. OMP tools are executables on its PATH, prefixed omp- where the shell has its own: ${commands(pi, ctx).map(([name]) => name).join(", ")}. NAME --help lists its flags: --kebab-case options, positional arguments fill the required ones first, - or a left-out required text argument reads stdin (edit <<'EOF' takes the patch, whose [PATH#TAG] comes from omp-read or omp-grep), --json prints {"text", "details"}; a failing tool exits 1 with its error on stderr. The cell fails with the script's nonzero exit status and ends when the script does, killing whatever it left running, so long work still uses the bash tool with async.`;
+function cells(pi: ExtensionAPI, ctx: ExtensionContext): string {
+	if (!enabled(pi, ctx).has("bash")) return "Cells are Python, not JavaScript: use r = await tool.read({\"path\": \"file\"}) and print(r[\"text\"]); results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather.";
+	return `Bash is the cell language: code runs as a bash script in this session's cwd with stdin closed, using the shell's own cat, rg, sed, git, jq and the rest, plus every OMP tool as an executable on its PATH: ${commands(pi, ctx).map(([name]) => name).join(", ")}. NAME --help lists its flags: --kebab-case options, positional arguments fill the required ones first, - or a left-out required text argument reads stdin (edit <<'EOF' takes the patch, whose [PATH#TAG] comes from omp-read or omp-grep), --json prints {"text", "details"}; a failing tool exits 1 with its error on stderr. The cell fails with the script's nonzero exit status, ends when the script does, and kills whatever it left running, so long work still uses the bash tool with async. language "py" instead runs Python, not JavaScript, for real logic or structured results: r = await tool.read({"path": "file"}) and print(r["text"]); results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather.`;
 }
 
 function declarations(pi: ExtensionAPI, ctx: ExtensionContext): string {
@@ -111,7 +112,7 @@ function declarations(pi: ExtensionAPI, ctx: ExtensionContext): string {
 }
 
 function section(pi: ExtensionAPI, ctx: ExtensionContext): string {
-	return `${START}Cells are Python, not JavaScript. Use r = await tool.read({"path": "file"}) and print(r["text"]); tool results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather. Give cells a 2–5-word title. Long shell work uses bash {"async": True}, not an eval argument. Results arrive automatically: never poll or wait for jobs you did not start. Read proc://JOB_ID only to inspect a known job. The declarations describe arguments, not the cell language. All nested calls retain normal approval hooks and this session's tool restrictions. checkpoint and rewind require direct calls.${bashCells(pi, ctx)}\n\n\`\`\`ts\n${declarations(pi, ctx)}\n\`\`\`\n${END}`;
+	return `${START}${cells(pi, ctx)} Give cells a 2–5-word title. Results arrive automatically: never poll or wait for jobs you did not start. Read proc://JOB_ID only to inspect a known job. One eval per assistant message: further eval calls in the same message are blocked, so put the work in one cell. The declarations describe arguments, not the cell language. All nested calls retain normal approval hooks and this session's tool restrictions. checkpoint and rewind require direct calls.\n\n\`\`\`ts\n${declarations(pi, ctx)}\n\`\`\`\n${END}`;
 }
 
 function rewrite(text: string, block: string): string {
@@ -147,13 +148,19 @@ export default function codeMode(pi: ExtensionAPI) {
 	const automaticChoices: Readonly<Record<string, true>> = { auto: true, none: true, required: true, any: true };
 	const cellDetails = z.object({ cells: z.array(z.object({}).passthrough()) }).passthrough();
 	pi.setLabel("Code mode");
+	let extraEvals = new Set<string>();
+	pi.on("assistant_message", event => {
+		const evals = event.message.content.flatMap(part => part.type === "toolCall" && (part.name === "eval" || part.name === "_eval") ? [part.id] : []);
+		extraEvals = new Set(evals.slice(1));
+	});
 	pi.registerTool({
 		name: "eval", label: "Eval", loadMode: "essential",
-		description: "Execute Python or bash in a persistent kernel. Call live session tools with await tool.NAME(args); print dictionary results with r[\"text\"]. Top-level await works. language is py or bash; bash cells run the code as a bash script with OMP tools as executables on PATH. Each call is one cell; state persists until reset or kernel loss.",
-		parameters: z.object({ language: z.enum(["py", "bash"]), code: z.string(), title: z.string().optional(), timeout: z.number().optional(), reset: z.boolean().optional() }),
+		description: "Execute a bash script or Python in a persistent kernel. language defaults to bash when the session has it, py otherwise. Call live session tools with await tool.NAME(args); print dictionary results with r[\"text\"]. Bash cells run code as a script with OMP tools as executables on PATH. One eval per assistant message: further eval calls in it are blocked, so put the work in one cell. Each call is one cell; Python state persists until reset or kernel loss.",
+		parameters: z.object({ language: z.enum(["py", "bash"]).optional(), code: z.string(), title: z.string().optional(), timeout: z.number().optional(), reset: z.boolean().optional() }),
 		async execute(_id, params, signal, onUpdate, ctx) {
 			if (!ctx.invokeTool) throw new Error("Code mode requires omp's native persistent eval runtime");
-			if (params.language === "py") return ctx.invokeTool(params, { signal, onUpdate });
+			const language = params.language ?? (enabled(pi, ctx).has("bash") ? "bash" : "py");
+			if (language === "py") return ctx.invokeTool({ ...params, language }, { signal, onUpdate });
 			if (!enabled(pi, ctx).has("bash")) throw new Error("bash cells need the bash tool, which this session's tool allowlist lacks");
 			const dir = mkdtempSync(join(process.env.XDG_RUNTIME_DIR || tmpdir(), "omp-cell-"));
 			try {
@@ -186,6 +193,7 @@ export default function codeMode(pi: ExtensionAPI) {
 		await pi.setActiveTools([...enabled(pi, ctx)]);
 	});
 	pi.on("tool_call", (event, ctx) => {
+		if (extraEvals.delete(event.toolCallId)) return { block: true, reason: EXTRA_EVAL };
 		if (HIDDEN.has(event.toolName) || restricted && !restricted.has(event.toolName)) {
 			return { block: true, reason: "This tool is disabled for this session's tool allowlist." };
 		}
