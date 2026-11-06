@@ -10,7 +10,6 @@ const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const START = "\n# Code Mode\n";
 const END = "\n# End Code Mode\n";
 const COVERED: Readonly<Record<string, true>> = { read: true, write: true, grep: true, glob: true, bash: true };
-const EXTRA_EVAL = "Only the first eval call of an assistant message runs. Put the work in one cell: background commands with & and wait in bash, or asyncio.gather in Python.";
 const DRIVER = readFileSync(new URL("bash-cell.py", import.meta.url), "utf8");
 const SHIM = readFileSync(new URL("bash-tool.py", import.meta.url), "utf8");
 let builtins: Set<string> | undefined;
@@ -112,7 +111,7 @@ function declarations(pi: ExtensionAPI, ctx: ExtensionContext): string {
 }
 
 function section(pi: ExtensionAPI, ctx: ExtensionContext): string {
-	return `${START}${cells(pi, ctx)} Give cells a 2–5-word title. Results arrive automatically: never poll or wait for jobs you did not start. Read proc://JOB_ID only to inspect a known job. One eval per assistant message: further eval calls in the same message are blocked, so put the work in one cell. The declarations describe arguments, not the cell language. All nested calls retain normal approval hooks and this session's tool restrictions. checkpoint and rewind require direct calls.\n\n\`\`\`ts\n${declarations(pi, ctx)}\n\`\`\`\n${END}`;
+	return `${START}${cells(pi, ctx)} Give cells a 2–5-word title. Results arrive automatically: never poll or wait for jobs you did not start. Read proc://JOB_ID only to inspect a known job. The declarations describe arguments, not the cell language. All nested calls retain normal approval hooks and this session's tool restrictions. checkpoint and rewind require direct calls.\n\n\`\`\`ts\n${declarations(pi, ctx)}\n\`\`\`\n${END}`;
 }
 
 function rewrite(text: string, block: string): string {
@@ -148,14 +147,9 @@ export default function codeMode(pi: ExtensionAPI) {
 	const automaticChoices: Readonly<Record<string, true>> = { auto: true, none: true, required: true, any: true };
 	const cellDetails = z.object({ cells: z.array(z.object({}).passthrough()) }).passthrough();
 	pi.setLabel("Code mode");
-	let extraEvals = new Set<string>();
-	pi.on("assistant_message", event => {
-		const evals = event.message.content.flatMap(part => part.type === "toolCall" && (part.name === "eval" || part.name === "_eval") ? [part.id] : []);
-		extraEvals = new Set(evals.slice(1));
-	});
 	pi.registerTool({
 		name: "eval", label: "Eval", loadMode: "essential",
-		description: "Execute a bash script or Python in a persistent kernel. language defaults to bash when the session has it, py otherwise. Call live session tools with await tool.NAME(args); print dictionary results with r[\"text\"]. Bash cells run code as a script with OMP tools as executables on PATH. One eval per assistant message: further eval calls in it are blocked, so put the work in one cell. Each call is one cell; Python state persists until reset or kernel loss.",
+		description: "Execute a bash script or Python in a persistent kernel. language defaults to bash when the session has it, py otherwise. Call live session tools with await tool.NAME(args); print dictionary results with r[\"text\"]. Bash cells run code as a script with OMP tools as executables on PATH. Each call is one cell; Python state persists until reset or kernel loss.",
 		parameters: z.object({ language: z.enum(["py", "bash"]).optional(), code: z.string(), title: z.string().optional(), timeout: z.number().optional(), reset: z.boolean().optional() }),
 		async execute(_id, params, signal, onUpdate, ctx) {
 			if (!ctx.invokeTool) throw new Error("Code mode requires omp's native persistent eval runtime");
@@ -193,7 +187,6 @@ export default function codeMode(pi: ExtensionAPI) {
 		await pi.setActiveTools([...enabled(pi, ctx)]);
 	});
 	pi.on("tool_call", (event, ctx) => {
-		if (extraEvals.delete(event.toolCallId)) return { block: true, reason: EXTRA_EVAL };
 		if (HIDDEN.has(event.toolName) || restricted && !restricted.has(event.toolName)) {
 			return { block: true, reason: "This tool is disabled for this session's tool allowlist." };
 		}
