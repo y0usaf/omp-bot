@@ -199,7 +199,7 @@ export default function helpers(pi) {
 		const home = join(HELPERS, id);
 		mkdirSync(join(home, "sessions"), { recursive: true });
 		const helper: Helper = { id, parent: self(), agent: agent.name, description: goal(item.task), job: "", tool, started: Date.now(), cwd };
-		const prewalk = process.env.OMP_BOT_PREWALK === "1" && item.model === undefined;
+		const prewalk = process.env.OMP_BOT_PREWALK === "1";
 		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context, prewalk));
 		writeAtomic(join(home, "assignment.md"), `Complete assignment thoroughly:\n\n${item.task.trim()}\n`);
 		let args = [...baseArgs(), "--session-dir", join(home, "sessions"), "--append-system-prompt", join(home, "system.md")];
