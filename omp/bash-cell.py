@@ -19,7 +19,7 @@ async def _omp_bash(d):
         writer.close()
 
     server = await asyncio.start_unix_server(serve, f"{d}/socket", limit=1 << 30)
-    proc = await asyncio.create_subprocess_exec("bash", f"{d}/cell.sh", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=json.load(open(f"{d}/env.json")), cwd=spec["cwd"], start_new_session=True)
+    proc = await asyncio.create_subprocess_exec("bash", "-o", "pipefail", f"{d}/cell.sh", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=json.load(open(f"{d}/env.json")), cwd=spec["cwd"], start_new_session=True)
     with open(f"{d}/pid", "w") as f:
         f.write(str(proc.pid))
 

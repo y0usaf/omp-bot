@@ -13,6 +13,8 @@ const COVERED: Readonly<Record<string, true>> = { read: true, write: true, grep:
 const DRIVER = readFileSync(new URL("bash-cell.py", import.meta.url), "utf8");
 const SHIM = readFileSync(new URL("bash-tool.py", import.meta.url), "utf8");
 let builtins: Set<string> | undefined;
+const CELL_TIMEOUT_S = (Number(process.env.OMPD_FOREGROUND_S) || 300) + 30;
+const nativeless = new Set<string>();
 const argsIndex = process.argv.lastIndexOf("--tools");
 const restricted = process.argv.includes("--no-tools") ? new Set<string>()
 	: process.env.OMP_BOT_HELPER && argsIndex >= 0
@@ -44,7 +46,7 @@ function commands(pi: ExtensionAPI, ctx: ExtensionContext): Array<[string, ToolI
 
 function cells(pi: ExtensionAPI, ctx: ExtensionContext): string {
 	if (!enabled(pi, ctx).has("bash")) return "Cells are Python, not JavaScript: use r = await tool.read({\"path\": \"file\"}) and print(r[\"text\"]); results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather.";
-	return `Bash is the cell language: code runs as a bash script in this session's cwd with stdin closed, using the shell's own cat, rg, sed, git, jq and the rest, plus every OMP tool as an executable on its PATH: ${commands(pi, ctx).map(([name]) => name).join(", ")}. NAME --help lists its flags: --kebab-case options, positional arguments fill the required ones first, - or a left-out required text argument reads stdin (edit <<'EOF' takes the patch, whose [PATH#TAG] comes from omp-read or omp-grep), --json prints {"text", "details"}; a failing tool exits 1 with its error on stderr. The cell fails with the script's nonzero exit status, ends when the script does, and kills whatever it left running, so long work still uses the bash tool with async. language "py" instead runs Python, not JavaScript, for real logic or structured results: r = await tool.read({"path": "file"}) and print(r["text"]); results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather.`;
+	return `Bash is the cell language: code runs as a bash script in this session's cwd with stdin closed, using the shell's own cat, rg, sed, git, jq and the rest, plus every OMP tool as an executable on its PATH: ${commands(pi, ctx).map(([name]) => name).join(", ")}. NAME --help lists its flags: --kebab-case options, positional arguments fill the required ones first, - or a left-out required text argument reads stdin (edit <<'EOF' takes the patch, whose [PATH#TAG] comes from omp-read or omp-grep), --json prints {"text", "details"}; a failing tool exits 1 with its error on stderr. Pipelines run with pipefail, so cmd | tail fails when cmd fails; a pipe closed early by a reader such as head (status 141) still counts as success. The cell fails with the script's nonzero exit status, ends when the script does, and kills whatever it left running, so long work still uses the bash tool with async. language "py" instead runs Python, not JavaScript, for real logic or structured results: r = await tool.read({"path": "file"}) and print(r["text"]); results are dictionaries with text and optional details. Persistent top-level state survives between cells; timeout/cancellation can restart Python, so reload missing helpers. Top-level await works; asyncio.run does not. Batch independent calls with asyncio.gather.`;
 }
 
 function declarations(pi: ExtensionAPI, ctx: ExtensionContext): string {
@@ -149,12 +151,16 @@ export default function codeMode(pi: ExtensionAPI) {
 	pi.setLabel("Code mode");
 	pi.registerTool({
 		name: "eval", label: "Eval", loadMode: "essential",
-		description: "Execute a bash script or Python in a persistent kernel. language defaults to bash when the session has it, py otherwise. Call live session tools with await tool.NAME(args); print dictionary results with r[\"text\"]. Bash cells run code as a script with OMP tools as executables on PATH. Each call is one cell; Python state persists until reset or kernel loss.",
+		description: `Execute a bash script or Python in a persistent kernel. language defaults to bash when the session has it, py otherwise. Call live session tools with await tool.NAME(args); print dictionary results with r["text"]. Bash cells run code as a script with OMP tools as executables on PATH. Each call is one cell; Python state persists until reset or kernel loss. A cell times out after ${CELL_TIMEOUT_S}s unless timeout says otherwise.`,
 		parameters: z.object({ language: z.enum(["py", "bash"]).optional(), code: z.string(), title: z.string().optional(), timeout: z.number().optional(), reset: z.boolean().optional() }),
 		async execute(_id, params, signal, onUpdate, ctx) {
-			if (!ctx.invokeTool) throw new Error("Code mode requires omp's native persistent eval runtime");
+			if (!ctx.invokeTool) {
+				nativeless.add(ctx.agent?.id ?? "");
+				throw new Error("omp has no native eval runtime in this session, so code mode is off here: from your next step call read, grep, glob, bash and the other tools directly.");
+			}
+			const timeout = params.timeout ?? CELL_TIMEOUT_S;
 			const language = params.language ?? (enabled(pi, ctx).has("bash") ? "bash" : "py");
-			if (language === "py") return ctx.invokeTool({ ...params, language }, { signal, onUpdate });
+			if (language === "py") return ctx.invokeTool({ ...params, language, timeout }, { signal, onUpdate });
 			if (!enabled(pi, ctx).has("bash")) throw new Error("bash cells need the bash tool, which this session's tool allowlist lacks");
 			const dir = mkdtempSync(join(process.env.XDG_RUNTIME_DIR || tmpdir(), "omp-cell-"));
 			try {
@@ -168,12 +174,12 @@ export default function codeMode(pi: ExtensionAPI) {
 					cwd: ctx.cwd, tools: list.map(([, tool]) => tool.name),
 					commands: Object.fromEntries(list.map(([name, tool]) => [name, { tool: tool.name, description: tool.description, schema: "toJsonSchema" in tool.parameters && typeof tool.parameters.toJsonSchema === "function" ? tool.parameters.toJsonSchema() : tool.parameters }])),
 				}));
-				const code = `${DRIVER}\n_omp_status = await _omp_bash(${JSON.stringify(dir)})\nif _omp_status:\n    raise SystemExit(_omp_status)\n`;
+				const code = `${DRIVER}\n_omp_status = await _omp_bash(${JSON.stringify(dir)})\nif _omp_status not in (0, 141):\n    raise SystemExit(_omp_status)\n`;
 				const relabel = (details: unknown) => {
 					const parsed = cellDetails.safeParse(details);
 					return parsed.success ? { ...parsed.data, language: "bash", languages: ["bash"], cells: parsed.data.cells.map(cell => ({ ...cell, language: "bash", code: params.code })) } : details;
 				};
-				const result = await ctx.invokeTool({ ...params, language: "py", code }, { signal, onUpdate: onUpdate && (update => onUpdate({ ...update, details: relabel(update.details) })) });
+				const result = await ctx.invokeTool({ ...params, language: "py", code, timeout }, { signal, onUpdate: onUpdate && (update => onUpdate({ ...update, details: relabel(update.details) })) });
 				return { ...result, details: relabel(result.details) };
 			} finally {
 				try {
@@ -198,7 +204,7 @@ export default function codeMode(pi: ExtensionAPI) {
 		if (!event.isError && event.toolCallId.startsWith(`js-${event.toolName}-`) && event.details === undefined) return { details: {} };
 	});
 	pi.on("before_agent_start", (event, ctx) => {
-		if (!enabled(pi, ctx).has("eval")) return;
+		if (!enabled(pi, ctx).has("eval") || nativeless.has(ctx.agent?.id ?? "")) return;
 		const block = section(pi, ctx);
 		let replaced = false;
 		const systemPrompt = event.systemPrompt.map(part => {
@@ -213,7 +219,9 @@ export default function codeMode(pi: ExtensionAPI) {
 		const parsed = payloadSchema.safeParse(event.payload);
 		if (!parsed.success) return event.payload;
 		const payload = parsed.data;
-		if (!payload.tools.some(tool => (tool.function?.name ?? tool.name) === "eval" || (tool.function?.name ?? tool.name) === "_eval")) return event.payload;
+		const toolName = (tool: { name?: string; function?: { name?: string } }) => tool.function?.name ?? tool.name ?? "";
+		if (!payload.tools.some(tool => ["eval", "_eval"].includes(toolName(tool)))) return event.payload;
+		if (nativeless.has(ctx.agent?.id ?? "")) return { ...event.payload, tools: payload.tools.filter(tool => !["eval", "_eval"].includes(toolName(tool))) };
 		const block = section(pi, ctx);
 		const tools = payload.tools.filter(tool => isDirect(tool.function?.name ?? tool.name));
 		const names = new Set(tools.map(tool => tool.function?.name ?? tool.name));

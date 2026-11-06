@@ -5,6 +5,7 @@ if [ -n "${2:-}" ] && ! printf '%s' "$$" >"$2/cgroup.procs"; then
 	exit 125
 fi
 printf '%s' "$$" >"$1/pid.tmp" && mv -f "$1/pid.tmp" "$1/pid"
-OMPD_JOB_DIR=$1 bash "$1/command" </dev/null
+OMPD_JOB_DIR=$1 bash -o pipefail "$1/command" </dev/null
 code=$?
+[ "$code" -ne 141 ] || code=0
 printf '%s\n' "$code" >"$1/exit.tmp" && mv -f "$1/exit.tmp" "$1/exit"

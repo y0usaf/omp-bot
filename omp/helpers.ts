@@ -154,7 +154,7 @@ The user's standing rules from ${rulesPath} apply to this assignment:
 ${rules || "No standing rules file is present."}
 
 § Shipping and decisions
-Unless this assignment explicitly limits shipping, finish authorized changes end to end: verify the real behavior, commit the owning repo, pin it in ~/finix, and run one \`nh os switch .\` in ~/finix under \`flock -x /run/user/1001/agent/finix-switch.lock\`. Coordinate with other shippers and build the committed revision before switching. Restart affected services and bots so the change is active; restart Lloyd last with \`omp-bot-ctl restart Lloyd\` when required. Do not push without the user's authorization.
+Unless this assignment explicitly limits shipping, finish authorized changes end to end: verify the real behavior, commit the owning repo, pin it in ~/finix and commit that, then run \`finix-switch\`. It builds finix's committed HEAD, switches this machine under the lock other shippers share (building again if HEAD moved meanwhile), skips a switch that is already active, and prints one JSON line with the system now running; a nonzero exit means it did not switch. Restart affected services and bots so the change is active; restart Lloyd last with \`omp-bot-ctl restart Lloyd\` when required. Do not push without the user's authorization.
 Decide routine, reversible details within the assignment yourself. Fix bugs in the owning component, with no compatibility shims. Themes override Tern's stock selectors and variables rather than adding machinery, except where stock Tern has no surface. A user decision is required for visible-to-others, irreversible, costly, or push actions not already authorized.
 Default helper models to the configured Codex task role. Request Opus only for Lean proofs or compiler work; do not use Opus as a general helper default.
 ` : ""}
@@ -332,20 +332,34 @@ export default function helpers(pi) {
 		if (SELF) await finishWhenDone(ctx);
 	});
 
+	let reported = "";
+	let reportedFrom: unknown;
 	pi.on("agent_end", async (event, ctx) => {
 		if (!SELF || ctx.agent?.kind === "sub" || !process.env.OMPD_JOB_DIR) return;
-		const last = [...(event.messages ?? [])].reverse().find(message => message?.role === "assistant");
-		if (!last) return;
+		const messages = event.messages ?? [];
+		const end = messages.findLastIndex(message => message?.role === "assistant");
+		const last = messages[end];
+		if (!last || last.timestamp === reportedFrom) return;
 		const raw = (Array.isArray(last.content) ? last.content : []).filter(part => part?.type === "text").map(part => part.text).join("\n").trim();
 		const said = raw.replace(WAKE, "");
 		const failed = last.stopReason === "error" || last.stopReason === "aborted" ? `[its last turn ${last.stopReason === "error" ? "failed" : "was aborted"}${last.errorMessage ? `: ${last.errorMessage}` : ""}]` : "";
 		const text = [said, failed].filter(Boolean).join("\n\n");
 		if (!text) return;
+		const kinds: string[] = [];
+		for (let index = end - 1; index >= 0; index--) {
+			const message = messages[index];
+			if (message?.role === "assistant" && (message.content ?? []).some(part => part?.type === "text" && part.text?.trim())) break;
+			if (message?.role === "user") kinds.push("user");
+			if (message?.role === "custom") kinds.push(String(message.customType ?? ""));
+		}
+		const noticeOnly = reported !== "" && kinds.length > 0 && kinds.every(kind => kind === "ompd-job");
+		reported = noticeOnly ? `${reported}\n\nAfter a job it had started ended:\n${text}` : text;
+		reportedFrom = last.timestamp;
 		const transcript = ctx.sessionManager.getSessionFile?.();
 		const wake = join(process.env.OMPD_JOB_DIR, "wake");
 		if (said !== raw || failed) writeAtomic(wake, "");
-		else rmSync(wake, { force: true });
-		writeAtomic(join(process.env.OMPD_JOB_DIR, "report"), `Result of helper ${SELF}:\n\n${text}\n${transcript ? `\n(transcript: ${transcript})\n` : ""}`);
+		else if (!noticeOnly) rmSync(wake, { force: true });
+		writeAtomic(join(process.env.OMPD_JOB_DIR, "report"), `Result of helper ${SELF}:\n\n${reported}\n${transcript ? `\n(transcript: ${transcript})\n` : ""}`);
 	});
 
 	let turned = false;
@@ -378,7 +392,7 @@ export default function helpers(pi) {
 	pi.registerTool({
 		name: "task",
 		label: "Task",
-		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll or wait for it${SELF ? "" : "; it waits quietly for your next turn unless the helper failed, asked to wake you (it was told to only when you must act now) or is the last job a background task waits on"}. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
+		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll for it, and call wait only when nothing else is left to do${SELF ? "" : "; it waits quietly for your next turn unless the helper failed, asked to wake you (it was told to only when you must act now) or is the last job a background task waits on"}. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
 		parameters: z.object({
 			context: z.string().optional(),
 			tasks: z.array(

@@ -6,6 +6,7 @@ import { ROOT, STATE } from "../daemon/paths";
 
 const UNKNOWN = "Previous OMP process exited before this tool returned";
 const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
+const WAIT_MAX_MS = 30 * 60_000;
 const TAIL_BYTES = 32 * 1024;
 const NOTICE_BYTES = 6 * 1024;
 const NOTICE_LINES = 50;
@@ -73,6 +74,7 @@ function botTask(): { jobs?: string[] } | undefined {
 
 
 function waking(job: Job): boolean {
+	if (job.reason === "killed on request" || job.reason === "killed before it started") return false;
 	if (!MAIN_BOT || failed(job) || existsSync(join(dir(job.id), "wake"))) return true;
 	const jobs = botTask()?.jobs ?? [];
 	return jobs.includes(job.id) && jobs.every(id => {
@@ -264,10 +266,51 @@ export default function ompd(pi) {
 		});
 	});
 
+	pi.on("session_start", () => {
+		if (!pi.getActiveTools().includes("wait")) return;
+		const wait = pi.getAllTools().find(tool => tool.name === "wait");
+		if (!wait) return;
+		pi.registerTool({
+			...wait,
+			label: "Wait",
+			description: `${wait.description}\n\nIt also waits for this session's ompd jobs, and returns the first one to end with its output.`,
+			async execute(_toolCallId, params, signal, onUpdate, ctx) {
+				const response: { jobs: Job[] } = await call({ op: "list", owner: ownerOf(ctx) });
+				const mine = response.jobs.filter(job => !job.delivered && !awaited.has(job.id) && !sent.has(job.id));
+				if (!mine.length) {
+					if (!ctx.invokeTool) throw new Error("wait needs omp's native wait tool");
+					return ctx.invokeTool(params, { signal, onUpdate });
+				}
+				for (const job of mine) awaited.add(job.id);
+				const until = Date.now() + WAIT_MAX_MS;
+				try {
+					for (;;) {
+						const done = mine.map(job => exited(load(job.id) ?? job)).find(job => job !== undefined);
+						if (done) {
+							sent.add(done.id);
+							await call({ op: "ack", id: done.id });
+							return { content: [{ type: "text", text: report(done) }], details: { job: done.id } };
+						}
+						if (signal?.aborted) throw new Error("Wait aborted");
+						if (ctx.hasPendingMessages()) return { content: [{ type: "text", text: "Wait interrupted by message." }], details: {} };
+						if (Date.now() >= until) return { content: [{ type: "text", text: `Wait limit reached; still running: ${mine.map(job => job.id).join(", ")}. Read proc:// for status.` }], details: {} };
+						await Bun.sleep(250);
+					}
+				} finally {
+					for (const job of mine) {
+						awaited.delete(job.id);
+						const gone = exited(load(job.id) ?? job);
+						if (gone && !sent.has(job.id)) void ended(gone).catch(() => {});
+					}
+				}
+			},
+		});
+	});
+
 	const bash = {
 		name: "bash",
 		label: "Bash",
-		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll, sleep or wait for it${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
+		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll or sleep for it; when nothing else is left to do until it ends, call wait${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. A job you stop with kill reports quietly at your next turn. Pipelines run with pipefail, so cmd | tail fails when cmd fails; a pipe closed early by a reader such as head (status 141) still counts as success. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
 		parameters: z.object({
 			command: z.string(),
 			timeout: z.number().optional(),
@@ -316,7 +359,7 @@ export default function ompd(pi) {
 						const why = signal?.aborted ? "Stopped waiting" : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
 						const out = tail(job.id, 4096).trimEnd();
 						return {
-							content: [{ type: "text", text: `${out ? `${out}\n\n` : ""}[${why}: ompd job ${job.id} keeps running, log ${join(dir(job.id), "log")}. Its result arrives in this conversation as a message when it ends; don't poll or wait for it. ${OMPD} kill ${job.id} stops it.]` }],
+							content: [{ type: "text", text: `${out ? `${out}\n\n` : ""}[${why}: ompd job ${job.id} keeps running, log ${join(dir(job.id), "log")}. Its result arrives in this conversation as a message when it ends; don't poll or sleep for it, and call wait only when nothing else is left to do. ${OMPD} kill ${job.id} stops it.]` }],
 							details: { job: job.id, running: true },
 						};
 					}
