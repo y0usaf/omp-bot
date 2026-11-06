@@ -29,7 +29,7 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
 | `bin/ompd jobs\|show ID\|kill ID\|run ...` | Inspect or start jobs by hand. |
 
-In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header and messages under every look (`tern/avatars.css`).
+In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header and messages under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
 To try prompts safely, set `OMP_BOT_NO_TOOLS=1` and a throwaway `OMP_BOT_STATE`. A separate state folder isolates memory, not access to the machine.
 
@@ -93,6 +93,8 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **One process per bot.** `bots/NAME/lock` keeps a bot from running twice. Opening a bot in Tern waits for its background copy to finish the current task, then takes over the same conversation.
 - **Delivery is at least once.** A task is retried, up to 3 attempts, if its bot crashes, the model call fails, or check-ins stop. Each task carries its ID; bots tag anything they post elsewhere with `omp-bot:ID` so a retry can see what was already done.
 - **Decisions.** A bot asks with `ask_decision`; the task waits in `inbox` and as a card in the bot's tab until you answer.
+- **Kept answers.** A question the bot asked with `ask` stays in the chat once you answer it: a read-only card with the question and only what you picked, custom text or note, also after a restart.
+- **Working row.** While a turn runs, the bot's avatar plays its motion under the transcript beside what it is doing ("Running a few commands", "Checking with helpers", "Needs your input"), and its tab avatar moves while Tern marks the tab working. After the turn the row stays only while background jobs or helpers run ("Waiting on 1 helper and 2 jobs") or the turn failed; otherwise it goes away.
 - **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
 - **Bots asking bots.** A task with `--origin bot:NAME` sends its result back to that bot as a `reply:` task. Replies never trigger replies.
 - **Quiet results.** A bot that has nothing for you replies "Nothing to report.", which skips the inbox.

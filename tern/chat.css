@@ -1,0 +1,33 @@
+:root:not(#bot) [data-role^='omp.bot.answer.'] {
+	align-self: flex-start;
+	width: min(100%, 560px);
+	margin: 6px 0;
+}
+:root:not(#bot) .sf-card[data-role='omp.bot.asked'] {
+	font-family: var(--sans);
+}
+:root:not(#bot) .sf-card[data-role='omp.bot.asked'] > .sf-card-body {
+	gap: 8px;
+	padding: 12px 14px;
+}
+:root:not(#bot) [data-role='omp.bot.asked.q'] {
+	font-weight: 600;
+	color: var(--t2);
+}
+:root:not(#bot) [data-role='omp.bot.asked.pick'] > .sf-badge {
+	justify-content: center;
+	min-width: 22px;
+	height: 22px;
+	padding: 0 6px;
+	border-radius: var(--r-chip);
+	color: #fff;
+	background: var(--t, var(--accent-fill));
+	box-shadow: none;
+}
+:root:not(#bot) [data-role='omp.bot.asked.note'],
+:root:not(#bot) [data-role='omp.bot.away'] {
+	color: var(--t3);
+}
+:root:not(#bot) [data-role='omp.bot.away'] {
+	font-size: 0.85em;
+}

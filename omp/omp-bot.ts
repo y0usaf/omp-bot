@@ -7,6 +7,7 @@ import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe"
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { isHelper, load, request } from "../daemon/ompd";
 import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
@@ -17,7 +18,32 @@ const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const HISTORY_CHUNK = 40;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
-const THINKING = ["Thinking…", "Hmm, let me see…", "Mulling it over…", "Working it out…"];
+const THINKING = ["Thinking it through", "Mulling it over", "Putting it together"];
+const WORKING = ["Getting it done", "Making progress", "Working on it", "Handling it", "Chipping away"];
+const DOING = {
+	bash: "Running a few commands",
+	eval: "Running a few commands",
+	ssh: "Running a few commands",
+	read: "Reading the file",
+	grep: "Digging around",
+	glob: "Digging around",
+	find: "Digging around",
+	ast_grep: "Digging around",
+	lsp: "Digging around",
+	edit: "Jotting it down",
+	write: "Jotting it down",
+	ast_edit: "Jotting it down",
+	web_search: "Doing some reading",
+	web_fetch: "Doing some reading",
+	fetch: "Doing some reading",
+	browser: "Clicking through pages",
+	task: "Checking with helpers",
+	wait: "Waiting on results",
+	ask: "Needs your input",
+	ask_decision: "Needs your input",
+};
+const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const OWNER = process.env.OMPD_OWNER || (process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : undefined);
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
 const PENDING = Symbol("pending");
@@ -124,7 +150,6 @@ class Bot {
 		this.submitted = 0;
 		this.active = false;
 		this.stopped = false;
-		this.failed = false;
 		this.running = new Map();
 		this.tui = undefined;
 		this.clock = undefined;
@@ -132,6 +157,7 @@ class Bot {
 		this.boops = 0;
 		this.typing = false;
 		this.awake = ["idle", this.line];
+		this.live = [];
 		this.timers = {};
 	}
 
@@ -207,6 +233,18 @@ class Bot {
 
 	face() {
 		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
+	}
+
+	tally(jobs) {
+		if (same(this.live.map(job => job.id), jobs.map(job => job.id))) return;
+		this.live = jobs;
+		this.render();
+	}
+
+	away() {
+		const helpers = this.live.filter(isHelper).length;
+		const jobs = this.live.length - helpers;
+		return [helpers && `${helpers} helper${helpers === 1 ? "" : "s"}`, jobs && `${jobs} job${jobs === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
 	}
 
 	chao() {
@@ -305,11 +343,15 @@ class BotStatus {
 
 	describe() {
 		const b = this.bot;
-		const busy = b.active && !b.boop;
-		const status = b.boop ?? b.line;
+		const away = b.away();
+		const failed = !b.active && b.mood === "error";
+		if (!b.active && !b.boop && !failed && !away) return NONE;
+		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
+		const busy = !b.boop && !asking && !failed;
+		const status = b.boop ?? (b.active || failed ? b.line : `Waiting on ${away}`);
 		return row(
 			[
-				b.chao(),
+				b.active || b.boop || failed ? b.chao() : drawChao(b.look, "waiting"),
 				busy
 					? node("shimmer", {
 							spans: [{ t: status, s: "muted" }],
@@ -317,8 +359,9 @@ class BotStatus {
 							palette: { low: "dim", mid: "muted", high: "accent" },
 							role: "omp.bot.say",
 						})
-					: text(status, { role: "omp.bot.say", wrap: "none" }),
-				busy ? node("row", { role: "omp.bot.took" }, [elapsed(Date.now() - b.turnStart)]) : undefined,
+					: text(status, { role: "omp.bot.say", wrap: "none", tone: asking ? "accent" : failed ? "error" : undefined }),
+				b.active ? node("row", { role: "omp.bot.took" }, [elapsed(Date.now() - b.turnStart)]) : undefined,
+				b.active && away ? text(`${away} running`, { role: "omp.bot.away", wrap: "none", tone: "muted" }) : undefined,
 			].filter(Boolean),
 			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "sm" },
 		);
@@ -567,7 +610,53 @@ class BotHistory {
 		this.bot.render();
 	}
 }
+function asked(details) {
+	if (!details || typeof details !== "object") return undefined;
+	if (details.chatRedirect === true) return (details.questions ?? []).map(question => ({ question, redirect: true }));
+	if (Array.isArray(details.results)) return details.results.every(q => typeof q?.question === "string" && Array.isArray(q.selectedOptions)) ? details.results : undefined;
+	return typeof details.question === "string" && Array.isArray(details.selectedOptions) ? [details] : undefined;
+}
 
+function answered(questions, tint) {
+	const parts = questions.flatMap(q => {
+		const options = Array.isArray(q.options) ? q.options : [];
+		const chosen = q.selectedOptions ?? [];
+		const picks = options.flatMap((label, i) => (chosen.includes(label) ? [[KEYS[i] ?? "•", label]] : []));
+		for (const label of chosen) if (!options.includes(label)) picks.push(["•", label]);
+		if (typeof q.customInput === "string") picks.push([KEYS[options.length] ?? "•", q.customInput]);
+		const rows = picks.map(([key, label]) =>
+			row([node("badge", { text: key, tone: "accent" }), text(label, { wrap: "word", shrink: 1 })], { role: "omp.bot.asked.pick", align: "center", gap: "sm" }),
+		);
+		const notes = [
+			q.redirect ? "Talked it over in chat instead" : undefined,
+			!q.redirect && rows.length === 0 ? "Nothing picked" : undefined,
+			q.timedOut ? "Picked automatically when the question timed out" : undefined,
+			typeof q.note === "string" && q.note ? q.note : undefined,
+		].filter(Boolean);
+		return [text(q.question, { role: "omp.bot.asked.q", wrap: "word" }), ...rows, ...notes.map(note => text(note, { role: "omp.bot.asked.note", wrap: "word", tone: "muted" }))];
+	});
+	return col([node("card", { role: "omp.bot.asked" }, parts)], { role: `omp.bot.answer.${tint}` });
+}
+
+class BotAnswer {
+	constructor(block, questions, tint) {
+		this.block = block;
+		this.questions = questions;
+		this.node = answered(questions, tint);
+	}
+
+	invalidate() {
+		this.block.invalidate?.();
+	}
+
+	render(width) {
+		return this.block.render(width);
+	}
+
+	describe() {
+		return this.node;
+	}
+}
 
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
@@ -586,11 +675,14 @@ function patchTranscript(state) {
 	const times = new WeakMap();
 	const mores = new WeakMap();
 	const collected = new WeakMap();
+	const answers = new WeakMap();
 	const pages = new WeakMap();
 	proto[PATCHED] = { state };
 
 	const updateResult = ToolExecutionComponent.prototype.updateResult;
 	ToolExecutionComponent.prototype.updateResult = function (result, isPartial, toolCallId) {
+		const questions = isPartial || result?.isError ? undefined : asked(result?.details);
+		if (questions) answers.set(this, questions);
 		const waited = !isPartial && result?.details?.op === "wait" ? result.details.waited : undefined;
 		if (typeof waited?.from === "string") {
 			const body = String(waited.body ?? "");
@@ -624,6 +716,16 @@ function patchTranscript(state) {
 
 	function shown(block) {
 		if (block?.mode === "thinking" || advises(block)) return undefined;
+		const questions = answers.get(block);
+		if (questions) {
+			let kept = wrapped.get(block);
+			if (kept?.questions !== questions) {
+				kept = new BotAnswer(block, questions, proto[PATCHED].state.bot.tint);
+				wrapped.set(block, kept);
+			}
+			if (isNativeSettled(block) && !isNativeSettled(kept)) settleNative(kept);
+			return kept;
+		}
 		const source = block?.source ?? block;
 		const reply = source instanceof AssistantMessageComponent;
 		let event = reply ? null : (collected.get(block) ?? events.get(block));
@@ -692,7 +794,7 @@ function patchTranscript(state) {
 		const start = page?.start ?? 0;
 		for (let i = blocks.length - 1; i >= start; i--) {
 			const item = shown(blocks[i]);
-			if (item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent) {
+			if (item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer) {
 				stamp(item, i < page.restored);
 			}
 		}
@@ -716,7 +818,7 @@ function patchTranscript(state) {
 					continue;
 				}
 			}
-			const visible = item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent;
+			const visible = item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer;
 			if (!visible) {
 				shownBlocks.push(item);
 				continue;
@@ -833,7 +935,20 @@ export default function ompBot(pi) {
 		listen();
 		mount();
 		bot.nap();
+		const jobs = OWNER
+			? await request({ op: "list", owner: OWNER }).then(
+					reply => reply.jobs,
+					() => [],
+				)
+			: [];
+		bot.tally(jobs.filter(job => job.state === "queued" || job.state === "running"));
 	}
+
+	pi.events.on("ompd:background", ({ id }) => {
+		const job = load(id);
+		if (job) bot.tally([...bot.live.filter(live => live.id !== id), job]);
+	});
+	pi.events.on("ompd:ended", ({ id }) => bot.tally(bot.live.filter(live => live.id !== id)));
 
 	pi.on("session_start", begin);
 	pi.on("session_switch", begin);
@@ -877,7 +992,6 @@ export default function ompBot(pi) {
 		bot.submitted = 0;
 		bot.active = true;
 		bot.stopped = false;
-		bot.failed = false;
 		bot.running.clear();
 		if (bot.hero) {
 			bot.hero = false;
@@ -889,38 +1003,36 @@ export default function ompBot(pi) {
 	pi.on("message_update", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub" || !bot.active || bot.running.size > 0) return;
 		const kind = event.assistantMessageEvent?.type;
-		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Writing it up…");
+		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Writing it up");
 		else if (kind === "thinking_delta" || kind === "thinking_start") bot.set("thinking", bot.mood === "thinking" ? bot.line : pick(THINKING, Date.now()));
 	});
 
 	pi.on("tool_execution_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		bot.running.set(event.toolCallId, true);
 		const target =
 			event.toolName === "write" && typeof event.args?.path === "string"
 				? event.args.path.match(/^agent:\/\/([^/]+)$/)?.[1]
 				: undefined;
-		bot.set(
-			event.toolName === "ask" ? "waiting" : "working",
-			event.toolName === "ask" ? "Waiting on you" : target ? `Messaging ${target}` : "Working",
-		);
+		const label = target ? `Messaging ${target}` : (DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size));
+		bot.running.set(event.toolCallId, label);
+		bot.set(label === DOING.ask ? "waiting" : "working", label);
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
 		bot.running.delete(event.toolCallId);
 		if (event.isError) {
-			bot.failed = true;
 			bot.set("error", "A step failed");
 			return;
 		}
-		bot.set(bot.running.size > 0 ? "working" : "thinking", bot.running.size > 0 ? "Working" : bot.line);
+		const left = [...bot.running.values()].at(-1);
+		bot.set(left === undefined ? "thinking" : left === DOING.ask ? "waiting" : "working", left ?? pick(THINKING, Date.now()));
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
 		if (event.willContinue) {
-			bot.set("waiting", "Waiting for helpers…");
+			bot.set("waiting", "Waiting on helpers");
 			return;
 		}
 		bot.active = false;
@@ -934,11 +1046,6 @@ export default function ompBot(pi) {
 		}
 		if (reason === "error" || reason === "length") {
 			bot.set("error", final.errorMessage || "The reply ended early — check the transcript");
-			return;
-		}
-		if (bot.failed) {
-			bot.failed = false;
-			bot.set("error", "Done · a step failed");
 			return;
 		}
 		bot.set("happy", "Done");

@@ -59,8 +59,12 @@ export function load(id: string): Job | undefined {
 	}
 }
 
+export function isHelper(job: Job): boolean {
+	return job.command.includes("/helpers/") && job.command.includes("rpc") && job.command.includes("--append-system-prompt");
+}
+
 export function trimHelperLog(job: Job): number {
-	if ((job.state !== "done" && job.state !== "lost") || !job.command.includes("/helpers/") || !job.command.includes("rpc") || !job.command.includes("--append-system-prompt")) return 0;
+	if ((job.state !== "done" && job.state !== "lost") || !isHelper(job)) return 0;
 	const path = join(dir(job.id), "log");
 	let fd: number | undefined;
 	try {
