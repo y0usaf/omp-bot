@@ -15,7 +15,7 @@ try {
 		const socket = connect(SOCKET);
 		let buffer = "";
 		socket.setTimeout(5000, () => socket.destroy(new Error("git approval daemon timed out")));
-		socket.on("connect", () => socket.write(`${JSON.stringify({ op: "git-check", bot: process.env.OMP_BOT_NAME })}\n`));
+		socket.on("connect", () => socket.write(`${JSON.stringify({ op: "git-check", bot: process.env.OMP_BOT_NAME, task: process.env.OMP_BOT_TASK })}\n`));
 		socket.on("data", chunk => {
 			buffer += chunk;
 			if (!buffer.includes("\n")) return;

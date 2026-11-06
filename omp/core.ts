@@ -8,7 +8,7 @@ const RESUME_GRACE_MS = 30_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
-type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; approved?: boolean; result?: string };
+type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; result?: string };
 type Decision = { id: string; question: string | null; text: string };
 
 const CHOICES = [
@@ -45,7 +45,7 @@ export default function core(pi) {
 	let socket: Socket | undefined;
 	let ctx;
 	const taskFile = join(STATE, "bots", name, "task.json");
-	let current: Task | undefined = saved();
+	let current: Task | undefined;
 	let since = Date.now();
 	let started = false;
 	let readySent = false;
@@ -54,6 +54,7 @@ export default function core(pi) {
 	let decisions: Decision[] = [];
 	const dismissed = new Set<string>();
 	let asking: { id: string; controller: AbortController } | undefined;
+	keep(saved());
 
 	pi.setLabel("Bot core");
 
@@ -69,6 +70,8 @@ export default function core(pi) {
 	function keep(task: Task | undefined) {
 		if (task !== current) since = Date.now();
 		current = task;
+		if (task) process.env.OMP_BOT_TASK = task.id;
+		else delete process.env.OMP_BOT_TASK;
 		if (!task) return rmSync(taskFile, { force: true });
 		writeFileSync(`${taskFile}.tmp`, JSON.stringify({ ...task, mode }));
 		renameSync(`${taskFile}.tmp`, taskFile);
@@ -154,7 +157,7 @@ export default function core(pi) {
 				restart(message.now);
 				return;
 			case "task":
-				keep({ id: message.id, attempt: message.attempt, token: message.token, jobs: [], approved: message.answer?.action === "approve" });
+				keep({ id: message.id, attempt: message.attempt, token: message.token, jobs: [] });
 				started = false;
 				readySent = false;
 				try {
