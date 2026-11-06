@@ -87,8 +87,9 @@ class Clock {
 }
 
 class BotTime {
-	constructor(ts) {
+	constructor(ts, user) {
 		this.ts = ts;
+		this.user = user;
 	}
 
 	invalidate() {}
@@ -99,7 +100,7 @@ class BotTime {
 	}
 
 	describe(cx) {
-		return text(when(this.ts, cx?.hour12), { role: "omp.bot.time", wrap: "none" });
+		return text(when(this.ts, cx?.hour12), { role: this.user ? "omp.bot.time.you" : "omp.bot.time.reply", wrap: "none" });
 	}
 }
 
@@ -533,6 +534,7 @@ class BotEvent {
 			].filter(Boolean),
 			{ role: `omp.bot.eventbox.${this.look.tint}`, align: "center", gap: "xs" },
 		);
+		this.drawn = { label, open: this.open, whole };
 		return this.node;
 	}
 }
@@ -638,7 +640,7 @@ function patchTranscript(state) {
 	function timeOf(item, ts) {
 		let time = times.get(item);
 		if (time?.ts !== ts) {
-			time = new BotTime(ts);
+			time = new BotTime(ts, item instanceof Marked && item.node.p.role === "omp.bot.you");
 			times.set(item, time);
 		}
 		return time;
@@ -781,6 +783,7 @@ export default function ompBot(pi) {
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		state.clock = new Clock(ctx.sessionManager);
 		state.restoring = true;
+		patchTranscript(state);
 		patchWorkingRow(state);
 		patchDock(state);
 		listen();
