@@ -171,7 +171,7 @@ export default function codeMode(pi: ExtensionAPI) {
 			if (typeof message.content === "string" && (message.role === "system" || message.role === "developer")) return [{ ...message, content: rewrite(message.content, block) }];
 			if (!Array.isArray(message.content)) return [message];
 			const content = message.content.filter(part => part.type !== "tool_addition" && part.type !== "tool_removal" || names.has(part.tool?.name))
-				.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: rewrite(part.text, block) } : part);
+				.map(part => (message.role === "system" || message.role === "developer") && part.type === "text" && typeof part.text === "string" ? { ...part, text: rewrite(part.text, block) } : part);
 			return content.length ? [{ ...message, content }] : [];
 		});
 		const system = typeof payload.system === "string" ? rewrite(payload.system, block) : payload.system?.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: rewrite(part.text, block) } : part);
