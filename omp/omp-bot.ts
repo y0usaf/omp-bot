@@ -15,6 +15,7 @@ const DOCK_PATCHED = Symbol.for("omp-bot.dock");
 const NONE = col([], { role: "omp.bot.none" });
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
+const HISTORY_CHUNK = 40;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
 const THINKING = ["Thinking…", "Hmm, let me see…", "Mulling it over…", "Working it out…"];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
@@ -79,10 +80,9 @@ class Clock {
 	}
 
 	find(described) {
-		this.sync();
 		const call = described?.p?.key;
 		if (typeof call === "string" && this.calls.has(call)) return this.calls.get(call);
-		return this.texts.get(textKey(bodyText(described)))?.shift();
+		return this.texts.get(textKey(bodyText(described)))?.pop();
 	}
 }
 
@@ -539,6 +539,35 @@ class BotEvent {
 	}
 }
 
+class BotHistory {
+	constructor(bot, load) {
+		this.bot = bot;
+		this.load = load;
+		this.node = row([text("Show earlier messages", { tone: "muted" })], {
+			role: "omp.bot.history",
+			justify: "center",
+			actions: { click: "earlier" },
+			aria: "Show earlier messages",
+		});
+	}
+
+	invalidate() {}
+
+	render() {
+		return [];
+	}
+
+	describe() {
+		return this.node;
+	}
+
+	handleNativeEvent(event) {
+		if (event?.type !== "action" || event.act !== "earlier") return;
+		this.load();
+		this.bot.render();
+	}
+}
+
 
 function patchTranscript(state) {
 	const proto = TranscriptContainer.prototype;
@@ -557,6 +586,7 @@ function patchTranscript(state) {
 	const times = new WeakMap();
 	const mores = new WeakMap();
 	const collected = new WeakMap();
+	const pages = new WeakMap();
 	proto[PATCHED] = { state };
 
 	const updateResult = ToolExecutionComponent.prototype.updateResult;
@@ -575,10 +605,10 @@ function patchTranscript(state) {
 	};
 
 	proto.clear = function () {
+		pages.delete(this);
 		const s = proto[PATCHED].state;
 		if (s.clock) {
 			s.clock = new Clock(s.clock.session);
-			s.restoring = true;
 		}
 		return clear.call(this);
 	};
@@ -618,12 +648,12 @@ function patchTranscript(state) {
 		return wrapper;
 	}
 
-	function stamp(item) {
+	function stamp(item, restoring) {
 		const block = item.block ?? item.items?.[0];
 		if (!block) return undefined;
 		if (stamps.has(block)) return stamps.get(block) ?? undefined;
 		const s = proto[PATCHED].state;
-		const ts = item.info?.ts ?? (s.restoring ? (s.clock?.find(block.describe?.(lastCx)) ?? (s.bot.hero ? Date.now() : null)) : Date.now());
+		const ts = item.info?.ts ?? (restoring ? (s.clock?.find(block.describe?.(lastCx)) ?? (s.bot.hero ? Date.now() : null)) : Date.now());
 		stamps.set(block, ts);
 		return ts ?? undefined;
 	}
@@ -650,16 +680,33 @@ function patchTranscript(state) {
 		const blocks = inner.call(this);
 		const s = proto[PATCHED].state;
 		if (!s.on || !s.top) return blocks;
+		let page = pages.get(this);
+		if (!page && blocks.length > 0) {
+			s.clock?.sync();
+			page = { start: Math.max(0, blocks.length - HISTORY_CHUNK), restored: blocks.length };
+			page.control = new BotHistory(s.bot, () => {
+				page.start = Math.max(0, page.start - HISTORY_CHUNK);
+			});
+			pages.set(this, page);
+		}
+		const start = page?.start ?? 0;
+		for (let i = blocks.length - 1; i >= start; i--) {
+			const item = shown(blocks[i]);
+			if (item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent) {
+				stamp(item, i < page.restored);
+			}
+		}
 		const shownBlocks = [s.top];
+		if (start > 0) shownBlocks.push(page.control);
 		let last;
 		let previous;
 		const taken = [];
-		for (const block of blocks) {
-			const waited = collected.get(block);
+		for (let i = start; i < blocks.length; i++) {
+			const waited = collected.get(blocks[i]);
 			if (waited) taken.push(waited);
 		}
-		for (const block of blocks) {
-			const item = shown(block);
+		for (let i = start; i < blocks.length; i++) {
+			const item = shown(blocks[i]);
 			if (!item) continue;
 			if (taken.length > 0 && item instanceof BotEvent && item.info.card) {
 				const body = item.info.body.trim();
@@ -682,7 +729,6 @@ function patchTranscript(state) {
 			previous = item;
 			shownBlocks.push(item);
 		}
-		if (blocks.length > 0) s.restoring = false;
 		if (!s.bot.hero) shownBlocks.push(s.status);
 		const before = shownBy.get(this);
 		if (before && same(before, shownBlocks)) return before;
@@ -738,7 +784,6 @@ export default function ompBot(pi) {
 		top: undefined,
 		status: new BotStatus(bot),
 		clock: undefined,
-		restoring: false,
 	};
 	let ui;
 	let abort;
@@ -782,7 +827,6 @@ export default function ompBot(pi) {
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		state.clock = new Clock(ctx.sessionManager);
-		state.restoring = true;
 		patchTranscript(state);
 		patchWorkingRow(state);
 		patchDock(state);
