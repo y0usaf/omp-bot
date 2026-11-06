@@ -234,7 +234,37 @@ export default function ompd(pi) {
 		};
 	});
 
-	pi.registerTool({
+	if (BOT === "Lloyd") pi.on("session_start", () => {
+		if (!pi.getActiveTools().includes("read")) return;
+		const read = pi.getAllTools().find(tool => tool.name === "read");
+		if (!read) return;
+		pi.registerTool({
+			...read,
+			label: "Read",
+			description: `${read.description}\n\nproc:// also lists this session's ompd jobs; proc://<job-id> returns their status and bounded output without acknowledging delivery. Completions arrive automatically; do not poll.`,
+			async execute(_toolCallId, params, signal, onUpdate, ctx) {
+				if (!ctx.invokeTool) throw new Error("read needs omp's native read tool");
+				const native = () => ctx.invokeTool(params, { signal, onUpdate });
+				const match = /^proc:\/\/([^/?#:]*)$/.exec(params.path);
+				if (!match) return native();
+				const response: { jobs: Job[] } = await call({ op: "list", owner: ownerOf(ctx) });
+				const jobs = response.jobs.map(job => exited(job) ?? job);
+				const id = match[1];
+				if (id) {
+					const job = jobs.find(job => job.id === id);
+					if (!job) return native();
+					const state = `${job.id} [ompd] ${job.state}${job.state === "done" || job.state === "lost" ? ` — ${outcome(job)}` : ""} — ${seconds(job)} — ${job.command}`;
+					return { content: [{ type: "text", text: `${state}\n${tail(job.id).trimEnd() || "(no output)"}` }], details: { proc: { job, log: join(dir(job.id), "log") } } };
+				}
+				const result = await native();
+				if (!jobs.length) return result;
+				const text = jobs.map(job => `${job.id} [ompd] ${job.state}${job.state === "done" || job.state === "lost" ? ` — ${outcome(job)}` : ""} — ${seconds(job)} — ${job.command.replace(/\s+/g, " ")}`).join("\n");
+				return { content: [...result.content, { type: "text", text: `\nompd jobs:\n${text}` }], details: { proc: { ...result.details?.proc, ompd: jobs } } };
+			},
+		});
+	});
+
+	const bash = {
 		name: "bash",
 		label: "Bash",
 		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll, sleep or wait for it${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
@@ -301,5 +331,9 @@ export default function ompd(pi) {
 				awaited.delete(job.id);
 			}
 		},
+	};
+	if (BOT === "Lloyd") pi.on("session_start", () => {
+		if (pi.getActiveTools().includes("bash")) pi.registerTool(bash);
 	});
+	else pi.registerTool(bash);
 }
