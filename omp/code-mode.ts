@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@oh-my-pi/pi-codi
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 
 const DIRECT: Readonly<Record<string, true>> = { eval: true, think: true, yield: true, goal: true, checkpoint: true, rewind: true };
-const HIDDEN = new Set(["debug", "init_experiment", "run_experiment", "log_experiment", "update_notes", "web_crawl"]);
+const HIDDEN = new Set(process.env.OMP_BOT_NAME === "Lloyd" ? ["debug", "init_experiment", "run_experiment", "log_experiment", "update_notes", "web_crawl"] : []);
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const START = "\n# Code Mode\n";
 const END = "\n# End Code Mode\n";
@@ -10,7 +10,7 @@ const argsIndex = process.argv.lastIndexOf("--tools");
 const restricted = process.argv.includes("--no-tools") ? new Set<string>()
 	: process.env.OMP_BOT_HELPER && argsIndex >= 0
 		? new Set(process.argv[argsIndex + 1].split(",").filter(Boolean)) : undefined;
-if (process.env.OMP_BOT_NAME && !process.env.OMP_BOT_BOXED) {
+if (process.env.OMP_BOT_NAME === "Lloyd" && !process.env.OMP_BOT_BOXED) {
 	HIDDEN.add("box");
 	HIDDEN.add("context_check");
 }
