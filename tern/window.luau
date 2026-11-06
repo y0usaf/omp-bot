@@ -102,15 +102,18 @@ local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
 end
 
-local function chao(bot: Bot): string
+local function hash(name: string): number
 	local h = 0x811cb697
-	for i = 1, #bot.name do
-		h = mul32(bit32.bxor(h, string.byte(bot.name, i)), 0x01000193)
+	for i = 1, #name do
+		h = mul32(bit32.bxor(h, string.byte(name, i)), 0x01000193)
 	end
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x85ebca6b)
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 13)), 0xc2b2ae35)
-	h = bit32.bxor(h, bit32.rshift(h, 16))
-	local kind = CHAO_TYPES[(h // #CHAO_EYES) % #CHAO_TYPES + 1]
+	return bit32.bxor(h, bit32.rshift(h, 16))
+end
+
+local function chao(bot: Bot): string
+	local kind = CHAO_TYPES[(hash(bot.name) // #CHAO_EYES) % #CHAO_TYPES + 1]
 	local own = type(bot.chao) == "string" and { type = bot.chao } or (type(bot.chao) == "table" and bot.chao or {})
 	return SPRITES[own.type] and own.type or kind
 end
@@ -129,6 +132,53 @@ local function mini(kind: string): string
 		end
 	end
 	return table.concat(shadows, ", ")
+end
+
+-- The pixel Chao is switched off: avatars.css draws every bot from the parts in avatars.json instead.
+local CHAO = false
+local AVATAR = tern.json.decode(tern.fs.read(tern.plugin.dir .. "/avatars.json"))
+local PARTS = { "body", "color", "eyes", "accessory", "motion" }
+
+local function part(kind: string, name: any): any
+	for _, item in ipairs(AVATAR[kind]) do
+		if item.name == name then
+			return item
+		end
+	end
+	return nil
+end
+
+-- A bot's avatar: one of each part, seeded from its name, with the roster's "avatar" table overriding any of them.
+local function avatar(bot: Bot): string
+	local h = hash(bot.name)
+	local own = type(bot.avatar) == "table" and bot.avatar or {}
+	local got: { [string]: string } = {}
+	for _, kind in ipairs(PARTS) do
+		local list = AVATAR[kind]
+		got[kind] = list[h % #list + 1].name
+		h = h // #list
+		local want = own[kind]
+		if want ~= nil then
+			if part(kind, want) or (kind == "body" and AVATAR.sprites[want]) or (kind == "color" and type(want) == "string" and want:match("^#%x+$")) then
+				got[kind] = want
+			else
+				print("omp bots: " .. bot.name .. "'s avatar has no " .. kind .. " " .. tostring(want))
+			end
+		end
+	end
+	local rows = AVATAR.sprites[got.body]
+	if rows then
+		return "--bot-face: url(\"avatars/" .. got.body .. ".png\"); --bot-cols: 10; --bot-rows: " .. rows .. "; --bot-move: avatar-" .. got.body .. "; --bot-move-big: avatar-" .. got.body .. "-big;"
+	end
+	local body = part("body", got.body)
+	local color = part("color", got.color)
+	local ink = color and color.hex or got.color
+	local svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><mask id='e'><rect width='128' height='128' fill='white'/>"
+		.. "<g transform='translate(" .. body.eyes[1] .. " " .. body.eyes[2] .. ")'>" .. part("eyes", got.eyes).svg .. "</g></mask>"
+		.. "<g fill='" .. ink .. "' stroke='" .. ink .. "' stroke-width='0' mask='url(#e)'>" .. body.svg
+		.. "<g transform='translate(" .. body.top[1] .. " " .. body.top[2] .. ")'>" .. part("accessory", got.accessory).svg .. "</g></g></svg>"
+	local url = svg:gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E")
+	return "--bot-face: url(\"data:image/svg+xml," .. url .. "\"); --bot-cols: 1; --bot-rows: 1; --bot-move: avatar-" .. got.motion .. "; --bot-move-big: avatar-" .. got.motion .. ";"
 end
 
 local function quote(s: string): string
@@ -156,13 +206,30 @@ local function show_health(bots: { Bot })
 			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
 			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode("down: " .. out.reason) .. "; color: #e5534b; }"
 		end
-		if bot.tint then
+		if CHAO and bot.tint then
 			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
 			local kind = chao(bot)
 			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(kind) .. "; }"
 		end
 	end
 	tern.css("health", table.concat(rules, "\n"))
+end
+
+-- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
+local function show_avatars(bots: { Bot })
+	local rules = { ":root { --bot-face: url(\"avatars/sol.png\"); --bot-cols: 10; --bot-rows: 8; --bot-move: avatar-sol; --bot-move-big: avatar-sol-big; }" }
+	local tints: { [string]: number } = {}
+	for _, bot in ipairs(bots) do
+		if bot.tint then
+			tints[bot.tint] = (tints[bot.tint] or 0) + 1
+		end
+	end
+	for _, bot in ipairs(bots) do
+		if bot.tint and tints[bot.tint] == 1 then
+			rules[#rules + 1] = ":root:not(#bot) :is([data-role^='omp.bot.'][data-role$='." .. bot.tint .. "'], #tabbar .tt[data-tc='" .. bot.tint .. "']) { " .. avatar(bot) .. " }"
+		end
+	end
+	tern.css("avatars", table.concat(rules, "\n"))
 end
 
 local function open_names(cx: WindowCx): { [string]: number }
@@ -204,6 +271,7 @@ end
 
 local function show(bots: { Bot })
 	show_health(bots)
+	show_avatars(bots)
 	register(bots)
 end
 

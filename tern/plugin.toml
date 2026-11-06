@@ -2,5 +2,6 @@ schema = 1
 id = "omp-bot"
 name = "omp bots"
 version = "0.1.0"
-description = "Bot mode for omp: a clean chat, a roster rail with mini Chao, and commands to open bots from bots.json."
+description = "Bot mode for omp: a clean chat, a roster rail with an avatar per bot, and commands to open bots from bots.json."
 window = "window.luau"
+styles = ["avatars.css"]

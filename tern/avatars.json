@@ -1,0 +1,58 @@
+{
+	"sprites": {"lloyd": 10, "sol": 8, "random": 10, "cu": 8, "bao": 8, "regal": 8},
+	"body": [
+		{"name": "cloud", "svg": "<circle cx='42' cy='80' r='24'/><circle cx='86' cy='80' r='24'/><circle cx='64' cy='60' r='28'/><circle cx='64' cy='88' r='22'/>", "eyes": [64, 74], "top": [64, 32]},
+		{"name": "bean", "svg": "<path d='M44 40C60 22 92 28 96 54C99 72 108 82 102 98C94 118 54 118 38 102C24 88 30 56 44 40Z'/>", "eyes": [68, 72], "top": [70, 30]},
+		{"name": "drop", "svg": "<path d='M64 26C76 44 104 62 104 84C104 104 86 116 64 116C42 116 24 104 24 84C24 62 52 44 64 26Z'/>", "eyes": [64, 84], "top": [64, 26]},
+		{"name": "pill", "svg": "<rect x='36' y='26' width='56' height='90' rx='28'/>", "eyes": [64, 66], "top": [64, 26]},
+		{"name": "square", "svg": "<rect x='24' y='34' width='80' height='80' rx='18'/>", "eyes": [64, 74], "top": [64, 34]},
+		{"name": "clover", "svg": "<circle cx='44' cy='54' r='22'/><circle cx='84' cy='54' r='22'/><circle cx='44' cy='94' r='22'/><circle cx='84' cy='94' r='22'/><rect x='36' y='46' width='56' height='56'/>", "eyes": [64, 74], "top": [64, 32]},
+		{"name": "star", "svg": "<path stroke-width='14' stroke-linejoin='round' d='M64.0 28.0L78.1 56.6L109.7 61.2L86.8 83.4L92.2 114.8L64.0 100.0L35.8 114.8L41.2 83.4L18.3 61.2L49.9 56.6Z'/>", "eyes": [64, 80], "top": [64, 28]},
+		{"name": "ghost", "svg": "<path d='M28 70C28 46 44 30 64 30C84 30 100 46 100 70V112L88 104L76 112L64 104L52 112L40 104L28 112Z'/>", "eyes": [64, 66], "top": [64, 30]},
+		{"name": "flower", "svg": "<circle cx='64.0' cy='44.0' r='20'/><circle cx='90.0' cy='59.0' r='20'/><circle cx='90.0' cy='89.0' r='20'/><circle cx='64.0' cy='104.0' r='20'/><circle cx='38.0' cy='89.0' r='20'/><circle cx='38.0' cy='59.0' r='20'/><circle cx='64' cy='74' r='32'/>", "eyes": [64, 74], "top": [64, 24]},
+		{"name": "egg", "svg": "<ellipse cx='64' cy='76' rx='38' ry='44'/>", "eyes": [64, 74], "top": [64, 32]},
+		{"name": "hex", "svg": "<path stroke-width='14' stroke-linejoin='round' d='M103.8 99.0L64.0 122.0L24.2 99.0L24.2 53.0L64.0 30.0L103.8 53.0Z'/>", "eyes": [64, 76], "top": [64, 30]},
+		{"name": "heart", "svg": "<path d='M64 112C30 88 20 70 24 54C28 36 52 30 64 48C76 30 100 36 104 54C108 70 98 88 64 112Z'/>", "eyes": [64, 66], "top": [64, 40]}
+	],
+	"color": [
+		{"name": "teal", "hex": "#13B8A3"},
+		{"name": "violet", "hex": "#905AFB"},
+		{"name": "orange", "hex": "#F9670E"},
+		{"name": "pink", "hex": "#FB3499"},
+		{"name": "amber", "hex": "#F69412"},
+		{"name": "green", "hex": "#14C370"},
+		{"name": "blue", "hex": "#3B82F6"},
+		{"name": "red", "hex": "#EF4444"},
+		{"name": "yellow", "hex": "#F5C211"},
+		{"name": "sky", "hex": "#21AEEF"},
+		{"name": "lime", "hex": "#7CC52A"},
+		{"name": "indigo", "hex": "#5B5BF0"}
+	],
+	"eyes": [
+		{"name": "pills", "svg": "<rect x='-18' y='-13' width='10' height='26' rx='5'/><rect x='8' y='-13' width='10' height='26' rx='5'/>"},
+		{"name": "dots", "svg": "<circle cx='-14' cy='0' r='7'/><circle cx='14' cy='0' r='7'/>"},
+		{"name": "wide", "svg": "<ellipse cx='-15' cy='0' rx='9' ry='6'/><ellipse cx='15' cy='0' rx='9' ry='6'/>"},
+		{"name": "happy", "svg": "<path fill='none' stroke='black' stroke-width='6' stroke-linecap='round' d='M-22 4Q-14 -8 -6 4M6 4Q14 -8 22 4'/>"},
+		{"name": "sleepy", "svg": "<rect x='-22' y='-3' width='16' height='6' rx='3'/><rect x='6' y='-3' width='16' height='6' rx='3'/>"},
+		{"name": "cyclops", "svg": "<circle cx='0' cy='0' r='12'/>"},
+		{"name": "wink", "svg": "<rect x='-18' y='-13' width='10' height='26' rx='5'/><path fill='none' stroke='black' stroke-width='6' stroke-linecap='round' d='M6 2Q14 -8 22 2'/>"}
+	],
+	"accessory": [
+		{"name": "none", "svg": ""},
+		{"name": "antenna", "svg": "<rect x='-2' y='-16' width='4' height='18'/><circle cx='0' cy='-19' r='6'/>"},
+		{"name": "sprout", "svg": "<rect x='-2' y='-12' width='4' height='14'/><ellipse cx='-9' cy='-15' rx='9' ry='5' transform='rotate(-25 -9 -15)'/><ellipse cx='9' cy='-17' rx='9' ry='5' transform='rotate(25 9 -17)'/>"},
+		{"name": "ears", "svg": "<path d='M-34 10L-28 -14L-12 2Z'/><path d='M34 10L28 -14L12 2Z'/>"},
+		{"name": "halo", "svg": "<ellipse fill='none' stroke-width='5' cx='0' cy='-14' rx='20' ry='6'/>"},
+		{"name": "crown", "svg": "<path d='M-18 4L-20 -16L-9 -6L0 -20L9 -6L20 -16L18 4Z'/>"},
+		{"name": "tuft", "svg": "<circle cx='-7' cy='-4' r='7'/><circle cx='5' cy='-8' r='8'/><circle cx='0' cy='0' r='6'/>"},
+		{"name": "bow", "svg": "<path d='M0 -6L-18 -16L-18 4Z'/><path d='M0 -6L18 -16L18 4Z'/><circle cx='0' cy='-6' r='6'/>"}
+	],
+	"motion": [
+		{"name": "bob"},
+		{"name": "sway"},
+		{"name": "squish"},
+		{"name": "hop"},
+		{"name": "wiggle"},
+		{"name": "spin"}
+	]
+}
