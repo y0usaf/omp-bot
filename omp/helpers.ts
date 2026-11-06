@@ -141,15 +141,27 @@ function goal(task: string): string {
 function systemPrompt(helper: Helper, role: string, context: string): string {
 	const parent = helper.parent === MAIN ? BOT : helper.parent;
 	const peers = records().filter(other => other.id !== helper.id && running(other)).map(other => `- \`${other.id}\` — ${other.description}`);
+	const rulesPath = join(STATE, "bots", BOT, "rules.md");
+	const rules = BOT === "Lloyd" && existsSync(rulesPath) ? readFileSync(rulesPath, "utf8").trim() : "";
 	return `§ Role
 ${role.trim()}
 ${context.trim() ? `\n§ Context\n${context.trim()}\n` : ""}
+${BOT === "Lloyd" ? `
+§ Inherited rules
+The user's standing rules from ${rulesPath} apply to this assignment:
+${rules || "No standing rules file is present."}
+
+§ Shipping and decisions
+Unless this assignment explicitly limits shipping, finish authorized changes end to end: verify the real behavior, commit the owning repo, pin it in ~/finix, and run one \`nh os switch .\` in ~/finix under \`flock -x /run/user/1001/agent/finix-switch.lock\`. Coordinate with other shippers and build the committed revision before switching. Restart affected services and bots so the change is active; restart Lloyd last with \`omp-bot-ctl restart Lloyd\` when required. Do not push without the user's authorization.
+Decide routine, reversible details within the assignment yourself. Fix bugs in the owning component, with no compatibility shims. Themes override Tern's stock selectors and variables rather than adding machinery, except where stock Tern has no surface. A user decision is required for visible-to-others, irreversible, costly, or push actions not already authorized.
+Default helper models to the configured Codex task role. Request Opus only for Lean proofs or compiler work; do not use Opus as a general helper default.
+` : ""}
 § Coop
 You are helper \`${helper.id}\` of the bot ${BOT}, started by \`${parent}\` with the task tool to do one piece of its work. You run as an omp session of your own, an ompd job outside \`${parent}\`'s session: it restarting doesn't stop you, and your result reaches it even then.
 # Peers
 Message peers via \`write\` with \`path: "agent://<id>"\` and \`content\`. Your id is \`${helper.id}\`; \`${parent}\` is \`agent://${parent}\`${peers.length ? `, and the other helpers now running are:\n${peers.join("\n")}` : "."}
 Use peer messages only for quick coordination, never long-form content. Before editing a file a sibling may own, message that peer. \`write agent://<id>\` never blocks.
-Your final result reaches \`${parent}\` automatically. Message \`${parent}\` only for questions, blockers, or decisions — never progress or completion reports.${helper.parent === MAIN ? `
+Your final result reaches \`${parent}\` automatically. Message \`${parent}\` ${BOT === "Lloyd" ? "only when blocked, reporting failure, needing a user decision (visible-to-others, irreversible, costly, or push), or delivering a requested final result — never progress, routine questions, or acknowledgements." : "only for questions, blockers, or decisions — never progress or completion reports."}${helper.parent === MAIN ? `
 Messages you send to \`agent://${parent}\` are held quietly for its next turn by default. To wake it now, put \`[wake]\` on the first line of the message's \`content\`: use this only when blocked, needing the user, reporting a failure, or delivering the final result it is waiting on. Routine acknowledgements and coordination stay held.
 Your final result also waits quietly for \`${parent}\`'s next turn. Put \`[wake]\` on its first line only for the same urgent cases; a failed run or the final job of a parked task wakes it automatically.` : ""}
 
@@ -195,8 +207,12 @@ export default function helpers(pi) {
 		]);
 		const session = AgentRegistry.global().get(MAIN)?.session;
 		const inherits = [agent.model ?? []].flat().every(pattern => INHERITED.test(String(pattern).trim()));
+		const requested = [item.model ?? "@task"].flat();
+		const requestModel = BOT === "Lloyd"
+			? (requested.length ? requested : ["@task"]).map(pattern => pattern.trim().replace(/^(?:\*|(?:@|pi\/)?(?:default|task))(?=:|$)/, "@task") || "@task")
+			: item.model ?? (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined);
 		const [model] = resolveAgentModelPatterns({
-			requestModel: item.model ?? (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined),
+			requestModel,
 			agentModel: agent.model,
 			settings: session?.settings,
 			activeModelPattern: session?.model ? formatModelString(session.model) : undefined,
@@ -359,7 +375,7 @@ export default function helpers(pi) {
 					name: z.string().optional(),
 					agent: z.string().optional(),
 					tools: z.array(z.string()).optional(),
-					model: z.union([z.string(), z.array(z.string())]).optional(),
+					model: z.union([z.string(), z.array(z.string())]).optional().describe(BOT === "Lloyd" ? "Defaults to the Codex task role. Request Opus only for Lean proofs or compiler work." : "Overrides the agent model."),
 				}),
 			),
 		}),
