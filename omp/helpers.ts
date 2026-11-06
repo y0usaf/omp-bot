@@ -15,6 +15,7 @@ const DEPTH = Number(process.env.OMP_BOT_HELPER_DEPTH) || (SELF ? 1 : 0);
 const MAX_DEPTH = 2;
 const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
 const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
+const PREWALK_MODEL = "anthropic/claude-opus-5-5";
 const PATCHED = Symbol.for("omp-bot.helpers.send");
 const WAKE = /^\[wake\][^\S\n]*(?:\n\s*)?/;
 const DELIVERED = { state: "done" } as Job;
@@ -110,8 +111,8 @@ function baseArgs(): string[] {
 	for (let i = 1; i < argv.length; i++) {
 		const arg = argv[i];
 		const next = argv[i + 1];
-		if (["--restore", "--session-dir", "--session", "--resume", "--mode", "--fork"].includes(arg)) i++;
-		else if (["--continue", "-c", "--no-ui", "--print", "-p"].includes(arg)) continue;
+		if (["--restore", "--session-dir", "--session", "--resume", "--mode", "--fork", "--prewalk-into"].includes(arg)) i++;
+		else if (["--continue", "-c", "--no-ui", "--print", "-p", "--prewalk", "--no-prewalk"].includes(arg) || arg.startsWith("--prewalk-into=")) continue;
 		else if ((arg === "-e" || arg === "--extension") && next !== undefined && own.has(real(next))) i++;
 		else if (arg === "--config" && next !== undefined && real(next) === memory) i++;
 		else out.push(arg);
@@ -138,7 +139,7 @@ function goal(task: string): string {
 	return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 }
 
-function systemPrompt(helper: Helper, role: string, context: string): string {
+function systemPrompt(helper: Helper, role: string, context: string, prewalk: boolean): string {
 	const parent = helper.parent === MAIN ? BOT : helper.parent;
 	const peers = records().filter(other => other.id !== helper.id && running(other)).map(other => `- \`${other.id}\` — ${other.description}`);
 	const rulesPath = join(STATE, "bots", BOT, "rules.md");
@@ -166,7 +167,7 @@ Messages you send to \`agent://${parent}\` are held quietly for its next turn by
 Your final result also waits quietly for \`${parent}\`'s next turn. Put \`[wake]\` on its first line only for the same urgent cases; a failed run or the final job of a parked task wakes it automatically.` : ""}
 
 § Completion
-No TODO tracking, no progress updates. Execute; your final message is your result.
+${prewalk ? "" : "No TODO tracking, "}no progress updates. Execute; your final message is your result.
 
 While work remains, you MUST continue with another tool call — investigate, edit. A reply without a tool call ends the run; its text reaches \`${parent}\` verbatim as your complete result. NEVER end on a plan, a promise of further work, or a question.
 
@@ -197,7 +198,8 @@ export default function helpers(pi) {
 		const home = join(HELPERS, id);
 		mkdirSync(join(home, "sessions"), { recursive: true });
 		const helper: Helper = { id, parent: self(), agent: agent.name, description: goal(item.task), job: "", tool, started: Date.now(), cwd };
-		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context));
+		const prewalk = process.env.OMP_BOT_PREWALK === "1" && item.model === undefined;
+		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context, prewalk));
 		writeAtomic(join(home, "assignment.md"), `Complete assignment thoroughly:\n\n${item.task.trim()}\n`);
 		let args = [...baseArgs(), "--session-dir", join(home, "sessions"), "--append-system-prompt", join(home, "system.md")];
 		const [{ formatModelString, resolveAgentModelPatterns }, { AgentRegistry }, { getEnvApiKeyName }] = await Promise.all([
@@ -207,23 +209,32 @@ export default function helpers(pi) {
 		]);
 		const session = AgentRegistry.global().get(MAIN)?.session;
 		const inherits = [agent.model ?? []].flat().every(pattern => INHERITED.test(String(pattern).trim()));
-		const requested = [item.model ?? "@task"].flat();
-		const requestModel = BOT === "Lloyd"
-			? (requested.length ? requested : ["@task"]).map(pattern => pattern.trim().replace(/^(?:\*|(?:@|pi\/)?(?:default|task))(?=:|$)/, "@task") || "@task")
-			: item.model ?? (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined);
+		const requestModel = item.model ?? (BOT === "Lloyd" || prewalk ? "@task" : (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined));
 		const [model] = resolveAgentModelPatterns({
 			requestModel,
 			agentModel: agent.model,
 			settings: session?.settings,
 			activeModelPattern: session?.model ? formatModelString(session.model) : undefined,
 		});
-		if (model) args = withFlag(args, "--model", model);
+		const config = join(home, "prewalk.json");
+		writeAtomic(config, JSON.stringify({ prewalk: { enabled: false, auto: "off" } }));
+		args.push("--config", config);
+		if (prewalk) {
+			if (!model) throw new Error("Prewalk helpers require a configured task model");
+			args = [...withFlag(args, "--model", PREWALK_MODEL), "--prewalk-into", model];
+		} else {
+			if (model) args = withFlag(args, "--model", model);
+			args.push("--no-prewalk");
+		}
 		const tools = item.tools ?? agent.tools;
 		if (Array.isArray(tools) && tools.length) args = withFlag(args, "--tools", tools.join(","));
 		const env = safeEnv(process.env);
 		for (const key of ["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"]) delete env[key];
-		const keyName = model ? getEnvApiKeyName(model.split("/")[0]) : undefined;
-		if (keyName && process.env[keyName]) env[keyName] = process.env[keyName];
+		for (const selected of prewalk ? [PREWALK_MODEL, model] : [model]) {
+			const provider = selected?.split("/")[0];
+			const keys = provider === "anthropic" ? ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY"] : [provider ? getEnvApiKeyName(provider) : undefined];
+			for (const key of keys) if (key && process.env[key]) env[key] = process.env[key];
+		}
 		Object.assign(env, { OMP_BOT_HELPER: id, OMP_BOT_HELPER_PARENT: helper.parent, OMP_BOT_HELPER_DEPTH: String(DEPTH + 1), OMPD_OWNER: `helper:${BOT}/${id}` });
 		try {
 			const { job } = await call({

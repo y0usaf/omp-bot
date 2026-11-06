@@ -81,7 +81,7 @@ optchat)
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/core.ts" -e "${OMP_BOT_OMPD_EXTENSION:-$root/omp/ompd.ts}" -e "$root/omp/helpers.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
+set -- -e "$root/omp/code-mode.ts" -e "$root/omp/core.ts" -e "${OMP_BOT_OMPD_EXTENSION:-$root/omp/ompd.ts}" -e "$root/omp/helpers.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 if [ "$headless" = 1 ]; then
 	export OMP_BOT_HEADLESS=1
 	exec flock -n -E 75 -o "$dir/lock" "$omp" --mode rpc --no-ui --continue "$@"
