@@ -360,7 +360,8 @@ export default function ompd(pi) {
 						if (failed(now)) throw new Error(`${out}\n\n[${outcome(now)}]`);
 						return { content: [{ type: "text", text: out }], details: { job: job.id } };
 					}
-					if (signal?.aborted || Date.now() >= deadline) {
+					const stopped = signal?.aborted || (!sub && ctx.hasPendingMessages());
+					if (stopped || Date.now() >= deadline) {
 						const last = exited(load(job.id) ?? job);
 						if (last) continue;
 						if (sub) {
@@ -369,7 +370,7 @@ export default function ompd(pi) {
 							throw new Error(`${tail(job.id, 4096).trimEnd()}\n\n[Stopped: ompd job ${job.id} killed]`);
 						}
 						pi.events.emit("ompd:background", { id: job.id });
-						const why = signal?.aborted ? "Stopped waiting" : params.monitor || params.filter !== undefined ? `Monitoring${params.filter ? ` for /${params.filter}/` : ""}` : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
+						const why = stopped ? "Stopped waiting" : params.monitor || params.filter !== undefined ? `Monitoring${params.filter ? ` for /${params.filter}/` : ""}` : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
 						const out = tail(job.id, 4096).trimEnd();
 						return {
 							content: [{ type: "text", text: `${out ? `${out}\n\n` : ""}[${why}: ompd job ${job.id} keeps running, log ${join(dir(job.id), "log")}. ${params.monitor || params.filter !== undefined ? "Matching output arrives in this conversation as it appears. " : ""}Its result arrives in this conversation as a message when it ends; don't poll or sleep for it, and call wait only when nothing else is left to do. ${OMPD} kill ${job.id} stops it.]` }],

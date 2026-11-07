@@ -423,7 +423,7 @@ export default function helpers(pi) {
 			try {
 				const deadline = Date.now() + FOREGROUND_S * 1000;
 				onUpdate?.({ content: [{ type: "text", text: `Started ${started.map(helper => helper.id).join(", ")}` }] });
-				while (done.size < started.length && !signal?.aborted && Date.now() < deadline) {
+				while (done.size < started.length && !signal?.aborted && !ctx.hasPendingMessages() && Date.now() < deadline) {
 					for (const helper of started) {
 						if (done.has(helper.id)) continue;
 						const now = load(helper.job);
