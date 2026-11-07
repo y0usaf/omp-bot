@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join, resolve } from "node:path";
-import { dir, type Job, load, request, SOCKET, V } from "../daemon/ompd";
+import { dir, type Job, load, MONITOR_MS, request, SOCKET, V } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
 
 const UNKNOWN = "Previous OMP process exited before this tool returned";
@@ -99,6 +99,12 @@ function report(job: Job): string {
 	const command = line.length > 200 ? `${line.slice(0, 200)}…` : line;
 	const out = tail(job.id, NOTICE_BYTES, NOTICE_LINES).trimEnd();
 	return `[ompd job ${job.id} ended: ${outcome(job)} after ${seconds(job)}${job.runs > 1 ? `, run ${job.runs}` : ""}]\n$ ${command}\n${out || "(no output)"}\n(log: ${join(dir(job.id), "log")})`;
+}
+
+function output(job: Job, lines: string[], omitted: number, skipped: number): string {
+	const head = `[ompd job ${job.id} output${skipped ? `, ${skipped} bytes skipped as the writer outpaced the monitor` : ""}]`;
+	const cut = omitted ? [`… ${omitted} earlier matching lines coalesced`] : [];
+	return `${head}\n${[...cut, ...lines].join("\n")}\n(log: ${join(dir(job.id), "log")})`;
 }
 
 let starting = 0;
@@ -199,6 +205,10 @@ export default function ompd(pi) {
 				if (!line) continue;
 				try {
 					const message = JSON.parse(line);
+					if (message.event === "output") {
+						const job = message.job as Job;
+						if (!delivered(job.id)) pi.sendMessage({ customType: "ompd-output", content: output(job, message.lines, message.omitted, message.skipped), display: !BOT, details: { id: job.id } }, { deliverAs: "followUp", triggerTurn: true });
+					}
 					if (message.event === "ended") void ended(message.job).catch(() => {});
 				} catch {}
 			}
@@ -310,12 +320,14 @@ export default function ompd(pi) {
 	const bash = {
 		name: "bash",
 		label: "Bash",
-		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll or sleep for it; when nothing else is left to do until it ends, call wait${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. A job you stop with kill reports quietly at your next turn. Pipelines run with pipefail, so cmd | tail fails when cmd fails, and a writer cut off by an early reader such as head fails with 141; start with set +o pipefail when the command cuts output short on purpose. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
+		description: `Runs a shell command with bash as an ompd job: a process outside this session that outlives restarts, its output kept in a log on disk. It waits like a normal shell for up to ${FOREGROUND_S}s; a command still running then, or started with async, keeps running and its result arrives in this conversation as a message when it ends, so never poll or sleep for it; when nothing else is left to do until it ends, call wait${MAIN_BOT ? "; a failure wakes you at once, while a success waits quietly in this conversation for your next turn unless it is the last job a background task waits on" : ""}. monitor wakes you with each new batch of the job's output that matches filter, a regex, or everything without one, at most once every ${Math.round(MONITOR_MS / 1000)}s, dropping repeated lines; it returns as soon as the job starts and keeps waking you until the job ends, across your restarts. A job you stop with kill reports quietly at your next turn. Pipelines run with pipefail, so cmd | tail fails when cmd fails, and a writer cut off by an early reader such as head fails with 141; start with set +o pipefail when the command cuts output short on purpose. timeout (seconds) kills the command after that long; without one it has no limit. rerunnable marks a command safe to start again from scratch if the machine restarts while it runs (builds, tests); it defaults to not, and a job that isn't is reported outcome unknown instead. pty runs the command in a terminal inside this session instead, for interactive programs; that run does not outlive a restart. ${OMPD} jobs lists jobs and ${OMPD} kill ID stops one.${BOT ? " Inside a background task, git push, rebase, commit --amend, filter-repo and filter-branch are blocked until the user approves them through ask_decision; in live chat they run." : ""}`,
 		parameters: z.object({
 			command: z.string(),
 			timeout: z.number().optional(),
 			cwd: z.string().optional(),
 			async: z.boolean().optional(),
+			monitor: z.boolean().optional(),
+			filter: z.string().optional(),
 			rerunnable: z.boolean().optional(),
 			pty: z.boolean().optional(),
 		}),
@@ -333,11 +345,12 @@ export default function ompd(pi) {
 				env: process.env,
 				timeout: params.timeout ?? 0,
 				rerunnable: params.rerunnable ?? false,
+				monitor: params.monitor || params.filter !== undefined ? (params.filter ?? "") : undefined,
 			});
 			awaited.add(job.id);
 			try {
 				const sub = ctx.agent?.kind === "sub";
-				const deadline = sub ? Infinity : params.async ? 0 : Date.now() + FOREGROUND_S * 1000;
+				const deadline = params.monitor || params.filter !== undefined || params.async ? 0 : sub ? Infinity : Date.now() + FOREGROUND_S * 1000;
 				let shown = "";
 				for (;;) {
 					const now = exited(load(job.id) ?? job);
@@ -356,10 +369,10 @@ export default function ompd(pi) {
 							throw new Error(`${tail(job.id, 4096).trimEnd()}\n\n[Stopped: ompd job ${job.id} killed]`);
 						}
 						pi.events.emit("ompd:background", { id: job.id });
-						const why = signal?.aborted ? "Stopped waiting" : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
+						const why = signal?.aborted ? "Stopped waiting" : params.monitor || params.filter !== undefined ? `Monitoring${params.filter ? ` for /${params.filter}/` : ""}` : params.async ? "Started" : `Still running after ${FOREGROUND_S}s`;
 						const out = tail(job.id, 4096).trimEnd();
 						return {
-							content: [{ type: "text", text: `${out ? `${out}\n\n` : ""}[${why}: ompd job ${job.id} keeps running, log ${join(dir(job.id), "log")}. Its result arrives in this conversation as a message when it ends; don't poll or sleep for it, and call wait only when nothing else is left to do. ${OMPD} kill ${job.id} stops it.]` }],
+							content: [{ type: "text", text: `${out ? `${out}\n\n` : ""}[${why}: ompd job ${job.id} keeps running, log ${join(dir(job.id), "log")}. ${params.monitor || params.filter !== undefined ? "Matching output arrives in this conversation as it appears. " : ""}Its result arrives in this conversation as a message when it ends; don't poll or sleep for it, and call wait only when nothing else is left to do. ${OMPD} kill ${job.id} stops it.]` }],
 							details: { job: job.id, running: true },
 						};
 					}

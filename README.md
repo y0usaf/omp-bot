@@ -27,7 +27,7 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-ctl restart BOT [--now]` | Restart a bot once idle; `--now` stops its turn and retries the task. |
 | `bin/omp-bot-remove NAME [--purge]` | Take a bot off the roster and archive its conversation; `--purge` also deletes its persisted folders. |
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
-| `bin/ompd jobs\|show ID\|kill ID\|run ...` | Inspect or start jobs by hand. |
+| `bin/ompd jobs\|show ID\|kill ID\|run [--monitor REGEX] ...` | Inspect or start jobs by hand. |
 
 In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header and messages under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
@@ -83,6 +83,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMPD_SERVICE` | unset | `1`: a service runs ompd; bots wait for it instead of starting one. |
 | `OMPD_FOREGROUND_S` | 300 | How long a command or helper is waited for before it continues in the background. |
 | `OMPD_JOB_MEMORY` | `12G` | Memory cap per job cgroup, no swap. |
+| `OMPD_MONITOR_MS` | 60000 | Shortest gap between a monitored job's wake batches. |
 | `OMPD_LEAN_SLOTS` | half of RAM / cap | Concurrent Lean builds. |
 | `OMPD_CGROUP` | ompd's parent cgroup | Where job cgroups go; without a writable one, jobs run uncapped. |
 
@@ -98,7 +99,7 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
 - **Bots asking bots.** A task with `--origin bot:NAME` sends its result back to that bot as a `reply:` task. Replies never trigger replies.
 - **Quiet results.** A bot that has nothing for you replies "Nothing to report.", which skips the inbox.
-- **Durability.** Every bash command runs as an ompd job with its own log under `jobs/ID/`, with `pipefail` on. A command cut off by a crash is reported as outcome unknown, not rerun, unless marked rerunnable. `wait` returns the first of the session's jobs to end; a job the session killed reports at its next turn instead of waking it. Turns resume after a restart with omp's `--restore`.
+- **Durability.** Every bash command runs as an ompd job with its own log under `jobs/ID/`, with `pipefail` on. A command cut off by a crash is reported as outcome unknown, not rerun, unless marked rerunnable. `wait` returns the first of the session's jobs to end; a job the session killed reports at its next turn instead of waking it. `monitor: true` with an optional `filter` regex makes a running job wake the session with each new batch of matching lines, at most once a minute, dropping repeats, so a CI watch or a training-loss alert costs no model calls and keeps working across restarts. Turns resume after a restart with omp's `--restore`.
 - **Helpers.** `omp/helpers.ts` replaces omp's task tool. Each helper is a headless omp session run as an ompd job; it reports back to its parent and survives the parent's restart. Results wait for the parent's next turn unless their first line is `[wake]` or they failed.
 - **Code mode.** `omp/code-mode.ts` gives bots persistent cells, bash by default: the code runs as a script with each enabled tool as an executable on `PATH` (`edit`, `lsp`, `web-fetch`, ...; `omp-read` where the shell has its own) that calls back through the same Python bridge, and `NAME --help` is generated from the tool's schema. A `language: "py"` cell calls any enabled tool as `await tool.NAME({...})` and keeps Python state. Both go through omp's normal approval hooks and tool limits.
 - **Git guard.** `git/git` sits first on bots' `PATH` and blocks push, rebase, `commit --amend`, filter-repo and filter-branch during a background task unless you approved that task. The bot exports the task's ID as `OMP_BOT_TASK`, so commands, scripts and helpers it starts are judged by that task's answer alone. A live message that asks you to push, rebase or amend is approval for the turn it starts, so a task waiting on jobs never needs a decision card for it; the grant is dropped as that turn ends, and a new task starts with none. This stops accidents and self-approval, not a hostile process running as your user.

@@ -7,6 +7,9 @@ export const V = 1;
 export const JOBS = join(STATE, "jobs");
 export const SOCKET = process.env.OMPD_SOCKET || join(STATE, "ompd.sock");
 const POLL_MS = Number(process.env.OMPD_POLL_MS) || 1000;
+export const MONITOR_MS = Number(process.env.OMPD_MONITOR_MS) || 60_000;
+const MONITOR_BYTES = 256 * 1024;
+const MONITOR_LINES = 50;
 const MAX_RUNS = 3;
 export const LEAN = /(?:^|[\s;&|(`'"])(?<!\b(?:pgrep|pkill|grep)\b[^;&\n]*)(?:lake\s+(?:build|env\s+lean)|lean\s+(?:-\S+\s+)*[^\s-]\S*\.lean)(?=$|[\s;&|)`'"])/;
 const ENV_KEEP = /^(?:PATH|HOME|USER|LOGNAME|SHELL|LANG|TERM|COLORTERM|TZ|TZDIR|TMPDIR|EDITOR|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|SSH_AUTH_SOCK|SSL_CERT_FILE|CARGO_HOME|RUSTUP_HOME|ELAN_HOME|(?:LC|XDG|NIX|PI|OMP|OMPD)_\w+)$/;
@@ -35,6 +38,7 @@ export type Job = {
 	code: number | null;
 	reason: string | null;
 	delivered: boolean;
+	monitor?: { filter: string; seen: number; last: string; sent: number } | null;
 };
 
 function size(text: string): number {
@@ -239,6 +243,43 @@ function serve() {
 		for (const socket of watchers.get(job.owner) ?? []) if (!socket.destroyed) socket.write(`${JSON.stringify({ event: "ended", job: shown })}\n`);
 	}
 
+	function monitor(job: Job) {
+		const m = job.monitor;
+		const live = [...(watchers.get(job.owner) ?? [])].filter(socket => !socket.destroyed);
+		if (!m || !live.length || Date.now() - m.sent < MONITOR_MS) return;
+		let fd: number | undefined;
+		let buffer: Buffer;
+		let from: number;
+		try {
+			fd = openSync(join(dir(job.id), "log"), "r");
+			const end = fstatSync(fd).size;
+			from = Math.max(m.seen, end - MONITOR_BYTES);
+			buffer = Buffer.alloc(end - from);
+			readSync(fd, buffer, 0, buffer.length, from);
+		} catch {
+			return;
+		} finally {
+			if (fd !== undefined) closeSync(fd);
+		}
+		const cut = buffer.lastIndexOf(10) + 1;
+		if (!cut) return;
+		const skipped = from - m.seen;
+		m.seen = from + cut;
+		const filter = new RegExp(m.filter);
+		const lines: string[] = [];
+		for (const raw of buffer.subarray(0, cut).toString("utf8").split("\n").slice(skipped ? 1 : 0, -1)) {
+			const line = raw.replace(/\r$/, "");
+			if (!line.trim() || line === m.last || !filter.test(line)) continue;
+			m.last = line;
+			lines.push(line);
+		}
+		if (lines.length) m.sent = Date.now();
+		save(job);
+		if (!lines.length) return;
+		const event = JSON.stringify({ event: "output", job, lines: lines.slice(-MONITOR_LINES), omitted: Math.max(0, lines.length - MONITOR_LINES), skipped });
+		for (const socket of live) socket.write(`${event}\n`);
+	}
+
 	function finish(job: Job, patch: Partial<Job>) {
 		Object.assign(job, { ended: Date.now(), ...patch });
 		save(job);
@@ -356,6 +397,7 @@ function serve() {
 				continue;
 			}
 			if (job.timeout > 0 && Date.now() - (job.started ?? 0) > job.timeout * 1000) kill(job, `killed after its ${job.timeout}s timeout`);
+			monitor(job);
 		}
 		dispatch();
 	}
@@ -377,6 +419,8 @@ function serve() {
 			if (existing) return existing;
 		}
 		const lean = LEAN.test(command);
+		const filter = message.monitor === undefined || message.monitor === null ? null : String(message.monitor);
+		if (filter !== null) new RegExp(filter);
 		const env = { ...message.env };
 		if (env.OMP_BOT_NAME) {
 			env.OMP_BOT_REAL_GIT ||= Bun.which("git", { PATH: env.PATH });
@@ -403,6 +447,7 @@ function serve() {
 			code: null,
 			reason: null,
 			delivered: false,
+			monitor: filter === null ? null : { filter, seen: 0, last: "", sent: 0 },
 		};
 		mkdirSync(dir(job.id), { recursive: true, mode: 0o700 });
 		writeFileSync(join(dir(job.id), "command"), command, { mode: 0o600 });
@@ -507,7 +552,7 @@ function serve() {
 
 const USAGE = `usage: ompd COMMAND
   serve                                  run the daemon (bin/ompd serve takes its lock)
-  run [--owner O] [--timeout S] [--rerunnable] -- CMD
+  run [--owner O] [--timeout S] [--rerunnable] [--monitor REGEX] -- CMD
                                          start CMD as a job and print its id
   jobs [--owner O]                       list jobs
   show ID                                a job's record and log path
@@ -532,7 +577,8 @@ if (import.meta.main) {
 			case "run": {
 				const at = args.indexOf("--");
 				if (at < 0 || at === args.length - 1) throw new Error(USAGE);
-				const reply = await request({ op: "run", owner: opt("owner") ?? `cli:${process.env.USER ?? "user"}`, command: args.slice(at + 1).join(" "), cwd: process.cwd(), env: process.env, timeout: Number(opt("timeout")) || 0, rerunnable: args.slice(0, at).includes("--rerunnable") });
+				const monitor = args.indexOf("--monitor");
+				const reply = await request({ op: "run", owner: opt("owner") ?? `cli:${process.env.USER ?? "user"}`, command: args.slice(at + 1).join(" "), cwd: process.cwd(), env: process.env, timeout: Number(opt("timeout")) || 0, rerunnable: args.slice(0, at).includes("--rerunnable"), monitor: monitor < 0 ? undefined : args[monitor + 1] && args[monitor + 1] !== "--" ? args[monitor + 1] : "" });
 				console.log(reply.job.id);
 				break;
 			}
