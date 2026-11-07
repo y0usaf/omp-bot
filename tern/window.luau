@@ -232,6 +232,48 @@ local function show_avatars(bots: { Bot })
 	tern.css("avatars", table.concat(rules, "\n"))
 end
 
+local current: { Bot } = {}
+local faces = ""
+
+local function show_faces(cx: WindowCx?)
+	if not cx then
+		return
+	end
+	local by_tint: { [string]: Bot } = {}
+	local shared: { [string]: boolean } = {}
+	for _, bot in ipairs(current) do
+		if bot.tint then
+			shared[bot.tint] = by_tint[bot.tint] ~= nil
+			by_tint[bot.tint] = bot
+		end
+	end
+	local owner: { [number]: Bot } = {}
+	for _, tab in ipairs(cx.session:tabs()) do
+		if tab.color and by_tint[tab.color] and not shared[tab.color] then
+			owner[tab.id] = by_tint[tab.color]
+		end
+	end
+	local faces_of, faces_text = {}, {}
+	for _, pane in ipairs(cx.session:panes()) do
+		local bot = pane.tab and owner[pane.tab]
+		if bot then
+			faces_of[#faces_of + 1] = "#banners .tn-dk-c[data-pane='" .. pane.pane .. "']"
+			faces_text[#faces_text + 1] = bot
+		end
+	end
+	local rules = {}
+	for index, selector in ipairs(faces_of) do
+		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) 0 0 / calc(100% * var(--bot-cols)) calc(100% * var(--bot-rows)) no-repeat; box-shadow: none; }"
+		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
+		rules[#rules + 1] = ":root:not(#bot) " .. selector .. "::before, :root:not(#bot) " .. selector .. "::after { content: none; }"
+	end
+	local text = table.concat(rules, "\n")
+	if text ~= faces then
+		faces = text
+		tern.css("faces", text)
+	end
+end
+
 local function open_names(cx: WindowCx): { [string]: number }
 	local names = {}
 	for _, tab in ipairs(cx.session:tabs()) do
@@ -270,6 +312,7 @@ local function register(bots: { Bot })
 end
 
 local function show(bots: { Bot })
+	current = bots
 	show_health(bots)
 	show_avatars(bots)
 	register(bots)
@@ -546,9 +589,12 @@ end
 show(roster())
 tern.timer(0, tick)
 
-for _, event in ipairs({ "focus", "tab_created" }) do
-	tern.on(event, function()
+for _, event in ipairs({ "focus", "tab_created", "tab_closed", "pane_created", "pane_closed", "agent_state" }) do
+	tern.on(event, function(_ev, cx: WindowCx)
 		register(roster())
+		show_faces(cx)
 	end)
 end
+
+tern.timer(0, show_faces)
 

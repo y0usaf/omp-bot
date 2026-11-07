@@ -29,7 +29,7 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
 | `bin/ompd jobs\|show ID\|kill ID\|run [--monitor REGEX] ...` | Inspect or start jobs by hand. |
 
-In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header and messages under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
+In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header, messages and Tern's own notification card under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
 To try prompts safely, set `OMP_BOT_NO_TOOLS=1` and a throwaway `OMP_BOT_STATE`. A separate state folder isolates memory, not access to the machine.
 
