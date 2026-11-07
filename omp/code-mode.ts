@@ -148,6 +148,24 @@ export default function codeMode(pi: ExtensionAPI) {
 	}).passthrough();
 	const automaticChoices: Readonly<Record<string, true>> = { auto: true, none: true, required: true, any: true };
 	const cellDetails = z.object({ cells: z.array(z.object({}).passthrough()) }).passthrough();
+	const backgrounded = z.object({ async: z.object({ state: z.literal("running"), jobId: z.string() }).passthrough() }).passthrough();
+	const detached = new Set<string>();
+	const release = (dir: string) => {
+		detached.delete(dir);
+		try {
+			process.kill(-Number(readFileSync(join(dir, "pid"), "utf8")), "SIGKILL");
+		} catch {}
+		rmSync(dir, { recursive: true, force: true });
+	};
+	const watch = (ctx: ExtensionContext, dir: string, jobId: string) => {
+		detached.add(dir);
+		const check = () => {
+			if (!detached.has(dir)) return;
+			if (ctx.getAsyncJobSnapshot()?.running.some(job => job.id === jobId)) ctx.setTimeout(check, 1000);
+			else release(dir);
+		};
+		ctx.setTimeout(check, 1000);
+	};
 	pi.setLabel("Code mode");
 	pi.registerTool({
 		name: "eval", label: "Eval", loadMode: "essential",
@@ -180,14 +198,16 @@ export default function codeMode(pi: ExtensionAPI) {
 					return parsed.success ? { ...parsed.data, language: "bash", languages: ["bash"], cells: parsed.data.cells.map(cell => ({ ...cell, language: "bash", code: params.code })) } : details;
 				};
 				const result = await ctx.invokeTool({ ...params, language: "py", code, timeout }, { signal, onUpdate: onUpdate && (update => onUpdate({ ...update, details: relabel(update.details) })) });
+				const job = backgrounded.safeParse(result.details);
+				if (job.success) watch(ctx, dir, job.data.async.jobId);
 				return { ...result, details: relabel(result.details) };
 			} finally {
-				try {
-					process.kill(-Number(readFileSync(join(dir, "pid"), "utf8")), "SIGKILL");
-				} catch {}
-				rmSync(dir, { recursive: true, force: true });
+				if (!detached.has(dir)) release(dir);
 			}
 		},
+	});
+	pi.on("session_shutdown", () => {
+		for (const dir of [...detached]) release(dir);
 	});
 	pi.on("session_start", async (_event, ctx) => {
 		await pi.setActiveTools([...enabled(pi, ctx)]);

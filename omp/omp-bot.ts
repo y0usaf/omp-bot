@@ -1040,6 +1040,7 @@ export default function ompBot(pi) {
 		bot.nap();
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
+		if (reason === "aborted" && !bot.stopped && ctx.hasPendingMessages()) return;
 		if (bot.stopped || reason === "aborted") {
 			bot.set("idle", "Stopped. Ready when you are.");
 			return;
