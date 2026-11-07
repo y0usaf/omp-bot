@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createServer, type Socket } from "node:net";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { gitAllowed } from "./guard";
 import { ROOT, ROSTER, SOCKET, STATE } from "./paths";
 
 const MAX_ATTEMPTS = Number(process.env.OMP_BOT_MAX_ATTEMPTS) || 3;
@@ -20,7 +21,7 @@ const SILENT = "Nothing to report.";
 const ACTIONS = { approve: "approved", deny: "denied", handle: "left it to you to decide" } as const;
 
 type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number; token: string | null; beat: number | null; wait: string | null; question: string | null; answer: string | null };
-type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; token?: string; closing?: boolean };
+type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; token?: string; closing?: boolean; git?: boolean };
 type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout>; hello?: boolean; tail: string };
 type Down = { reason: string; since: number; cause: "start" | "box" };
 
@@ -251,6 +252,7 @@ function dispatch(bot: string) {
 	link.idle = false;
 	link.task = task.id;
 	link.token = token;
+	link.git = false;
 	clearTimeout(children.get(bot)?.idleTimer);
 	log(`lease ${task.id} -> ${bot} (${link.mode}, attempt ${task.attempts + 1})`);
 	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, token, text: task.text, origin: task.origin, answer: task.answer ? JSON.parse(task.answer) : null });
@@ -526,10 +528,12 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			return wait === "decision" ? pushDecisions(link.bot) : undefined;
 		}
 		case "git-check": {
-			const held = q.git.all({ bot: String(message.bot ?? "") });
-			const task = String(message.task ?? "");
-			const allowed = task ? held.some(row => row.id === task && row.answer !== null && JSON.parse(row.answer).action === "approve") : held.length === 0;
-			return send(socket, { ok: true, allowed });
+			const bot = String(message.bot ?? "");
+			return send(socket, { ok: true, allowed: gitAllowed(q.git.all({ bot }), String(message.task ?? ""), links.get(bot)?.git === true) });
+		}
+		case "live": {
+			if (self.link) self.link.git = message.git === true;
+			return;
 		}
 		case "answer": {
 			if (message.source !== "user") throw new Error("Only the user can answer a task decision");

@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
+import { approvesGit } from "../daemon/guard";
 import { SOCKET, STATE } from "../daemon/paths";
 import { identity } from "./prompt";
 
@@ -263,6 +264,11 @@ export default function core(pi) {
 		return { systemPrompt };
 	});
 
+	pi.on("input", async (event, c) => {
+		if (c.agent?.kind === "sub") return;
+		send({ op: "live", git: approvesGit(event.text) });
+	});
+
 	pi.on("agent_start", async (_event, c) => {
 		if (c.agent?.kind === "sub") return;
 		readySent = false;
@@ -271,7 +277,9 @@ export default function core(pi) {
 	});
 
 	pi.on("agent_end", async (event, c) => {
-		if (c.agent?.kind === "sub" || event.willContinue || !current || !started || stopped) return;
+		if (c.agent?.kind === "sub") return;
+		if (!event.willContinue) send({ op: "live", git: false });
+		if (event.willContinue || !current || !started || stopped) return;
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
 		const result = current.result || textOf(final);
