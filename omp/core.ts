@@ -283,6 +283,7 @@ export default function core(pi) {
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
 		const result = current.result || textOf(final);
+		if (reason === "aborted" && c.hasPendingMessages()) return;
 		started = false;
 		if (reason === "aborted") report({ op: "fail", error: "stopped by the user", final: true });
 		else if (reason === "error") report({ op: "fail", error: final?.errorMessage || "the model request failed" });
