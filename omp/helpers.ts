@@ -168,7 +168,7 @@ Messages you send to \`agent://${parent}\` are held quietly for its next turn by
 Your final result also waits quietly for \`${parent}\`'s next turn. Put \`[wake]\` on its first line only for the same urgent cases; a failed run or the final job of a parked task wakes it automatically.` : ""}
 
 § Completion
-${prewalk ? "" : "No TODO tracking, "}no progress updates. Execute; your final message is your result.
+No progress updates. Execute; your final message is your result.
 
 While work remains, you MUST continue with another tool call — investigate, edit. A reply without a tool call ends the run; its text reaches \`${parent}\` verbatim as your complete result. NEVER end on a plan, a promise of further work, or a question.
 
