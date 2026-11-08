@@ -29,7 +29,7 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
 | `bin/ompd jobs\|show ID\|kill ID\|run [--monitor REGEX] ...` | Inspect or start jobs by hand. |
 
-In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot** and **Bots: Remove bot** to the palette, plus each bot's avatar in its tab, header, messages and Tern's own notification card under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
+In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot**, **Bots: Remove bot** and **Bots: Change avatar** to the palette, plus each bot's avatar in its tab, header, messages and Tern's own notification card under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
 To try prompts safely, set `OMP_BOT_NO_TOOLS=1` and a throwaway `OMP_BOT_STATE`. A separate state folder isolates memory, not access to the machine.
 
@@ -53,7 +53,7 @@ omp, bun, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash
 | `persist` | Folders under `~` that must survive a reboot. |
 | `box` | `true` runs the bot's omp inside omp-box. |
 | `avatar` | Parts overriding the ones the name picks: `{"body": "ghost", "color": "#ff8800", "eyes": "happy", "accessory": "halo", "motion": "hop"}`. |
-| | Part names are in `tern/avatars.json`; `body` may also name a drawn sprite in `tern/avatars/` (`lloyd`, `sol`, ...). |
+| | Part names are in `tern/avatars.json`; `body` may also name a drawn sprite in `tern/avatars/` (`lloyd`, `sol`, ...). **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
 
 A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. `bots/NAME/rules.md` holds standing rules given to the bot word for word; its `pin_rule` tool appends to it. `tools/NAME/bin/` goes on that bot's `PATH` only.
 

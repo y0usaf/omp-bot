@@ -148,8 +148,8 @@ local function part(kind: string, name: any): any
 	return nil
 end
 
--- A bot's avatar: one of each part, seeded from its name, with the roster's "avatar" table overriding any of them.
-local function avatar(bot: Bot): string
+-- A bot's parts: one of each, seeded from its name, with the roster's "avatar" table overriding any of them.
+local function parts(bot: Bot): { [string]: string }
 	local h = hash(bot.name)
 	local own = type(bot.avatar) == "table" and bot.avatar or {}
 	local got: { [string]: string } = {}
@@ -166,6 +166,11 @@ local function avatar(bot: Bot): string
 			end
 		end
 	end
+	return got
+end
+
+local function avatar(bot: Bot): string
+	local got = parts(bot)
 	local rows = AVATAR.sprites[got.body]
 	if rows then
 		return "--bot-face: url(\"avatars/" .. got.body .. ".png\"); --bot-cols: 10; --bot-rows: " .. rows .. "; --bot-move: avatar-" .. got.body .. "; --bot-move-big: avatar-" .. got.body .. "-big;"
@@ -506,13 +511,7 @@ local function remove_bot(cx: WindowCx)
 	end)
 end
 
-tern.command({ id = "new", title = "Bots: Open bot", icon = "sparkle", run = new_bot })
-tern.command({ id = "remove", title = "Bots: Remove bot", icon = "trash", run = remove_bot })
-tern.command({ id = "open_all", title = "Bots: Open all", icon = "sparkle", run = open_all })
-tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
-	return false
-end, run = stage })
-
+-- The roster's folder, as bin/ scripts read it.
 local function state_env(): { [string]: string }
 	local env = {}
 	local state = tern.getenv("OMP_BOT_STATE")
@@ -521,6 +520,114 @@ local function state_env(): { [string]: string }
 	end
 	return env
 end
+
+-- Tern's pick items take only an icon name, so a sheet keyed on row position draws each row's face; a row matches
+-- only while the list is whole, so a typed filter, which drops rows, falls back to the icons.
+local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
+	local n = #faces
+	local rules = {}
+	for i, face in ipairs(faces) do
+		local row = ":root:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item)"
+		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 32px; height: 32px; background: var(--bot-face) 0 0 / calc(32px * var(--bot-cols)) calc(32px * var(--bot-rows)) no-repeat; }"
+		rules[#rules + 1] = row .. " .ck-ic > .ico { display: none; }"
+		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { animation: var(--bot-move) 4s steps(1, end) infinite; }"
+	end
+	rules[#rules + 1] = "@media (prefers-reduced-motion: reduce) { :root:not(#bot) #pick .ck-item .ck-ic { animation: none !important; } }"
+	tern.css("pick", table.concat(rules, "\n"))
+	return cx:pick(opts)
+end
+
+-- Writes one bot's "avatar" (nil drops it, back to the parts its name picks) and redraws every avatar in place.
+local function save_avatar(name: string, own: { [string]: string }?)
+	local fields = {}
+	for _, kind in ipairs(PARTS) do
+		if own and own[kind] then
+			fields[#fields + 1] = tern.json.encode(kind) .. ": " .. tern.json.encode(own[kind])
+		end
+	end
+	tern.process.run({ ROOT .. "/bin/omp-bot-avatar", name, own and ("{" .. table.concat(fields, ", ") .. "}") or "--name" }, { env = state_env(), timeout_ms = 10000 }, function(result, cx)
+		if result.status ~= 0 then
+			if cx then
+				cx:toast("error", "Could not save " .. name .. "'s avatar", (result.stderr:gsub("%s+$", "")))
+			end
+			return
+		end
+		show(roster())
+		show_faces(cx)
+	end)
+end
+
+local KIND_NAMES: { [string]: string } = { body = "body", color = "colour", eyes = "eyes", accessory = "accessory", motion = "motion" }
+
+-- One part per pick, in PARTS order, each row drawn as the bot would look with it; a drawn sprite or "From name" ends the chain.
+local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step: number)
+	local kind = PARTS[step]
+	local now = parts({ name = bot.name, avatar = own } :: any)
+	local items, faces = {}, {}
+	local function add(item: any, try: { [string]: string }?)
+		item.icon = "sparkle"
+		items[#items + 1] = item
+		faces[#faces + 1] = avatar({ name = bot.name, avatar = try } :: any)
+	end
+	if kind == "body" then
+		add({ label = "From name", detail = "parts picked from the name " .. bot.name, reset = true, current = bot.avatar == nil }, nil)
+		local sprites = {}
+		for name in AVATAR.sprites do
+			sprites[#sprites + 1] = name
+		end
+		table.sort(sprites)
+		for _, name in ipairs(sprites) do
+			add({ label = name, detail = "drawn", value = name, current = now.body == name }, { body = name })
+		end
+	end
+	for _, item in ipairs(AVATAR[kind]) do
+		local try = table.clone(own)
+		try[kind] = item.name
+		add({ label = item.name, detail = item.hex, value = item.name, current = now[kind] == item.name }, try)
+	end
+	local last = step == #PARTS
+	pick_faces(cx, { items = items, placeholder = bot.name .. "'s " .. KIND_NAMES[kind], icon = "sparkle", action = last and "save" or "next" }, faces):next(function(item, _, cx2)
+		tern.css("pick", "")
+		if not item or not cx2 then
+			return
+		end
+		if item.reset then
+			save_avatar(bot.name, nil)
+		elseif AVATAR.sprites[item.value :: string] then
+			save_avatar(bot.name, { body = item.value })
+		else
+			own[kind] = item.value
+			if last then
+				save_avatar(bot.name, own)
+			else
+				pick_part(cx2, bot, own, step + 1)
+			end
+		end
+	end)
+end
+
+local function change_avatar(cx: WindowCx)
+	local bots = roster()
+	local items, faces = {}, {}
+	for _, bot in ipairs(bots) do
+		items[#items + 1] = { label = bot.name, icon = "sparkle", bot = bot }
+		faces[#faces + 1] = avatar(bot)
+	end
+	pick_faces(cx, { items = items, placeholder = "Change whose avatar?", icon = "sparkle", action = "next" }, faces):next(function(item, _, cx2)
+		tern.css("pick", "")
+		if item and cx2 then
+			pick_part(cx2, item.bot, parts(item.bot), 1)
+		end
+	end)
+end
+
+tern.command({ id = "new", title = "Bots: Open bot", icon = "sparkle", run = new_bot })
+tern.command({ id = "remove", title = "Bots: Remove bot", icon = "trash", run = remove_bot })
+tern.command({ id = "avatar", title = "Bots: Change avatar", icon = "sparkle", run = change_avatar })
+tern.command({ id = "open_all", title = "Bots: Open all", icon = "sparkle", run = open_all })
+tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
+	return false
+end, run = stage })
 
 local function poll()
 	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "status", "--json" }, { env = state_env(), timeout_ms = 10000 }, function(result, cx)

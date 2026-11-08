@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+usage="usage: omp-bot-avatar NAME JSON | omp-bot-avatar NAME --name"
+[ $# -eq 2 ] || { echo "$usage" >&2; exit 2; }
+name=$1
+avatar=$2
+case $name in
+"" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, spaces, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
+esac
+[ ${#name} -le 40 ] || { echo "omp-bot: bot name longer than 40 characters" >&2; exit 2; }
+if [ "$avatar" = --name ]; then
+	avatar=null
+else
+	printf '%s' "$avatar" | jq -e 'type == "object"' >/dev/null 2>&1 || { echo "omp-bot-avatar: JSON must be an object of parts, or --name" >&2; exit 2; }
+fi
+config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
+[ ! -r "$config" ] || . "$config"
+state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+mkdir -p "$state"
+[ -e "$state/bots.json" ] || { cp "$(cd "$(dirname "$0")/.." && pwd)/bots.json" "$state/bots.json" && chmod 644 "$state/bots.json"; }
+jq -e --arg n "$name" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null || { echo "omp-bot-avatar: no bot named $name" >&2; exit 1; }
+(
+	flock 9
+	tmp=$(mktemp "$state/bots.json.XXXXXX")
+	jq --arg n "$name" --argjson a "$avatar" 'map(if .name == $n then if $a == null then del(.avatar) else .avatar = $a end else . end)' "$state/bots.json" >"$tmp"
+	chmod 644 "$tmp"
+	mv -f "$tmp" "$state/bots.json"
+) 9>"$state/bots.lock"
