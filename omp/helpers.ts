@@ -15,8 +15,6 @@ const DEPTH = Number(process.env.OMP_BOT_HELPER_DEPTH) || (SELF ? 1 : 0);
 const MAX_DEPTH = 2;
 const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
 const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
-const PREWALK_START = "anthropic/claude-opus-5-5";
-const PREWALK_INTO = "vercel-ai-gateway/deepseek/deepseek-v4.1-flash-1017-fast";
 const PATCHED = Symbol.for("omp-bot.helpers.send");
 const WAKE = /^\[wake\][^\S\n]*(?:\n\s*)?/;
 const DELIVERED = { state: "done" } as Job;
@@ -140,7 +138,7 @@ function goal(task: string): string {
 	return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 }
 
-function systemPrompt(helper: Helper, role: string, context: string, prewalk: boolean): string {
+function systemPrompt(helper: Helper, role: string, context: string): string {
 	const parent = helper.parent === MAIN ? BOT : helper.parent;
 	const peers = records().filter(other => other.id !== helper.id && running(other)).map(other => `- \`${other.id}\` — ${other.description}`);
 	const rulesPath = join(STATE, "bots", BOT, "rules.md");
@@ -199,8 +197,7 @@ export default function helpers(pi) {
 		const home = join(HELPERS, id);
 		mkdirSync(join(home, "sessions"), { recursive: true });
 		const helper: Helper = { id, parent: self(), agent: agent.name, description: goal(item.task), job: "", tool, started: Date.now(), cwd };
-		const prewalk = process.env.OMP_BOT_PREWALK === "1";
-		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context, prewalk));
+		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context));
 		writeAtomic(join(home, "assignment.md"), `Complete assignment thoroughly:\n\n${item.task.trim()}\n`);
 		let args = [...baseArgs(), "--session-dir", join(home, "sessions"), "--append-system-prompt", join(home, "system.md")];
 		const [{ formatModelString, resolveAgentModelPatterns }, { AgentRegistry }, { getEnvApiKeyName }] = await Promise.all([
@@ -210,7 +207,7 @@ export default function helpers(pi) {
 		]);
 		const session = AgentRegistry.global().get(MAIN)?.session;
 		const inherits = [agent.model ?? []].flat().every(pattern => INHERITED.test(String(pattern).trim()));
-		const requestModel = item.model ?? (BOT === "Lloyd" || prewalk ? "@task" : (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined));
+		const requestModel = item.model ?? (BOT === "Lloyd" ? "@task" : (inherits ? (session?.settings?.getModelRole("task") ? "@task" : "@smol") : undefined));
 		const [model] = resolveAgentModelPatterns({
 			requestModel,
 			agentModel: agent.model,
@@ -220,19 +217,13 @@ export default function helpers(pi) {
 		const config = join(home, "prewalk.json");
 		writeAtomic(config, JSON.stringify({ prewalk: { enabled: false, auto: "off" } }));
 		args.push("--config", config);
-		const start = item.model ? model : PREWALK_START;
-		if (prewalk) {
-			if (!start) throw new Error("Prewalk helpers require a starting model");
-			args = [...withFlag(args, "--model", start), "--prewalk-into", PREWALK_INTO];
-		} else {
-			if (model) args = withFlag(args, "--model", model);
-			args.push("--no-prewalk");
-		}
+		if (model) args = withFlag(args, "--model", model);
+		args.push("--no-prewalk");
 		const tools = item.tools ?? agent.tools;
 		if (Array.isArray(tools)) args = withFlag(args, "--tools", tools.join(","));
 		const env = safeEnv(process.env);
 		for (const key of ["OMP_BOT_RELAUNCH", "OMP_BOT_HEADLESS", "OMP_BOT_PID"]) delete env[key];
-		for (const selected of prewalk ? [start, PREWALK_INTO] : [model]) {
+		for (const selected of [model]) {
 			const provider = selected?.split("/")[0];
 			const keys = provider === "anthropic" ? ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY"] : [provider ? getEnvApiKeyName(provider) : undefined];
 			for (const key of keys) if (key && process.env[key]) env[key] = process.env[key];
