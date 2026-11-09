@@ -11,7 +11,8 @@ const USAGE = `usage: omp-bot-ctl COMMAND
   restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task); a down BOT tries to start again
   claim BOT                                     wait until BOT's headless run has stopped
   holder BOT                                    what holds BOT's lock: tui PID, dying PID, headless PID or none
-  retire BOT                                    fail BOT's queued tasks and stop its background run`;
+  retire BOT                                    fail BOT's queued tasks and stop its background run
+  gaveup BOT SINCE REASON                       BOT's tab stopped; unless BOT connected since SINCE (epoch ms), mark it down for REASON`;
 
 function request(message: unknown, timeoutMs = 0): Promise<any> {
 	return new Promise((resolve, reject) => {
@@ -101,6 +102,11 @@ try {
 			if (!rest[0]) throw new Error(USAGE);
 			const reply = await request({ op: "restart", bot: rest[0], now: Boolean(opts.now) });
 			console.log(reply.state === "asleep" ? `${rest[0]} is asleep; it starts fresh next time` : reply.state === "retrying" ? `${rest[0]} was down; trying to start it again` : reply.state === "restarting" ? `restarting ${rest[0]}` : `${rest[0]} restarts once its turn ends`);
+			break;
+		}
+		case "gaveup": {
+			if (!rest[2]) throw new Error(USAGE);
+			await request({ op: "gaveup", bot: rest[0], since: Number(rest[1]), reason: rest.slice(2).join(" ") }, 5000);
 			break;
 		}
 		case "holder": {

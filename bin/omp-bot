@@ -126,4 +126,5 @@ if [ -e "$OMP_BOT_RELAUNCH" ]; then
 	rm -f "$OMP_BOT_RELAUNCH"
 	exit 76
 fi
+[ "$code" = 0 ] || "$root/bin/omp-bot-ctl" gaveup "$name" "$((started * 1000))" "its tab's omp exited with code $code before connecting; the error is in its tab" || true
 exit "$code"

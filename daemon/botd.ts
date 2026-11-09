@@ -81,6 +81,7 @@ const dying = new Map<string, number>();
 const resumes = new Map<string, number>();
 const down = new Map<string, Down>();
 const startFails = new Map<string, number>();
+const hellos = new Map<string, number>();
 let boxHealthy: boolean | undefined;
 let boxedBots = new Set<string>();
 let draining = false;
@@ -466,6 +467,7 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			const child = children.get(link.bot);
 			if (child && link.mode === "headless") child.hello = true;
 			clearDown(link.bot, `it connected (${link.mode})`);
+			hellos.set(link.bot, Date.now());
 			if (draining && link.mode === "headless") link.closing = true;
 			if (message.task && q.resume.run({ id: String(message.task), token: String(message.token ?? ""), now: Date.now() }).changes) {
 				link.task = message.task;
@@ -576,6 +578,13 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "unretire":
 			claims.delete(message.bot);
 			return send(socket, { ok: true });
+		case "gaveup": {
+			const bot = message.bot;
+			if (!roster().has(bot)) throw new Error(`no bot named ${bot}`);
+			if (links.has(bot) || (hellos.get(bot) ?? 0) >= Number(message.since)) return send(socket, { ok: true, state: "connected" });
+			markDown(bot, String(message.reason), "start");
+			return send(socket, { ok: true, state: "down" });
+		}
 		case "restart": {
 			const bot = message.bot;
 			if (!roster().has(bot)) throw new Error(`no bot named ${bot}`);
