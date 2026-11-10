@@ -186,7 +186,8 @@ function serve() {
 	}
 
 	function findTask(id: string): Task {
-		const matches = [...tasks.values()].filter(task => task.id.startsWith(String(id ?? "")));
+		const key = String(id ?? "");
+		const matches = [...tasks.values()].filter(task => task.id === key || task.id.startsWith(key) || task.id.endsWith(key));
 		if (matches.length !== 1) throw new Error(matches.length ? `task ${id} is ambiguous` : `no task ${id}`);
 		return matches[0];
 	}
@@ -822,7 +823,7 @@ function age(ms: number): string {
 }
 
 export function taskLine(task: Task): string {
-	return `${task.id.slice(0, 8)}  ${task.state}  ${age(Date.now() - task.created)}  ${task.owner}  ${task.title}`;
+	return `${task.id.slice(-8)}  ${task.state}  ${age(Date.now() - task.created)}  ${task.owner}  ${task.title}`;
 }
 
 export function taskDetails(task: Task, running: number): string[] {
