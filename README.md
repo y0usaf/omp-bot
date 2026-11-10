@@ -20,8 +20,8 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-botd` | Supervisor: task queue (SQLite), starts and stops background bots. finix runs it as the `omp-botd` service. |
 | `bin/ompd serve [--wait]` | Job daemon. One copy per state folder; `--wait` waits for the lock instead of exiting. finix runs it as the `ompd` service. |
 | `bin/omp-bot NAME` | Open a bot in any terminal. `--create TINT` adds it to the roster first. |
-| `bin/omp-bot-ctl task BOT TEXT [--key K] [--origin O]` | Queue a task. The same key queues once; `--origin bot:NAME` sends the result to that bot. |
-| `bin/omp-bot-ctl inbox` / `ack ID` | Decisions waiting on you, and unacknowledged results. |
+| `bin/omp-bot-ctl task BOT TEXT [--key K] [--origin O] [--check CMD] [--cwd DIR]` | Queue a task. The same key queues once; `--origin bot:NAME` sends the result to that bot. With `--check`, botd runs CMD when the bot reports and only exit 0 makes the task done; a failure queues it again with CMD's output. Without one, the result waits as `reported` until `ack`. |
+| `bin/omp-bot-ctl inbox` / `ack ID` | Decisions waiting on you, and unacknowledged reported, finished and failed tasks. |
 | `bin/omp-bot-ctl approve\|deny\|handle ID [NOTE]` | Answer a decision (`handle` leaves it to the bot). |
 | `bin/omp-bot-ctl tasks` / `status [--json]` | Recent tasks; which bots are up, and why any are down. |
 | `bin/omp-bot-ctl restart BOT [--now]` | Restart a bot once idle; `--now` stops its turn and retries the task. |
@@ -74,7 +74,8 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_NO_TOOLS` | unset | `1` starts bots with `--no-tools`. |
 | `OMP_BOT_IDLE_EXIT_MS` | 300000 | Idle time before a background bot sleeps. |
 | `OMP_BOT_HEARTBEAT_MS` | 30000 | Task check-in interval; three misses retry the task. |
-| `OMP_BOT_MAX_ATTEMPTS` | 3 | Attempts per task. |
+| `OMP_BOT_MAX_ATTEMPTS` | 3 | Attempts per task, and failed checks before a task fails. |
+| `OMP_BOT_CHECK_TIMEOUT_MS` | 1800000 | Longest a `--check` command may run. |
 | `OMP_BOT_MAX_STARTS` | 3 | Failed starts in a row before a bot is marked down. |
 | `OMP_BOT_HEALTH_MS` | 60000 | How often a boxed bot's box is checked. |
 | `OMP_BOT_HELD_MAX_MS` | 300000 | Longest backoff while a bot is open in a tab. |

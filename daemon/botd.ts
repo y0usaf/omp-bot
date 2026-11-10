@@ -17,10 +17,12 @@ const DRAIN_MS = Number(process.env.OMP_BOT_DRAIN_MS) || 120_000;
 const MAX_STARTS = Number(process.env.OMP_BOT_MAX_STARTS) || 3;
 const HEALTH_MS = Number(process.env.OMP_BOT_HEALTH_MS) || 60_000;
 const HEALTH_TIMEOUT_MS = 30_000;
+const CHECK_TIMEOUT_MS = Number(process.env.OMP_BOT_CHECK_TIMEOUT_MS) || 1_800_000;
+const CHECK_LOG_MAX = 4000;
 const SILENT = "Nothing to report.";
 const ACTIONS = { approve: "approved", deny: "denied", handle: "left it to you to decide" } as const;
 
-type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; created: number; updated: number; seen: number; token: string | null; beat: number | null; wait: string | null; question: string | null; answer: string | null };
+type Task = { id: string; bot: string; key: string; text: string; origin: string | null; state: string; attempts: number; result: string | null; error: string | null; check: string | null; cwd: string | null; checklog: string | null; created: number; updated: number; seen: number; token: string | null; beat: number | null; wait: string | null; question: string | null; answer: string | null };
 type Link = { socket: Socket; bot: string; mode: "tui" | "headless"; pid?: number; idle: boolean; task?: string; token?: string; closing?: boolean; git?: boolean; live?: boolean };
 type Child = { proc: ReturnType<typeof Bun.spawn>; idleTimer?: ReturnType<typeof setTimeout>; hello?: boolean; tail: string };
 type Down = { reason: string; since: number; cause: "start" | "box" };
@@ -31,17 +33,18 @@ db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
 db.exec(`CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY, bot TEXT NOT NULL, key TEXT NOT NULL UNIQUE, text TEXT NOT NULL, origin TEXT,
 	state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT,
+	"check" TEXT, cwd TEXT, checklog TEXT,
 	created INTEGER NOT NULL, updated INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0,
 	token TEXT, beat INTEGER, wait TEXT, question TEXT, answer TEXT)`);
 const columns = new Set(db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('tasks')").all().map(column => column.name));
-for (const column of ["token TEXT", "beat INTEGER", "wait TEXT", "question TEXT", "answer TEXT"]) if (!columns.has(column.split(" ")[0])) db.exec(`ALTER TABLE tasks ADD COLUMN ${column}`);
+for (const column of ["token TEXT", "beat INTEGER", "wait TEXT", "question TEXT", "answer TEXT", '"check" TEXT', "cwd TEXT", "checklog TEXT"]) if (!columns.has(column.split(" ")[0].replace(/"/g, ""))) db.exec(`ALTER TABLE tasks ADD COLUMN ${column}`);
 db.exec("UPDATE tasks SET state = 'queued' WHERE state IN ('pending', 'leased')");
 db.exec("CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (bot, state, created)");
 db.exec("DROP TABLE IF EXISTS subagents");
 
 const HELD = "(state = 'running' OR (state = 'waiting' AND wait = 'jobs'))";
 const q = {
-	insert: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, created, updated) VALUES ($id, $bot, $key, $text, $origin, 'queued', $now, $now) ON CONFLICT (key) DO NOTHING"),
+	insert: db.query('INSERT INTO tasks (id, bot, key, text, origin, state, "check", cwd, created, updated) VALUES ($id, $bot, $key, $text, $origin, \'queued\', $check, $cwd, $now, $now) ON CONFLICT (key) DO NOTHING'),
 	byKey: db.query<Task, { key: string }>("SELECT * FROM tasks WHERE key = $key"),
 	byId: db.query<Task, { id: string }>("SELECT * FROM tasks WHERE id = $id"),
 	next: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued' ORDER BY created LIMIT 1"),
@@ -49,20 +52,25 @@ const q = {
 	lease: db.query("UPDATE tasks SET state = 'running', attempts = attempts + 1, token = $token, beat = $now, wait = NULL, updated = $now WHERE id = $id AND state = 'queued'"),
 	resume: db.query(`UPDATE tasks SET state = CASE WHEN state = 'queued' THEN 'running' ELSE state END, beat = $now, updated = $now WHERE id = $id AND token = $token AND (state = 'queued' OR ${HELD})`),
 	beat: db.query(`UPDATE tasks SET beat = $now WHERE id = $id AND token = $token AND ${HELD}`),
-	finish: db.query(`UPDATE tasks SET state = 'done', result = $result, wait = NULL, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	report: db.query(`UPDATE tasks SET state = 'reported', result = $result, wait = NULL, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	checkReport: db.query(`UPDATE tasks SET state = 'checking', result = $result, checklog = NULL, wait = NULL, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
+	checkPass: db.query("UPDATE tasks SET state = 'done', updated = $now WHERE id = $id AND state = 'checking'"),
+	checkFail: db.query(`UPDATE tasks SET state = CASE WHEN attempts >= $max THEN 'failed' ELSE 'queued' END, error = $error, checklog = $error, token = NULL, beat = NULL, wait = NULL, updated = $now WHERE id = $id AND state = 'checking'`),
+	checking: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'checking'"),
+	checkingAll: db.query<Task, []>("SELECT * FROM tasks WHERE state = 'checking'"),
 	release: db.query(`UPDATE tasks SET state = CASE WHEN attempts >= $max THEN 'failed' ELSE 'queued' END, wait = NULL, error = $error, updated = $now WHERE id = $id AND token IS $token AND ${HELD}`),
 	wait: db.query(`UPDATE tasks SET state = 'waiting', wait = $wait, question = $question, result = $result, seen = CASE WHEN $wait = 'decision' THEN 0 ELSE seen END, updated = $now WHERE id = $id AND token = $token AND ${HELD}`),
 	answer: db.query("UPDATE tasks SET state = 'queued', attempts = 0, answer = $answer, wait = NULL, seen = 1, updated = $now WHERE id = $id AND state = 'waiting' AND wait = 'decision'"),
-	silent: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state = 'done' AND trim(result) = $silent"),
+	silent: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state IN ('done', 'reported') AND trim(result) = $silent"),
 	silentHeld: db.query<Task, { before: number }>(`SELECT * FROM tasks WHERE ${HELD} AND beat < $before`),
 	held: db.query<Task, []>(`SELECT * FROM tasks WHERE ${HELD}`),
 	decisions: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'waiting' AND wait = 'decision' ORDER BY updated"),
 	git: db.query<{ id: string; answer: string | null }, { bot: string }>(`SELECT id, answer FROM tasks WHERE bot = $bot AND ${HELD}`),
 	grace: db.query(`UPDATE tasks SET beat = $now WHERE ${HELD}`),
 	list: db.query<Task, { state: string | null; bot: string | null; limit: number }>("SELECT * FROM tasks WHERE ($state IS NULL OR state = $state) AND ($bot IS NULL OR bot = $bot) ORDER BY created DESC LIMIT $limit"),
-	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
-	ack: db.query("UPDATE tasks SET seen = 1 WHERE id = $id AND state IN ('done', 'failed')"),
-	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('queued', 'running', 'waiting')"),
+	inbox: db.query<Task, []>("SELECT * FROM tasks WHERE (state IN ('reported', 'done', 'failed') OR (state = 'waiting' AND wait = 'decision')) AND seen = 0 ORDER BY updated"),
+	ack: db.query("UPDATE tasks SET state = CASE WHEN state = 'reported' THEN 'done' ELSE state END, seen = 1 WHERE id = $id AND state IN ('reported', 'done', 'failed')"),
+	retire: db.query("UPDATE tasks SET state = 'failed', error = 'bot removed', seen = 1, updated = $now WHERE bot = $bot AND state IN ('queued', 'running', 'waiting', 'checking')"),
 	queued: db.query<Task, { bot: string }>("SELECT * FROM tasks WHERE bot = $bot AND state = 'queued'"),
 	drop: db.query("UPDATE tasks SET state = 'failed', error = $error, updated = $now WHERE id = $id AND state = 'queued'"),
 	notice: db.query("INSERT INTO tasks (id, bot, key, text, origin, state, result, error, created, updated) VALUES ($id, $bot, $key, $text, 'botd', $state, $result, $error, $now, $now)"),
@@ -74,6 +82,7 @@ const claims = new Map<string, { until: number; waiters: Array<() => void> }>();
 const nextSpawn = new Map<string, number>();
 const held = new Map<string, number>();
 const summarisers = new Map<string, ReturnType<typeof Bun.spawn>>();
+const checks = new Map<string, ReturnType<typeof Bun.spawn>>();
 const memoryRetry = new Map<string, number>();
 const restarts = new Map<string, { now: boolean }>();
 const respawn = new Set<string>();
@@ -257,7 +266,7 @@ function dispatch(bot: string) {
 	link.live = false;
 	clearTimeout(children.get(bot)?.idleTimer);
 	log(`lease ${task.id} -> ${bot} (${link.mode}, attempt ${task.attempts + 1})`);
-	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, token, text: task.text, origin: task.origin, answer: task.answer ? JSON.parse(task.answer) : null });
+	send(link.socket, { op: "task", id: task.id, attempt: task.attempts + 1, token, text: task.text, origin: task.origin, check: task.check, error: task.error, answer: task.answer ? JSON.parse(task.answer) : null });
 }
 
 function ensureRunning(bot: string, force = false) {
@@ -428,29 +437,99 @@ function expire() {
 	}
 }
 
-function enqueue(message: { bot?: string; text?: string; key?: string; origin?: string }) {
+function expand(path: string): string {
+	const home = process.env.HOME || "/";
+	return path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
+}
+
+function botCwd(bot: string): string {
+	try {
+		const entry = (JSON.parse(readFileSync(ROSTER, "utf8")) as Array<{ name: string; cwd?: string }>).find(next => next.name === bot);
+		return expand(entry?.cwd ?? "~");
+	} catch {
+		return process.cwd();
+	}
+}
+
+function killCheck(proc: ReturnType<typeof Bun.spawn>) {
+	try {
+		process.kill(-proc.pid, "SIGKILL");
+	} catch {}
+}
+
+function settleCheck(task: Task, code: number | null, output: string, note?: string) {
+	if (q.byId.get({ id: task.id })?.state !== "checking") return;
+	const text = output.length > CHECK_LOG_MAX ? output.slice(-CHECK_LOG_MAX) : output;
+	if (code === 0) {
+		if (!q.checkPass.run({ id: task.id, now: Date.now() }).changes) return;
+		const settled = q.byId.get({ id: task.id });
+		if ((settled?.result ?? "").trim() === SILENT) q.silent.run({ id: task.id, silent: SILENT });
+		log(`check ${task.id} passed`);
+		return replyToOrigin(task.id);
+	}
+	const error = note ? `${note}${text ? `: ${text}` : ""}` : text || `exit ${code ?? "?"}`;
+	q.checkFail.run({ id: task.id, error, max: MAX_ATTEMPTS, now: Date.now() });
+	const next = q.byId.get({ id: task.id });
+	log(`check ${task.id} failed${next?.state === "failed" ? "" : ", queued again"}: ${lastLine(error)}`);
+	replyToOrigin(task.id);
+	if (next?.state === "queued") dispatch(task.bot);
+}
+
+function startCheck(task: Task) {
+	if (!task.check || checks.has(task.id)) return;
+	let proc: ReturnType<typeof Bun.spawn>;
+	try {
+		proc = Bun.spawn(["setsid", "bash", "-lc", task.check], { cwd: task.cwd || botCwd(task.bot), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+	} catch (error) {
+		return settleCheck(task, null, "", `could not start the check: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	checks.set(task.id, proc);
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		killCheck(proc);
+	}, CHECK_TIMEOUT_MS);
+	log(`check ${task.id}: ${task.check}`);
+	Promise.all([new Response(proc.stdout as ReadableStream<Uint8Array>).text(), new Response(proc.stderr as ReadableStream<Uint8Array>).text(), proc.exited])
+		.then(([out, err, code]) => {
+			clearTimeout(timer);
+			checks.delete(task.id);
+			settleCheck(task, timedOut ? null : code, `${out}${err}`.trim(), timedOut ? `timed out after ${CHECK_TIMEOUT_MS / 1000}s` : undefined);
+		})
+		.catch(error => {
+			clearTimeout(timer);
+			checks.delete(task.id);
+			settleCheck(task, null, "", `could not read the check: ${error instanceof Error ? error.message : String(error)}`);
+		});
+}
+
+function enqueue(message: { bot?: string; text?: string; key?: string; origin?: string; check?: string; cwd?: string }) {
 	if (!message.bot || !roster().has(message.bot)) throw new Error(`no bot named ${message.bot}`);
 	if (!message.text?.trim()) throw new Error("empty task");
 	const isDown = down.get(message.bot);
 	if (isDown) throw new Error(`${message.bot} is down: ${isDown.reason} (omp-bot-ctl restart ${message.bot} to try again)`);
+	const check = message.check?.trim() || null;
+	const cwd = message.cwd?.trim() ? expand(message.cwd.trim()) : botCwd(message.bot);
+	if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error(`no such directory: ${cwd}`);
 	const id = Bun.randomUUIDv7();
 	const key = message.key || id;
-	q.insert.run({ id, bot: message.bot, key, text: message.text, origin: message.origin ?? null, now: Date.now() });
+	q.insert.run({ id, bot: message.bot, key, text: message.text, origin: message.origin ?? null, check, cwd, now: Date.now() });
 	const task = q.byKey.get({ key })!;
 	if (task.bot !== message.bot) throw new Error(`key ${key} already belongs to ${task.bot}`);
 	const created = task.id === id;
-	if (created) log(`enqueue ${task.id} for ${task.bot}${message.key ? ` key ${message.key}` : ""}`);
+	if (created) log(`enqueue ${task.id} for ${task.bot}${message.key ? ` key ${message.key}` : ""}${check ? ` (check: ${check})` : ""}`);
 	dispatch(task.bot);
 	return { id: task.id, created, state: task.state };
 }
 
 function replyToOrigin(id: string) {
 	const task = q.byId.get({ id });
-	if (!task?.origin?.startsWith("bot:") || (task.state !== "done" && task.state !== "failed")) return;
+	if (!task?.origin?.startsWith("bot:")) return;
+	if (task.state !== "done" && task.state !== "failed" && task.state !== "reported") return;
 	const to = task.origin.slice(4);
 	if (!roster().has(to)) return log(`reply ${id}: no bot named ${to}`);
-	const body = task.state === "done" ? String(task.result ?? "").trim() : `It failed: ${task.error}`;
-	q.ack.run({ id });
+	const body = task.state === "failed" ? `It failed: ${task.error}` : String(task.result ?? "").trim();
+	if (task.state === "done" || task.state === "failed") q.ack.run({ id });
 	enqueue({ bot: to, text: `Reply from ${task.bot} to your task ${id}:\n\n${body}`, key: `reply-${id}`, origin: `reply:${task.bot}` });
 }
 
@@ -492,16 +571,21 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 			if (self.link) self.link.idle = false;
 			return;
 		}
-		case "done": {
+		case "report": {
 			const link = self.link;
 			if (!link) return;
-			if (!q.finish.run({ id: message.id, token: String(message.token ?? ""), result: String(message.result ?? ""), now: Date.now() }).changes) return stale(socket, link, message);
-			q.silent.run({ id: message.id, silent: SILENT });
-			resumes.delete(message.id);
-			if (link.task === message.id) link.task = link.token = undefined;
-			log(`done ${message.id} by ${link.bot}`);
-			replyToOrigin(message.id);
-			return send(socket, { op: "ack", id: message.id });
+			const id = String(message.id);
+			const result = String(message.result ?? "");
+			const task = q.byId.get({ id });
+			const run = task?.check ? q.checkReport : q.report;
+			if (!run.run({ id, token: String(message.token ?? ""), result, now: Date.now() }).changes) return stale(socket, link, message);
+			if (!task?.check) q.silent.run({ id, silent: SILENT });
+			resumes.delete(id);
+			if (link.task === id) link.task = link.token = undefined;
+			log(`${task?.check ? "check" : "report"} ${id} by ${link.bot}`);
+			if (task?.check) startCheck(task);
+			else replyToOrigin(id);
+			return send(socket, { op: "ack", id });
 		}
 		case "fail": {
 			const link = self.link;
@@ -567,10 +651,15 @@ function handle(socket: Socket, message: any, self: { link?: Link }) {
 		case "status":
 			return send(socket, {
 				ok: true,
-				bots: [...roster()].map(bot => ({ bot, link: links.get(bot)?.mode ?? null, task: links.get(bot)?.task ?? null, headless: children.get(bot)?.proc.pid ?? null, down: down.get(bot) ?? null })),
+				bots: [...roster()].map(bot => ({ bot, link: links.get(bot)?.mode ?? null, task: links.get(bot)?.task ?? null, checking: q.checking.get({ bot })?.id ?? null, headless: children.get(bot)?.proc.pid ?? null, down: down.get(bot) ?? null })),
 			});
 		case "retire": {
 			const bot = message.bot;
+			for (const task of q.checking.all({ bot })) {
+				const proc = checks.get(task.id);
+				checks.delete(task.id);
+				if (proc) killCheck(proc);
+			}
 			q.retire.run({ bot, now: Date.now() });
 			claims.set(bot, { until: Number.POSITIVE_INFINITY, waiters: [] });
 			const link = links.get(bot);
@@ -658,6 +747,7 @@ const server = createServer(socket => {
 
 server.listen(SOCKET, () => {
 	log(`listening on ${SOCKET}`);
+	for (const task of q.checkingAll.all()) startCheck(task);
 	for (const { bot } of q.queuedBots.all()) ensureRunning(bot);
 	for (const task of q.held.all()) {
 		const saved = savedTask(task.bot);
@@ -672,6 +762,7 @@ server.listen(SOCKET, () => {
 
 function stop() {
 	server.close();
+	for (const proc of checks.values()) killCheck(proc);
 	for (const child of children.values()) killGroup(child.proc.pid);
 	for (const proc of summarisers.values()) killGroup(proc.pid);
 	db.close();

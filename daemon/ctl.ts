@@ -2,10 +2,11 @@ import { connect } from "node:net";
 import { SOCKET } from "./paths";
 
 const USAGE = `usage: omp-bot-ctl COMMAND
-  task BOT TEXT [--key KEY] [--origin ORIGIN]   queue a task; the same KEY never queues twice
+  task BOT TEXT [--key KEY] [--origin ORIGIN] [--check CMD] [--cwd DIR]
+                                                queue a task; the same KEY never queues twice
   tasks [--bot BOT] [--state STATE]             recent tasks
-  inbox                                         decisions waiting on you, and finished and failed tasks not yet acknowledged
-  ack ID                                        acknowledge an inbox task
+  inbox                                         decisions waiting on you, and reported, finished and failed tasks not yet acknowledged
+  ack ID                                        acknowledge an inbox task; a reported one becomes done
   approve|deny|handle ID [NOTE]                 answer a task waiting on your decision: approve, deny, or let its bot decide
   status [--json]                               which bots are connected, and how, and which are down and why
   restart BOT [--now]                           restart BOT once it is idle (--now: at once, retrying its task); a down BOT tries to start again
@@ -48,8 +49,9 @@ function flags(args: string[]): { rest: string[]; opts: Record<string, string> }
 function line(task: any): string {
 	const when = new Date(task.updated).toISOString().replace("T", " ").slice(0, 19);
 	const waiting = task.state === "waiting" ? (task.wait === "decision" ? " on your decision" : " on its jobs") : "";
-	const body = (task.state === "failed" ? task.error : task.wait === "decision" ? `${task.question}\n\n${task.result ?? ""}` : task.result ?? task.text) ?? "";
-	return `${task.id}  ${task.bot}  ${task.state}${waiting}  attempt ${task.attempts}  ${when}\n  ${String(body).trim().replace(/\n/g, "\n  ")}`;
+	const body = (task.state === "failed" || (task.state === "queued" && task.error) ? task.error : task.wait === "decision" ? `${task.question}\n\n${task.result ?? ""}` : task.result ?? task.text) ?? "";
+	const check = task.state === "checking" ? `\n  check: ${task.check}` : "";
+	return `${task.id}  ${task.bot}  ${task.state}${waiting}  attempt ${task.attempts}  ${when}${check}\n  ${String(body).trim().replace(/\n/g, "\n  ")}`;
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -58,7 +60,7 @@ try {
 	switch (command) {
 		case "task": {
 			if (rest.length < 2) throw new Error(USAGE);
-			const reply = await request({ op: "enqueue", bot: rest[0], text: rest.slice(1).join(" "), key: opts.key, origin: opts.origin });
+			const reply = await request({ op: "enqueue", bot: rest[0], text: rest.slice(1).join(" "), key: opts.key, origin: opts.origin, check: opts.check, cwd: opts.cwd });
 			console.log(`${reply.id} ${reply.created ? "queued" : `already ${reply.state}`}`);
 			break;
 		}
@@ -86,7 +88,7 @@ try {
 				console.log(JSON.stringify(bots));
 				break;
 			}
-			for (const bot of bots) console.log(`${bot.bot}  ${bot.down ? `down since ${new Date(bot.down.since).toISOString().replace("T", " ").slice(0, 19)}: ${bot.down.reason}` : bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : ""}`);
+			for (const bot of bots) console.log(`${bot.bot}  ${bot.down ? `down since ${new Date(bot.down.since).toISOString().replace("T", " ").slice(0, 19)}: ${bot.down.reason}` : bot.link ?? "asleep"}${bot.task ? `  working on ${bot.task}` : bot.checking ? `  checking ${bot.checking}` : ""}`);
 			break;
 		}
 		case "unretire":

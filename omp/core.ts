@@ -9,7 +9,7 @@ const RESUME_GRACE_MS = 30_000;
 const HEARTBEAT_MS = Number(process.env.OMP_BOT_HEARTBEAT_MS) || 30_000;
 const ANSWERS = { approve: "approved it", deny: "denied it", handle: "left the call to you: decide it yourself and go on" };
 
-type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; result?: string };
+type Task = { id: string; attempt: number; token: string; mode?: string; jobs: string[]; question?: string; result?: string; check?: string | null; error?: string | null };
 type Decision = { id: string; question: string | null; text: string };
 
 const CHOICES = [
@@ -26,6 +26,8 @@ function brief(text: string, max = 240): string {
 function prompt(task) {
 	const lines = [`[omp-bot task ${task.id}, attempt ${task.attempt}${task.origin ? `, from ${task.origin}` : ""}${task.answer ? ", your question answered" : ""}]`, "", task.text];
 	if (task.answer) lines.push("", `You asked the user: ${task.answer.question}`, `The user ${ANSWERS[task.answer.action] ?? task.answer.action}.${task.answer.note ? ` Their note: ${task.answer.note}` : ""}`);
+	if (task.check) lines.push("", `Your result is accepted only when this command exits 0: ${task.check}`);
+	if (task.error) lines.push("", `The last attempt did not pass: ${task.error}`);
 	if (task.attempt > 1) lines.push("", "An earlier attempt at this task was interrupted. Before acting, check what it already did, and don't repeat any change or message outside this conversation.");
 	return lines.join("\n");
 }
@@ -297,7 +299,7 @@ export default function core(pi) {
 			keep({ ...current, result });
 			return report({ op: "wait", wait: "jobs", result });
 		}
-		else report({ op: "done", result });
+		else report({ op: "report", result });
 		keep(undefined);
 	});
 }
