@@ -3,7 +3,7 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
-import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
+import { col, elapsed, node, row, span, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
@@ -44,6 +44,13 @@ const DOING = {
 };
 const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const OWNER = process.env.OMPD_OWNER || (process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : undefined);
+const TASK_MS = 3000;
+const TASK_GROUPS = [
+	["waiting", "Waiting on you", "waiting on you"],
+	["running", "Running", "running"],
+	["checking", "Checking", "checking"],
+	["open", "Open", "open"],
+];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
 const PENDING = Symbol("pending");
@@ -241,10 +248,14 @@ class Bot {
 		this.render();
 	}
 
-	away() {
-		const helpers = this.live.filter(isHelper).length;
-		const jobs = this.live.length - helpers;
-		return [helpers && `${helpers} helper${helpers === 1 ? "" : "s"}`, jobs && `${jobs} job${jobs === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
+	away(jobs = this.live) {
+		const helpers = jobs.filter(isHelper).length;
+		const commands = jobs.length - helpers;
+		return [helpers && `${helpers} helper${helpers === 1 ? "" : "s"}`, commands && `${commands} job${commands === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
+	}
+
+	loose() {
+		return this.away(this.live.filter(job => !job.task));
 	}
 
 	chao() {
@@ -326,9 +337,41 @@ class BotTop {
 	}
 }
 
+function ages(ms) {
+	const seconds = Math.max(0, Math.round(ms / 1000));
+	return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : seconds < 86_400 ? `${Math.floor(seconds / 3600)}h` : `${Math.floor(seconds / 86_400)}d`;
+}
+
+function taskDetail(task, live) {
+	if (task.state === "waiting") return task.question ?? "needs your answer";
+	if (task.state === "running") {
+		const jobs = live.filter(job => job.task === task.id);
+		const helpers = jobs.filter(isHelper).length;
+		const count = helpers || jobs.length || task.jobs.length;
+		return `${ages(Date.now() - task.updated)} · ${count} ${helpers ? "helper" : "job"}${count === 1 ? "" : "s"}`;
+	}
+	if (task.state === "checking") return task.check ?? "checking";
+	if (task.note) return task.note;
+	if (task.checked) return `check failed, exit ${task.checked.code ?? "-"}, ${ages(Date.now() - task.checked.at)} ago`;
+	return "not started";
+}
+
+function taskStatus(task) {
+	if (task.state === "waiting") return "blocked";
+	if (task.state === "running" || task.state === "checking") return "active";
+	return task.checked ? "blocked" : "pending";
+}
+
 class BotStatus {
 	constructor(bot) {
 		this.bot = bot;
+		this.open = [];
+		this.flash = [];
+		this.busy = false;
+		this.again = false;
+		this.version = 0;
+		this.stamp = -1;
+		this.node = NONE;
 	}
 
 	handleNativeEvent(event) {
@@ -341,14 +384,91 @@ class BotStatus {
 		return [];
 	}
 
+	start() {
+		this.poll();
+	}
+
+	poll() {
+		if (!OWNER) return;
+		this.bot.after("tasks", TASK_MS, () => this.poll());
+		if (this.busy) {
+			this.again = true;
+			return;
+		}
+		this.busy = true;
+		request({ op: "task-list", owner: OWNER }).then(
+			reply => {
+				this.busy = false;
+				this.take(reply?.tasks);
+			},
+			() => {
+				this.busy = false;
+			},
+		);
+	}
+
+	take(tasks) {
+		if (!Array.isArray(tasks)) return;
+		const mine = tasks.filter(task => task?.owner === OWNER);
+		const open = mine.filter(task => task.state !== "done" && task.state !== "dropped");
+		const flash = [...this.flash];
+		for (const task of this.open) {
+			if (open.some(next => next.id === task.id)) continue;
+			const ended = mine.find(next => next.id === task.id && (next.state === "done" || next.state === "dropped"));
+			if (ended && !flash.some(next => next.id === ended.id)) flash.push(ended);
+		}
+		this.open = open;
+		this.flash = flash;
+		this.version += 1;
+		this.bot.render();
+		if (this.again) {
+			this.again = false;
+			this.poll();
+		}
+	}
+
+	clearFlash() {
+		if (this.flash.length === 0) return;
+		this.flash = [];
+		this.version += 1;
+		this.bot.render();
+	}
+
+	counts() {
+		return TASK_GROUPS.map(([state, , label]) => {
+			const count = this.open.filter(task => task.state === state).length;
+			return count > 0 ? `${count} ${label}` : undefined;
+		})
+			.filter(Boolean)
+			.join(" · ");
+	}
+
+	card() {
+		const groups = TASK_GROUPS.map(([state, title]) => ({ state, title, tasks: this.open.filter(task => task.state === state) })).filter(group => group.tasks.length > 0);
+		if (groups.length === 0 && this.flash.length === 0) return NONE;
+		if (this.stamp === this.version) return this.node;
+		this.stamp = this.version;
+		const phases = groups.map(group => ({
+			id: group.state,
+			title: group.title,
+			items: group.tasks.map(task => ({ id: task.id, text: [span(task.title), span(` — ${taskDetail(task, this.bot.live)}`, "muted")], status: taskStatus(task) })),
+		}));
+		if (this.flash.length > 0) phases.push({ id: "done", title: "Done", collapsed: false, items: this.flash.map(task => ({ id: task.id, text: [span(task.title)], status: task.state })) });
+		this.node = node("card", { role: "omp.bot.tasks", head: [span("Tasks", "muted")] }, [node("checklist", { mode: "full", phases }, [], "tasks")]);
+		return this.node;
+	}
+
 	describe() {
 		const b = this.bot;
-		const away = b.away();
+		const counts = this.counts();
+		const loose = b.loose();
+		const away = [counts, loose].filter(Boolean).join(" · ");
 		const failed = !b.active && b.mood === "error";
 		if (!b.active && !b.boop && !failed && !away) return NONE;
 		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
 		const busy = !b.boop && !asking && !failed;
-		const status = b.boop ?? (b.active || failed ? b.line : `Waiting on ${away}`);
+		const status = b.boop ?? (b.active || failed ? b.line : counts || `Waiting on ${loose}`);
+		const side = b.active ? (counts ? away : loose ? `${loose} running` : undefined) : counts && loose ? loose : undefined;
 		return row(
 			[
 				b.active || b.boop || failed ? b.chao() : drawChao(b.look, "waiting"),
@@ -361,10 +481,26 @@ class BotStatus {
 						})
 					: text(status, { role: "omp.bot.say", wrap: "none", tone: asking ? "accent" : failed ? "error" : undefined }),
 				b.active ? node("row", { role: "omp.bot.took" }, [elapsed(Date.now() - b.turnStart)]) : undefined,
-				b.active && away ? text(`${away} running`, { role: "omp.bot.away", wrap: "none", tone: "muted" }) : undefined,
+				side ? text(side, { role: "omp.bot.away", wrap: "none", tone: "muted" }) : undefined,
 			].filter(Boolean),
 			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "sm" },
 		);
+	}
+}
+
+class BotTasks {
+	constructor(status) {
+		this.status = status;
+	}
+
+	invalidate() {}
+
+	render() {
+		return [];
+	}
+
+	describe() {
+		return this.status.card();
 	}
 }
 
@@ -831,7 +967,7 @@ function patchTranscript(state) {
 			previous = item;
 			shownBlocks.push(item);
 		}
-		if (!s.bot.hero) shownBlocks.push(s.status);
+		if (!s.bot.hero) shownBlocks.push(s.tasks, s.status);
 		const before = shownBy.get(this);
 		if (before && same(before, shownBlocks)) return before;
 		shownBy.set(this, shownBlocks);
@@ -885,8 +1021,10 @@ export default function ompBot(pi) {
 		bot,
 		top: undefined,
 		status: new BotStatus(bot),
+		tasks: undefined,
 		clock: undefined,
 	};
+	state.tasks = new BotTasks(state.status);
 	let ui;
 	let abort;
 	let unlisten;
@@ -942,13 +1080,21 @@ export default function ompBot(pi) {
 				)
 			: [];
 		bot.tally(jobs.filter(job => job.state === "queued" || job.state === "running"));
+		state.status.start();
 	}
 
 	pi.events.on("ompd:background", ({ id }) => {
 		const job = load(id);
 		if (job) bot.tally([...bot.live.filter(live => live.id !== id), job]);
+		state.status.poll();
 	});
-	pi.events.on("ompd:ended", ({ id }) => bot.tally(bot.live.filter(live => live.id !== id)));
+	pi.events.on("ompd:ended", ({ id }) => {
+		bot.tally(bot.live.filter(live => live.id !== id));
+		state.status.poll();
+	});
+	pi.events.on("ompd:task", event => {
+		if (event?.task?.owner === OWNER) state.status.poll();
+	});
 
 	pi.on("session_start", begin);
 	pi.on("session_switch", begin);
@@ -990,6 +1136,7 @@ export default function ompBot(pi) {
 		bot.cancel("nap");
 		bot.turnStart = bot.submitted || Date.now();
 		bot.submitted = 0;
+		state.status.clearFlash();
 		bot.active = true;
 		bot.stopped = false;
 		bot.running.clear();
