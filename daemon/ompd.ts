@@ -1,7 +1,8 @@
 import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { ROOT, STATE } from "./paths";
+import { ROOT, SOCKET as BOTD, STATE } from "./paths";
+import { TASKS, type Task, final, loadTask, taskState } from "./tasks";
 
 export const V = 1;
 export const JOBS = join(STATE, "jobs");
@@ -22,6 +23,8 @@ export type Job = {
 	id: string;
 	owner: string;
 	tool: string | null;
+	task?: string | null;
+	check?: boolean;
 	command: string;
 	cwd: string;
 	timeout: number;
@@ -132,6 +135,8 @@ function serve() {
 	const jobs = new Map<string, Job>();
 	const watchers = new Map<string, Set<Socket>>();
 	const envs = new Map<string, Record<string, string>>();
+	const tasks = new Map<string, Task>();
+	const taskEnvs = new Map<string, Record<string, string>>();
 
 	function log(line: string) {
 		console.log(`${new Date().toISOString()} ${line}`);
@@ -141,6 +146,90 @@ function serve() {
 		const file = join(dir(job.id), "job.json");
 		writeFileSync(`${file}.tmp`, JSON.stringify(job, null, "\t"), { mode: 0o600 });
 		renameSync(`${file}.tmp`, file);
+	}
+
+	function taskDir(id: string): string {
+		return join(TASKS, id);
+	}
+
+	function saveTask(task: Task) {
+		const file = join(taskDir(task.id), "task.json");
+		writeFileSync(`${file}.tmp`, JSON.stringify(task, null, "\t"), { mode: 0o600 });
+		renameSync(`${file}.tmp`, file);
+	}
+
+	function liveJob(id: string): boolean {
+		const job = jobs.get(id);
+		return !!job && (job.state === "queued" || job.state === "running");
+	}
+
+	function recompute(task: Task, touch = true) {
+		task.state = taskState(task, liveJob);
+		if (touch) task.updated = Date.now();
+		saveTask(task);
+	}
+
+	function taskLog(task: Task): string | null {
+		return task.checked ? join(dir(task.checked.job), "log") : null;
+	}
+
+	function notifyTask(task: Task) {
+		if (task.seq <= task.acked) return;
+		const event = JSON.stringify({ event: "task", task, log: taskLog(task) });
+		for (const socket of watchers.get(task.owner) ?? []) if (!socket.destroyed) socket.write(`${event}\n`);
+	}
+
+	function changed(task: Task) {
+		task.seq += 1;
+		recompute(task);
+		notifyTask(task);
+	}
+
+	function findTask(id: string): Task {
+		const matches = [...tasks.values()].filter(task => task.id.startsWith(String(id ?? "")));
+		if (matches.length !== 1) throw new Error(matches.length ? `task ${id} is ambiguous` : `no task ${id}`);
+		return matches[0];
+	}
+
+	function storedTaskEnv(id: string): Record<string, string> {
+		try {
+			return JSON.parse(readFileSync(join(taskDir(id), "env.json"), "utf8"));
+		} catch {
+			throw new Error("its task's environment was not kept");
+		}
+	}
+
+	function startCheck(task: Task) {
+		run({ owner: `task:${task.id}`, command: task.check, cwd: task.cwd, timeout: task.checkTimeout, env: taskEnvs.get(task.id) ?? storedTaskEnv(task.id), task: task.id, check: true });
+	}
+
+	function unhold(task: Task) {
+		for (const id of task.jobs) {
+			const job = jobs.get(id);
+			if (job && !job.delivered && (job.state === "done" || job.state === "lost")) deliver(job);
+		}
+	}
+
+	function settleCheck(task: Task, job: { id: string; code: number | null; reason: string | null }) {
+		task.checkJob = null;
+		if (task.dropped !== null) return recompute(task);
+		task.checked = { job: job.id, code: job.code, reason: job.reason, at: Date.now() };
+		changed(task);
+		unhold(task);
+	}
+
+	function jobEnded(job: Job) {
+		const task = job.task ? tasks.get(job.task) : undefined;
+		if (!task) return;
+		recompute(task);
+		if (!final(task) && task.check !== null && task.checkJob === null && !task.jobs.some(liveJob)) startCheck(task);
+	}
+
+	function stop(id: string, reason: string) {
+		const job = jobs.get(id);
+		if (!job || (job.state !== "queued" && job.state !== "running")) return;
+		if (job.state === "queued") finish(job, { state: "done", code: null, reason });
+		else kill(job, reason);
 	}
 
 	function pid(job: Job): number | undefined {
@@ -239,8 +328,11 @@ function serve() {
 
 	function deliver(job: Job) {
 		if (job.delivered) return;
+		const task = job.task ? tasks.get(job.task) : undefined;
+		if (task && (task.state === "running" || task.state === "checking")) return;
 		const { env: _env, ...shown } = job as Job & { env?: unknown };
-		for (const socket of watchers.get(job.owner) ?? []) if (!socket.destroyed) socket.write(`${JSON.stringify({ event: "ended", job: shown })}\n`);
+		const message = task ? { event: "ended", job: shown, task } : { event: "ended", job: shown };
+		for (const socket of watchers.get(job.owner) ?? []) if (!socket.destroyed) socket.write(`${JSON.stringify(message)}\n`);
 	}
 
 	function monitor(job: Job) {
@@ -287,6 +379,10 @@ function serve() {
 		envs.delete(job.id);
 		rmQuiet(join(dir(job.id), "env.json"));
 		log(`${job.state} ${job.id} code ${job.code}${job.reason ? `: ${job.reason}` : ""}`);
+		if (job.check) {
+			const task = job.task ? tasks.get(job.task) : undefined;
+			if (task) settleCheck(task, job);
+		} else if (job.task) jobEnded(job);
 		deliver(job);
 		dispatch();
 	}
@@ -311,6 +407,7 @@ function serve() {
 		const before = Date.now() - KEEP_MS;
 		let pruned = 0;
 		let swept = 0;
+		let cleaned = 0;
 		for (const job of jobs.values()) {
 			if (job.state === "running") continue;
 			trimHelperLog(job);
@@ -325,7 +422,15 @@ function serve() {
 			jobs.delete(job.id);
 			pruned++;
 		}
+		for (const task of tasks.values()) {
+			if (!final(task) || task.updated > before || task.seq > task.acked) continue;
+			rmSync(taskDir(task.id), { recursive: true, force: true });
+			tasks.delete(task.id);
+			taskEnvs.delete(task.id);
+			cleaned++;
+		}
 		if (pruned || swept) log(`pruned ${pruned} delivered jobs that ended over ${KEEP_MS / 86_400_000} days ago, removed ${swept} empty job cgroups`);
+		if (cleaned) log(`pruned ${cleaned} finished tasks untouched for ${KEEP_MS / 86_400_000} days`);
 	}
 
 	function start(job: Job) {
@@ -413,6 +518,9 @@ function serve() {
 		const command = String(message.command ?? "");
 		if (!owner) throw new Error("run needs an owner");
 		if (!command.trim()) throw new Error("run needs a command");
+		const task = message.task ? findTask(String(message.task)) : undefined;
+		if (task && final(task)) throw new Error(`task ${task.id} is already ${task.state}`);
+		const checking = message.check === true;
 		const tool = message.tool ? String(message.tool) : null;
 		if (tool) {
 			const existing = [...jobs.values()].find(job => job.owner === owner && job.tool === tool);
@@ -446,7 +554,9 @@ function serve() {
 			ended: null,
 			code: null,
 			reason: null,
-			delivered: false,
+			delivered: checking,
+			task: task ? task.id : null,
+			...(checking ? { check: true } : {}),
 			monitor: filter === null ? null : { filter, seen: 0, last: "", sent: 0 },
 		};
 		mkdirSync(dir(job.id), { recursive: true, mode: 0o700 });
@@ -454,6 +564,11 @@ function serve() {
 		save(job);
 		jobs.set(job.id, job);
 		envs.set(job.id, env);
+		if (task) {
+			if (checking) task.checkJob = job.id;
+			else task.jobs.push(job.id);
+			recompute(task);
+		}
 		log(`queue ${job.id} for ${owner}${tool ? ` call ${tool}` : ""}`);
 		dispatch();
 		if (job.state === "queued" || (job.state === "running" && job.rerunnable)) writeFileSync(join(dir(job.id), "env.json"), JSON.stringify(safeEnv(env)), { mode: 0o600 });
@@ -490,6 +605,103 @@ function serve() {
 				}
 				return reply({ job });
 			}
+			case "task-add": {
+				const title = String(message.title ?? "").trim();
+				if (!title) throw new Error("task-add needs a title");
+				const check = String(message.check ?? "").trim() || null;
+				const question = String(message.question ?? "").trim() || null;
+				if (!check && !question) throw new Error("a task needs a check command, or a question for the user");
+				const owner = String(message.owner ?? "");
+				if (!owner) throw new Error("task-add needs an owner");
+				const id = Bun.randomUUIDv7();
+				const now = Date.now();
+				const env = safeEnv({ ...message.env });
+				const task: Task = {
+					v: V,
+					id,
+					owner,
+					title,
+					check,
+					cwd: String(message.cwd ?? process.cwd()),
+					checkTimeout: Math.max(0, Number(message.checkTimeout) || 1800),
+					note: String(message.note ?? "").trim() || null,
+					jobs: [],
+					checkJob: null,
+					checked: null,
+					question,
+					answer: null,
+					dropped: null,
+					state: "open",
+					seq: 0,
+					acked: 0,
+					created: now,
+					updated: now,
+				};
+				mkdirSync(taskDir(id), { recursive: true, mode: 0o700 });
+				writeFileSync(join(taskDir(id), "env.json"), JSON.stringify(env), { mode: 0o600 });
+				tasks.set(id, task);
+				taskEnvs.set(id, env);
+				recompute(task);
+				log(`task ${id} for ${owner}: ${title}`);
+				return reply({ task });
+			}
+			case "task-list":
+				return reply({ tasks: [...tasks.values()].filter(task => !message.owner || task.owner === message.owner).sort((a, b) => a.created - b.created) });
+			case "task-get":
+				return reply({ task: findTask(message.id) });
+			case "task-ask": {
+				const task = findTask(message.id);
+				if (final(task)) throw new Error(`task ${task.id} is already ${task.state}`);
+				const question = String(message.question ?? "").trim();
+				if (!question) throw new Error("task-ask needs a question");
+				task.question = question;
+				changed(task);
+				return reply({ task });
+			}
+			case "task-answer": {
+				const task = findTask(message.id);
+				if (task.question === null) throw new Error(`task ${task.id} has no pending question`);
+				if (task.check === null && task.answer !== null) throw new Error(`task ${task.id} was already answered`);
+				task.answer = String(message.answer ?? "");
+				task.question = null;
+				changed(task);
+				return reply({ task });
+			}
+			case "task-note": {
+				const task = findTask(message.id);
+				task.note = String(message.note ?? "").trim() || null;
+				recompute(task);
+				return reply({ task });
+			}
+			case "task-check": {
+				const task = findTask(message.id);
+				if (final(task)) throw new Error(`task ${task.id} is already ${task.state}`);
+				if (!task.check) throw new Error(`task ${task.id} has no check command`);
+				if (task.checkJob === null) startCheck(task);
+				return reply({ task });
+			}
+			case "task-drop": {
+				const task = findTask(message.id);
+				const reason = String(message.reason ?? "").trim();
+				if (!reason) throw new Error("task-drop needs a reason");
+				if (final(task)) throw new Error(`task ${task.id} is already ${task.state}`);
+				const held = task.jobs.flatMap(id => {
+					const job = jobs.get(id);
+					return job && !job.delivered && (job.state === "done" || job.state === "lost") ? [job] : [];
+				});
+				task.dropped = reason;
+				changed(task);
+				for (const id of task.jobs) stop(id, "its task was dropped");
+				if (task.checkJob) stop(task.checkJob, "its task was dropped");
+				for (const job of held) deliver(job);
+				return reply({ task });
+			}
+			case "task-ack": {
+				const task = findTask(message.id);
+				task.acked = Math.max(task.acked, Number(message.seq) || 0);
+				saveTask(task);
+				return reply({ task });
+			}
 			case "watch": {
 				const owner = String(message.owner ?? "");
 				if (!watchers.has(owner)) watchers.set(owner, new Set());
@@ -497,6 +709,7 @@ function serve() {
 				socket.on("close", () => watchers.get(owner)?.delete(socket));
 				reply({ watching: owner });
 				for (const job of jobs.values()) if (job.owner === owner && !job.delivered && (job.state === "done" || job.state === "lost")) deliver(job);
+				for (const task of tasks.values()) if (task.owner === owner) notifyTask(task);
 				return;
 			}
 			default:
@@ -515,6 +728,21 @@ function serve() {
 		jobs.set(id, job);
 		scrubEnv(job);
 		if (job.state === "running") log(alive(job) ? `reattach ${id}` : `found ${id} not running`);
+	}
+	mkdirSync(TASKS, { recursive: true, mode: 0o700 });
+	for (const id of readdirSync(TASKS)) {
+		const task = loadTask(id);
+		if (!task) continue;
+		if (task.v !== V) {
+			log(`skip task ${id}: written by ompd version ${task.v}, not replayed`);
+			continue;
+		}
+		tasks.set(id, task);
+		recompute(task, false);
+		if (task.checkJob === null) continue;
+		const job = jobs.get(task.checkJob);
+		if (!job) settleCheck(task, { id: task.checkJob, code: null, reason: "its check job is gone" });
+		else if (job.state === "done" || job.state === "lost") settleCheck(task, job);
 	}
 	prune();
 	if (existsSync(SOCKET)) unlinkSync(SOCKET);
@@ -552,15 +780,75 @@ function serve() {
 
 const USAGE = `usage: ompd COMMAND
   serve                                  run the daemon (bin/ompd serve takes its lock)
-  run [--owner O] [--timeout S] [--rerunnable] [--monitor REGEX] -- CMD
+  run [--owner O] [--task ID] [--timeout S] [--rerunnable] [--monitor REGEX] -- CMD
                                          start CMD as a job and print its id
   jobs [--owner O]                       list jobs
   show ID                                a job's record and log path
-  kill ID                                kill a job's processes`;
+  kill ID                                kill a job's processes
+  task add --title T [--check CMD] [--cwd DIR] [--check-timeout S] [--note N] [--ask Q] [--owner O]
+                                         add a task and print its id
+  tasks [--owner O] [--all] [--json]     list tasks
+  task show ID                           a task's record as JSON
+  task ask ID QUESTION                   ask the user a question about it
+  task answer ID TEXT                    record the user's answer
+  task note ID TEXT                      say why an open task is idle
+  task check ID                          run its check now
+  task drop ID REASON                    drop it and kill its jobs`;
 
 function line(job: Job): string {
 	const took = job.started ? `${Math.round(((job.ended ?? Date.now()) - job.started) / 1000)}s` : "-";
 	return `${job.id}  ${job.state}${job.code !== null ? ` ${job.code}` : ""}  ${took}  ${job.owner}  ${job.command.replace(/\s+/g, " ").slice(0, 80)}${job.reason ? `\n  ${job.reason}` : ""}`;
+}
+
+function age(ms: number): string {
+	const seconds = Math.max(0, Math.round(ms / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+	if (seconds < 86_400) return `${Math.round(seconds / 3600)}h`;
+	return `${Math.round(seconds / 86_400)}d`;
+}
+
+function taskLine(task: Task): string {
+	return `${task.id.slice(0, 8)}  ${task.state}  ${age(Date.now() - task.created)}  ${task.owner}  ${task.title}`;
+}
+
+function taskDetails(task: Task, running: number): string[] {
+	const lines: string[] = [];
+	if (task.check) lines.push(`  check: ${task.check}`);
+	if (task.checked) lines.push(`  last check: exit ${task.checked.code ?? "-"} ${age(Date.now() - task.checked.at)} ago (log ${join(dir(task.checked.job), "log")})`);
+	if (task.question) lines.push(`  question: ${task.question}`);
+	if (task.answer) lines.push(`  answer: ${task.answer}`);
+	if (task.note) lines.push(`  note: ${task.note}`);
+	if (task.dropped) lines.push(`  dropped: ${task.dropped}`);
+	if (running) lines.push(`  jobs: ${running} running`);
+	return lines;
+}
+
+async function userOnly(): Promise<void> {
+	const refuse = () => new Error("only the user can answer or drop a task: do it in a turn the user started by typing to you, relaying their words");
+	if (process.env.OMP_BOT_HELPER) throw new Error("only the user can answer or drop a task; ask your parent");
+	const bot = process.env.OMP_BOT_NAME;
+	if (!bot) return;
+	const live = await new Promise<boolean>((resolve, reject) => {
+		const socket = connect(BOTD);
+		let buffer = "";
+		socket.setEncoding("utf8");
+		socket.setTimeout(5000, () => socket.destroy(new Error("botd did not answer")));
+		socket.on("connect", () => socket.write(`${JSON.stringify({ op: "live-check", bot })}\n`));
+		socket.on("data", chunk => {
+			buffer += chunk;
+			if (!buffer.includes("\n")) return;
+			socket.end();
+			try {
+				const reply = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
+				resolve(reply.ok === true && reply.live === true);
+			} catch (error) {
+				reject(error);
+			}
+		});
+		socket.on("error", reject);
+	}).catch(() => false);
+	if (!live) throw refuse();
 }
 
 if (import.meta.main) {
@@ -569,6 +857,7 @@ if (import.meta.main) {
 		const at = args.indexOf(`--${name}`);
 		return at >= 0 ? args[at + 1] : undefined;
 	};
+	const owner = (name: string) => opt(name) || process.env.OMPD_OWNER || (process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : `cli:${process.env.USER ?? "user"}`);
 	try {
 		switch (command) {
 			case "serve":
@@ -578,7 +867,7 @@ if (import.meta.main) {
 				const at = args.indexOf("--");
 				if (at < 0 || at === args.length - 1) throw new Error(USAGE);
 				const monitor = args.indexOf("--monitor");
-				const reply = await request({ op: "run", owner: opt("owner") ?? `cli:${process.env.USER ?? "user"}`, command: args.slice(at + 1).join(" "), cwd: process.cwd(), env: process.env, timeout: Number(opt("timeout")) || 0, rerunnable: args.slice(0, at).includes("--rerunnable"), monitor: monitor < 0 ? undefined : args[monitor + 1] && args[monitor + 1] !== "--" ? args[monitor + 1] : "" });
+				const reply = await request({ op: "run", owner: owner("owner"), task: opt("task"), command: args.slice(at + 1).join(" "), cwd: process.cwd(), env: process.env, timeout: Number(opt("timeout")) || 0, rerunnable: args.slice(0, at).includes("--rerunnable"), monitor: monitor < 0 ? undefined : args[monitor + 1] && args[monitor + 1] !== "--" ? args[monitor + 1] : "" });
 				console.log(reply.job.id);
 				break;
 			}
@@ -595,6 +884,59 @@ if (import.meta.main) {
 				if (!args[0]) throw new Error(USAGE);
 				console.log(line((await request({ op: "kill", id: args[0] })).job));
 				break;
+			case "task": {
+				const [sub, ...rest] = args;
+				const id = rest[0];
+				const text = rest.slice(1).join(" ").trim();
+				if (sub === "add") {
+					const reply = await request({ op: "task-add", owner: owner("owner"), title: opt("title"), check: opt("check"), cwd: opt("cwd"), checkTimeout: opt("check-timeout"), note: opt("note"), question: opt("ask"), env: process.env });
+					console.log(reply.task.id);
+					break;
+				}
+				if (!id) throw new Error(USAGE);
+				switch (sub) {
+					case "show": {
+						const { task } = await request({ op: "task-get", id });
+						console.log(JSON.stringify(task, null, 2));
+						break;
+					}
+					case "ask":
+						if (!text) throw new Error(USAGE);
+						console.log(taskLine((await request({ op: "task-ask", id, question: text })).task));
+						break;
+					case "answer":
+						await userOnly();
+						console.log(taskLine((await request({ op: "task-answer", id, answer: text })).task));
+						break;
+					case "note":
+						console.log(taskLine((await request({ op: "task-note", id, note: text })).task));
+						break;
+					case "check":
+						console.log(taskLine((await request({ op: "task-check", id })).task));
+						break;
+					case "drop":
+						if (!text) throw new Error(USAGE);
+						await userOnly();
+						console.log(taskLine((await request({ op: "task-drop", id, reason: text })).task));
+						break;
+					default:
+						throw new Error(USAGE);
+				}
+				break;
+			}
+			case "tasks": {
+				const { tasks } = await request({ op: "task-list", owner: owner("owner") });
+				const rows = args.includes("--all") ? tasks : tasks.filter((task: Task) => !final(task));
+				if (args.includes("--json")) {
+					console.log(JSON.stringify(rows, null, 2));
+					break;
+				}
+				const { jobs } = await request({ op: "list" });
+				const running = new Map<string, number>();
+				for (const job of jobs) if (job.task && (job.state === "queued" || job.state === "running")) running.set(job.task, (running.get(job.task) ?? 0) + 1);
+				for (const task of rows) console.log([taskLine(task), ...taskDetails(task, running.get(task.id) ?? 0)].join("\n"));
+				break;
+			}
 			default:
 				throw new Error(USAGE);
 		}
