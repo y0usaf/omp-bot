@@ -9,7 +9,6 @@ state=$OMP_BOT_STATE
 dir=$state/bots/$name
 tag=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._-')
 cache=$HOME/.cache/omp-bot/box
-sock=$cache/run/$tag.sock
 ssh=(ssh -F "$OMP_BOT_BOX_SSH_CONFIG")
 why=$("$root/bin/omp-bot-health") || { echo "omp-bot-box: $name can't start because its box is down: $why" >&2; exit 1; }
 
@@ -51,8 +50,8 @@ fi
 fwd=()
 for k in $(compgen -e); do
 	case $k in
-	OMP_BOT_BOX_* | OMP_BOT_PERSIST* | OMP_BOT_SOCKET | OMP_BOT_PID | OMP_BOT_REAL_GIT) ;;
-	OMP_BOT_* | OMPD_* | OPTCHAT_* | PI_* | TERM | TERM_PROGRAM | TERM_PROGRAM_VERSION | COLORTERM | LANG | LC_*) fwd+=("$k") ;;
+	OMP_BOT_BOX_* | OMP_BOT_PERSIST*) ;;
+	OMP_BOT_* | OPTCHAT_* | PI_* | TERM | TERM_PROGRAM | TERM_PROGRAM_VERSION | COLORTERM | LANG | LC_*) fwd+=("$k") ;;
 	esac
 done
 declare -A tops=()
@@ -73,13 +72,13 @@ for a in "$@"; do scan "$a"; done
 for k in "${fwd[@]}"; do scan "${!k}"; done
 
 # Make the box's state folder the bot's own (a share mounted with sudo leaves root-owned parents), hand it
-# the roster, clear a stale botd socket, and learn which store paths the box lacks. A store path one of the links
+# the roster, and learn which store paths the box lacks. A store path one of the links
 # in OMP_BOT_BOX_EXT (finix's seed share: NAME -> a copy of a store path, the names the box's own omp config
 # loads its extensions by) points at is named by that link, so the bot and the box name an extension alike and
 # omp loads it once; one neither there nor in the box's store is copied.
 prelude='set -euo pipefail
-state=$1 dir=$2 cache=$3 sock=$4 root=$5 ext=$6
-shift 6
+state=$1 dir=$2 cache=$3 root=$4 ext=$5
+shift 5
 own() {
 	local p=$1 chain=()
 	while [ "$p" != "$HOME" ] && [ "$p" != / ]; do chain=("$p" "${chain[@]}"); p=$(dirname "$p"); done
@@ -90,10 +89,8 @@ own() {
 }
 own "$state/bots"
 own "$cache/store"
-own "$cache/run"
 mountpoint -q "$dir" || { echo "omp-bot-box: $dir is not shared into the box (omp-box list)" >&2; exit 1; }
 case $root in /nix/store/*) ;; *) [ -e "$root" ] || { echo "omp-bot-box: $root is not in the box; share it with omp-box add" >&2; exit 1; } ;; esac
-rm -f "$sock"
 cat >"$state/bots.json.tmp"
 mv -f "$state/bots.json.tmp" "$state/bots.json"
 declare -A named=()
@@ -112,7 +109,7 @@ declare -A instore=() named=()
 missing=()
 while read -r kind t link; do
 	case $kind in store) instore[$t]=1 ;; named) named[$t]=$link ;; copy) missing+=("$t") ;; esac
-done < <("${ssh[@]}" -T box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$state" "$dir" "$cache" "$sock" "$root" "${OMP_BOT_BOX_EXT:-}" "${!tops[@]}")" <"$state/bots.json")
+done < <("${ssh[@]}" -T box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$state" "$dir" "$cache" "$root" "${OMP_BOT_BOX_EXT:-}" "${!tops[@]}")" <"$state/bots.json")
 if [ ${#missing[@]} -gt 0 ]; then
 	sync='set -euo pipefail
 t=$(mktemp -d "$1/.in.XXXXXX")
@@ -137,11 +134,11 @@ map() {
 
 cwd=${OMP_BOT_BOX_CWD:-$HOME}
 tools=$(map "$root")/tools/$name/bin
-cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export OMP_BOT_REAL_GIT=\"\$(command -v git)\" && export PATH=$(printf %q "$(map "$root")/git:$tools:$(map "$root")/bin${OMP_BOT_BOX_PATH:+:$OMP_BOT_BOX_PATH}"):\"\$PATH\" && exec env"
+cmd="{ cd $(printf %q "$cwd") 2>/dev/null || { mkdir -p $(printf %q "$cwd") && cd $(printf %q "$cwd"); }; } && export PATH=$(printf %q "$tools:$(map "$root")/bin${OMP_BOT_BOX_PATH:+:$OMP_BOT_BOX_PATH}"):\"\$PATH\" && exec env"
 for k in "${fwd[@]}"; do cmd+=" $(printf %q "$k=$(map "${!k}")")"; done
 # A boxed bot keeps its secrets in its own folder, which the box shares, encrypted with a key of its own there.
-cmd+=" $(printf %q "OMP_SECRETS_DIR=$dir/secrets") $(printf %q "OMP_BOT_SOCKET=$sock") OMP_BOT_BOXED=1 OMP_BOT_PID=$$ omp"
+cmd+=" $(printf %q "OMP_SECRETS_DIR=$dir/secrets") OMP_BOT_BOXED=1 omp"
 for a in "$@"; do cmd+=" $(printf %q "$(map "$a")")"; done
 tty=-T
 [ -t 0 ] && [ -t 1 ] && tty=-t
-exec "${ssh[@]}" "$tty" -o ExitOnForwardFailure=yes -R "$sock:${OMP_BOT_SOCKET:-$state/botd.sock}" box "$cmd"
+exec "${ssh[@]}" "$tty" box "$cmd"

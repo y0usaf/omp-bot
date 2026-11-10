@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-usage="usage: omp-bot NAME [--headless | --create TINT] [omp args...]"
+usage="usage: omp-bot NAME [--create TINT] [omp args...]"
 [ $# -ge 1 ] || { echo "$usage" >&2; exit 2; }
 root=$(cd -P "$(dirname "$0")/.." && pwd)
 name=$1
@@ -9,10 +9,8 @@ case $name in
 "" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, space, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
 esac
 [ ${#name} -le 40 ] || { echo "omp-bot: bot name longer than 40 characters" >&2; exit 2; }
-headless=0
 tint=
 case ${1:-} in
---headless) headless=1; shift ;;
 --create) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; tint=$2; shift 2 ;;
 esac
 config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
@@ -55,8 +53,7 @@ else
 	cd "${cwd:-$HOME}"
 fi
 export OMP_BOT_NAME="$name" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
-export OMP_BOT_REAL_GIT="$(command -v git)"
-export PATH="$root/git:$root/tools/$name/bin:$PATH"
+export PATH="$root/tools/$name/bin:$PATH"
 persona=$(field persona)
 [ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
@@ -71,7 +68,9 @@ model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
 [ ! -f "$dir/config.yml" ] || set -- --config "$dir/config.yml" "$@"
 memory=$(field memory)
-case ${memory:-optchat} in
+memory=${memory:-optchat}
+export OMP_BOT_MEMORY="$memory"
+case $memory in
 optchat)
 	[ -n "${OMP_BOT_OPTCHAT:-}" ] || { echo "omp-bot: $name keeps OptChat memory but OMP_BOT_OPTCHAT, OptChat's directory, is unset; set it, or \"memory\": \"none\" on the bot" >&2; exit 1; }
 	mkdir -p "$dir/optchat"
@@ -81,50 +80,31 @@ optchat)
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/code-mode.ts" -e "$root/omp/core.ts" -e "${OMP_BOT_OMPD_EXTENSION:-$root/omp/ompd.ts}" -e "$root/omp/helpers.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
-if [ "$headless" = 1 ]; then
-	export OMP_BOT_HEADLESS=1
-	exec flock -n -E 75 -o "$dir/lock" "$omp" --mode rpc --no-ui --continue "$@"
-fi
-"$root/bin/omp-bot-ctl" claim "$name" || true
+set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
 rm -f "$OMP_BOT_RELAUNCH"
-waiting=
-# A boxed bot cut off by its box going away (ssh exits 255) or refused a start while its box is down waits in
-# its tab for the box to answer again and carries on there, restoring its session. Five such cut-offs in a row
-# while the box answers, each within a minute of starting, give up instead of looping.
 cutoffs=0
 while :; do
 	code=0
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
 	started=$(date +%s)
-	flock -w 2 -E 213 -o "$dir/lock" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
-	if [ "$code" != 213 ]; then
-		[ -n "${boxed:-}" ] && [ "$code" != 0 ] && [ ! -e "$OMP_BOT_RELAUNCH" ] || break
+	flock -n -E 75 -o "$dir/lock" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
+	if [ "$code" = 75 ]; then
+		echo "omp-bot: $name is already open somewhere else" >&2
+		exit 75
+	fi
+	if [ -n "${boxed:-}" ] && [ "$code" != 0 ] && [ ! -e "$OMP_BOT_RELAUNCH" ]; then
 		[ $(($(date +%s) - started)) -lt 60 ] || cutoffs=0
 		why=$("$root/bin/omp-bot-health") && { [ "$code" != 255 ] || [ "$cutoffs" -ge 5 ]; } && break
 		cutoffs=$((cutoffs + 1))
 		echo "omp-bot: $name lost its box${why:+ ($why)}; it carries on here once the box answers again…" >&2
 		until "$root/bin/omp-bot-health" >/dev/null; do sleep 5; done
-		"$root/bin/omp-bot-ctl" claim "$name" || true
 		continue
 	fi
-	holder=$("$root/bin/omp-bot-ctl" holder "$name" 2>/dev/null) || holder=none
-	case $holder in
-	headless*) "$root/bin/omp-bot-ctl" claim "$name" || true ;;
-	tui*)
-		echo "omp-bot: $name is already open somewhere else (pid ${holder#tui })" >&2
-		exit 75
-		;;
-	*)
-		[ -n "$waiting" ] || echo "omp-bot: waiting for $name's last run to exit…" >&2
-		waiting=1
-		;;
-	esac
+	break
 done
 if [ -e "$OMP_BOT_RELAUNCH" ]; then
 	rm -f "$OMP_BOT_RELAUNCH"
 	exit 76
 fi
-[ "$code" = 0 ] || "$root/bin/omp-bot-ctl" gaveup "$name" "$((started * 1000))" "its tab's omp exited with code $code before connecting; the error is in its tab" || true
 exit "$code"

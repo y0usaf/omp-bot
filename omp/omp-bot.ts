@@ -3,16 +3,13 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
-import { col, elapsed, node, row, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
-import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { isHelper, load, request } from "../daemon/ompd";
 import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
-const DOCK_PATCHED = Symbol.for("omp-bot.dock");
 const NONE = col([], { role: "omp.bot.none" });
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
@@ -40,21 +37,10 @@ const DOING = {
 	task: "Checking with helpers",
 	wait: "Waiting on results",
 	ask: "Needs your input",
-	ask_decision: "Needs your input",
 };
 const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const OWNER = process.env.OMPD_OWNER || (process.env.OMP_BOT_NAME ? `bot:${process.env.OMP_BOT_NAME}` : undefined);
-const TASK_MS = 3000;
-const TASK_GROUPS = [
-	["waiting", "Waiting on you", "waiting on you"],
-	["running", "Running", "running"],
-	["checking", "Checking", "checking"],
-	["open", "Open", "open"],
-];
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
-const PENDING = Symbol("pending");
-const HIDDEN = Symbol("hidden");
 let lastCx;
 
 function when(ts, hour12, now = new Date()) {
@@ -82,9 +68,7 @@ function firstText(content) {
 }
 
 function entryText(entry) {
-	if (entry?.type === "message") return entry.message?.role === "user" || entry.message?.role === "assistant" ? firstText(entry.message.content) : "";
-	if (entry?.type !== "custom_message") return "";
-	return String(entry.customType ?? "").startsWith("irc:") && typeof entry.details?.message === "string" ? entry.details.message : firstText(entry.content);
+	return entry?.type === "message" && (entry.message?.role === "user" || entry.message?.role === "assistant") ? firstText(entry.message.content) : "";
 }
 
 class Clock {
@@ -164,7 +148,6 @@ class Bot {
 		this.boops = 0;
 		this.typing = false;
 		this.awake = ["idle", this.line];
-		this.live = [];
 		this.timers = {};
 	}
 
@@ -240,22 +223,6 @@ class Bot {
 
 	face() {
 		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
-	}
-
-	tally(jobs) {
-		if (same(this.live.map(job => job.id), jobs.map(job => job.id))) return;
-		this.live = jobs;
-		this.render();
-	}
-
-	away(jobs = this.live) {
-		const helpers = jobs.filter(isHelper).length;
-		const commands = jobs.length - helpers;
-		return [helpers && `${helpers} helper${helpers === 1 ? "" : "s"}`, commands && `${commands} job${commands === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
-	}
-
-	loose() {
-		return this.away(this.live.filter(job => !job.task));
 	}
 
 	chao() {
@@ -337,41 +304,9 @@ class BotTop {
 	}
 }
 
-function ages(ms) {
-	const seconds = Math.max(0, Math.round(ms / 1000));
-	return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : seconds < 86_400 ? `${Math.floor(seconds / 3600)}h` : `${Math.floor(seconds / 86_400)}d`;
-}
-
-function taskDetail(task, live) {
-	if (task.state === "waiting") return task.question ?? "needs your answer";
-	if (task.state === "running") {
-		const jobs = live.filter(job => job.task === task.id);
-		const helpers = jobs.filter(isHelper).length;
-		const count = helpers || jobs.length || task.jobs.length;
-		return `${ages(Date.now() - task.updated)} · ${count} ${helpers ? "helper" : "job"}${count === 1 ? "" : "s"}`;
-	}
-	if (task.state === "checking") return task.check ?? "checking";
-	if (task.note) return task.note;
-	if (task.checked) return `check failed, exit ${task.checked.code ?? "-"}, ${ages(Date.now() - task.checked.at)} ago`;
-	return "not started";
-}
-
-function taskStatus(task) {
-	if (task.state === "waiting") return "blocked";
-	if (task.state === "running" || task.state === "checking") return "active";
-	return task.checked ? "blocked" : "pending";
-}
-
 class BotStatus {
 	constructor(bot) {
 		this.bot = bot;
-		this.open = [];
-		this.flash = [];
-		this.busy = false;
-		this.again = false;
-		this.version = 0;
-		this.stamp = -1;
-		this.node = NONE;
 	}
 
 	handleNativeEvent(event) {
@@ -384,91 +319,13 @@ class BotStatus {
 		return [];
 	}
 
-	start() {
-		this.poll();
-	}
-
-	poll() {
-		if (!OWNER) return;
-		this.bot.after("tasks", TASK_MS, () => this.poll());
-		if (this.busy) {
-			this.again = true;
-			return;
-		}
-		this.busy = true;
-		request({ op: "task-list", owner: OWNER }).then(
-			reply => {
-				this.busy = false;
-				this.take(reply?.tasks);
-			},
-			() => {
-				this.busy = false;
-			},
-		);
-	}
-
-	take(tasks) {
-		if (!Array.isArray(tasks)) return;
-		const mine = tasks.filter(task => task?.owner === OWNER);
-		const open = mine.filter(task => task.state !== "done" && task.state !== "dropped");
-		const flash = [...this.flash];
-		for (const task of this.open) {
-			if (open.some(next => next.id === task.id)) continue;
-			const ended = mine.find(next => next.id === task.id && (next.state === "done" || next.state === "dropped"));
-			if (ended && !flash.some(next => next.id === ended.id)) flash.push(ended);
-		}
-		this.open = open;
-		this.flash = flash;
-		this.version += 1;
-		this.bot.render();
-		if (this.again) {
-			this.again = false;
-			this.poll();
-		}
-	}
-
-	clearFlash() {
-		if (this.flash.length === 0) return;
-		this.flash = [];
-		this.version += 1;
-		this.bot.render();
-	}
-
-	counts() {
-		return TASK_GROUPS.map(([state, , label]) => {
-			const count = this.open.filter(task => task.state === state).length;
-			return count > 0 ? `${count} ${label}` : undefined;
-		})
-			.filter(Boolean)
-			.join(" · ");
-	}
-
-	dock() {
-		const groups = TASK_GROUPS.map(([state, title]) => ({ state, title, tasks: this.open.filter(task => task.state === state) })).filter(group => group.tasks.length > 0);
-		if (groups.length === 0 && this.flash.length === 0) return NONE;
-		if (this.stamp === this.version) return this.node;
-		this.stamp = this.version;
-		const phases = groups.map(group => ({
-			id: group.state,
-			title: group.title,
-			items: group.tasks.map(task => ({ id: task.id, text: [span(task.title), span(` — ${taskDetail(task, this.bot.live)}`, "muted")], status: taskStatus(task) })),
-		}));
-		if (this.flash.length > 0) phases.push({ id: "done", title: "Done", collapsed: false, items: this.flash.map(task => ({ id: task.id, text: [span(task.title)], status: task.state })) });
-		this.node = row([node("checklist", { phases, mode: "hud", role: "omp.hud.todo" }, undefined, "tasks")], { role: "omp.hud.activity", justify: "end" });
-		return this.node;
-	}
-
 	describe() {
 		const b = this.bot;
-		const counts = this.counts();
-		const loose = b.loose();
-		const away = [counts, loose].filter(Boolean).join(" · ");
 		const failed = !b.active && b.mood === "error";
-		if (!b.active && !b.boop && !failed && !away) return NONE;
+		if (!b.active && !b.boop && !failed) return NONE;
 		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
 		const busy = !b.boop && !asking && !failed;
-		const status = b.boop ?? (b.active || failed ? b.line : counts || `Waiting on ${loose}`);
-		const side = b.active ? (counts ? away : loose ? `${loose} running` : undefined) : counts && loose ? loose : undefined;
+		const status = b.boop ?? b.line;
 		return row(
 			[
 				b.active || b.boop || failed ? b.chao() : drawChao(b.look, "waiting"),
@@ -481,26 +338,9 @@ class BotStatus {
 						})
 					: text(status, { role: "omp.bot.say", wrap: "none", tone: asking ? "accent" : failed ? "error" : undefined }),
 				b.active ? node("row", { role: "omp.bot.took" }, [elapsed(Date.now() - b.turnStart)]) : undefined,
-				side ? text(side, { role: "omp.bot.away", wrap: "none", tone: "muted" }) : undefined,
 			].filter(Boolean),
 			{ role: `omp.bot.chat.${b.tint}`, align: "center", gap: "sm" },
 		);
-	}
-}
-
-class BotTasks {
-	constructor(status) {
-		this.status = status;
-	}
-
-	invalidate() {}
-
-	render() {
-		return [];
-	}
-
-	describe() {
-		return this.status.dock();
 	}
 }
 
@@ -582,62 +422,11 @@ function bodyText(block) {
 	return "";
 }
 
-function spansText(spans) {
-	return (Array.isArray(spans) ? spans : []).map(part => part?.t ?? "").join("");
-}
-
-function withRole(node, role) {
-	if (!node || typeof node !== "object") return undefined;
-	if (node.p?.role === role) return node;
-	for (const child of node.c ?? []) {
-		const found = withRole(child, role);
-		if (found) return found;
-	}
-	return undefined;
-}
-
-const GLYPHS = /^[←→›\uE000-\uF8FF\s]+/;
-
-function eventInfo(block, bot) {
+function eventInfo(block) {
 	const role = String(block?.p?.role ?? "");
-	const head = headText(block);
-	if (role === "omp.tool.write") {
-		const title = block.p.title ?? block.c?.[0]?.c?.[0]?.p?.spans ?? [];
-		if (spansText(title.slice(0, 1)).trim() !== "IRC") return undefined;
-		const name = title.slice(1).find(part => String(part?.s ?? "").includes("accent"))?.t?.trim();
-		const settled = block.p.status === "done" || block.p.status === "error";
-		if (!name || name === "…") return settled ? undefined : PENDING;
-		if (name === "all") return undefined;
-		const preview = withRole(block, "omp.tool.proc.preview");
-		return { action: "Messaged", name, from: bot.name, body: spansText(preview?.p?.spans) || preview?.p?.text || "" };
-	}
-	if (role.startsWith("omp.irc.")) {
-		const body = bodyText(block);
-		if (role === "omp.irc.incoming") {
-			const name = head.replace(/^IRC\s+/, "").replace(GLYPHS, "").trim();
-			if (name) return { action: "Message from", name, from: name, body, card: true };
-		}
-		const routed = head.match(/^(?:IRC|Pool)\s+(.+?)\s*(?:→|->|›|[\uE000-\uF8FF])+\s*(.+)$/);
-		if (routed) {
-			const name = routed[2].trim();
-			return { action: "Messaged", name, from: routed[1].replace(GLYPHS, "").trim() || bot.name, body };
-		}
-		const name = head.match(/^(?:IRC|Pool)\s+(.+)$/)?.[1]?.replace(GLYPHS, "").trim();
-		if (name) return { action: "Messaged", name, from: bot.name, body };
-	}
-	const body = bodyText(block);
-	if (head === "ompd-job" || body.startsWith("[ompd job ")) return HIDDEN;
-	if (body.startsWith("[omp-bot task ")) {
-		const marker = body.slice(0, body.indexOf("]") + 1);
-		const origin = marker.match(/from (?:bot|reply):(.+?)(?:,|\])/)?.[1]?.trim();
-		return origin
-			? { action: "Task from", name: origin, from: origin, body: body.slice(marker.length).trim() }
-			: { action: "Task for", name: bot.name };
-	}
-	if (role === "omp.user.collab") {
-		const name = head.match(/^«(.+?)»/)?.[1]?.trim();
-		if (name) return { action: "Message from", name };
-	}
+	if (role !== "omp.user.collab") return undefined;
+	const name = headText(block).match(/^«(.+?)»/)?.[1]?.trim();
+	if (name) return { action: "Message from", name };
 	return undefined;
 }
 
@@ -801,7 +590,6 @@ function patchTranscript(state) {
 		return;
 	}
 	const inner = proto.nativeBlocks;
-	const removable = proto.canRemoveBlock;
 	const clear = proto.clear;
 	const shownBy = new WeakMap();
 	const wrapped = new WeakMap();
@@ -810,7 +598,6 @@ function patchTranscript(state) {
 	const stamps = new WeakMap();
 	const times = new WeakMap();
 	const mores = new WeakMap();
-	const collected = new WeakMap();
 	const answers = new WeakMap();
 	const pages = new WeakMap();
 	proto[PATCHED] = { state };
@@ -819,17 +606,7 @@ function patchTranscript(state) {
 	ToolExecutionComponent.prototype.updateResult = function (result, isPartial, toolCallId) {
 		const questions = isPartial || result?.isError ? undefined : asked(result?.details);
 		if (questions) answers.set(this, questions);
-		const waited = !isPartial && result?.details?.op === "wait" ? result.details.waited : undefined;
-		if (typeof waited?.from === "string") {
-			const body = String(waited.body ?? "");
-			collected.set(this, { action: "Message from", name: waited.from, from: waited.from, body, ts: Number(waited.ts) || undefined });
-		}
 		return updateResult.call(this, result, isPartial, toolCallId);
-	};
-
-	proto.canRemoveBlock = function (component) {
-		if (proto[PATCHED].state.on && String(component?.describe?.()?.p?.role ?? "").startsWith("omp.irc.")) return false;
-		return removable.call(this, component);
 	};
 
 	proto.clear = function () {
@@ -864,13 +641,11 @@ function patchTranscript(state) {
 		}
 		const source = block?.source ?? block;
 		const reply = source instanceof AssistantMessageComponent;
-		let event = reply ? null : (collected.get(block) ?? events.get(block));
+		let event = reply ? null : events.get(block);
 		if (!reply && event === undefined) {
-			event = eventInfo(block.describe?.(lastCx), proto[PATCHED].state.bot) ?? null;
-			if (event !== PENDING) events.set(block, event);
+			event = eventInfo(block.describe?.(lastCx)) ?? null;
+			events.set(block, event);
 		}
-		if (event === PENDING) return block;
-		if (event === HIDDEN) return undefined;
 		const notice = !reply && !event && !(block instanceof UserMessageComponent) && block.describe?.(lastCx)?.p?.role === "omp.custom";
 		if (!reply && !(block instanceof UserMessageComponent) && !event && !notice) return block;
 		let wrapper = wrapped.get(block);
@@ -938,22 +713,9 @@ function patchTranscript(state) {
 		if (start > 0) shownBlocks.push(page.control);
 		let last;
 		let previous;
-		const taken = [];
-		for (let i = start; i < blocks.length; i++) {
-			const waited = collected.get(blocks[i]);
-			if (waited) taken.push(waited);
-		}
 		for (let i = start; i < blocks.length; i++) {
 			const item = shown(blocks[i]);
 			if (!item) continue;
-			if (taken.length > 0 && item instanceof BotEvent && item.info.card) {
-				const body = item.info.body.trim();
-				const at = taken.findIndex(waited => waited.from === item.info.from && waited.body.trim() === body);
-				if (at >= 0) {
-					taken.splice(at, 1);
-					continue;
-				}
-			}
 			const visible = item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer;
 			if (!visible) {
 				shownBlocks.push(item);
@@ -974,31 +736,6 @@ function patchTranscript(state) {
 		return shownBlocks;
 	};
 }
-
-function patchDock(state) {
-	const proto = Composer.prototype;
-	if (proto[DOCK_PATCHED]) {
-		proto[DOCK_PATCHED].state = state;
-		return;
-	}
-	const inner = proto.describeSurface;
-	const docks = new WeakMap();
-	proto[DOCK_PATCHED] = { state };
-	proto.describeSurface = function (cx) {
-		const surface = inner.call(this, cx);
-		if (!proto[DOCK_PATCHED].state.on) return surface;
-		let marked = docks.get(surface);
-		if (!marked) {
-			const dock = [...surface.dock];
-			const at = dock.indexOf(this.editor);
-			dock.splice(at < 0 ? dock.length : at, 0, proto[DOCK_PATCHED].state.tasks);
-			marked = { ...surface, dock: [new Marked(dock, "omp.bot.dock")] };
-			docks.set(surface, marked);
-		}
-		return marked;
-	};
-}
-
 
 function patchWorkingRow(state) {
 	const proto = Loader.prototype;
@@ -1024,10 +761,8 @@ export default function ompBot(pi) {
 		bot,
 		top: undefined,
 		status: new BotStatus(bot),
-		tasks: undefined,
 		clock: undefined,
 	};
-	state.tasks = new BotTasks(state.status);
 	let ui;
 	let abort;
 	let unlisten;
@@ -1065,39 +800,17 @@ export default function ompBot(pi) {
 		});
 	}
 
-	async function begin(_event, ctx) {
+	function begin(_event, ctx) {
 		if (ctx.agent?.kind === "sub" || ctx.mode !== "tui") return;
 		attach(ctx);
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		state.clock = new Clock(ctx.sessionManager);
 		patchTranscript(state);
 		patchWorkingRow(state);
-		patchDock(state);
 		listen();
 		mount();
 		bot.nap();
-		const jobs = OWNER
-			? await request({ op: "list", owner: OWNER }).then(
-					reply => reply.jobs,
-					() => [],
-				)
-			: [];
-		bot.tally(jobs.filter(job => job.state === "queued" || job.state === "running"));
-		state.status.start();
 	}
-
-	pi.events.on("ompd:background", ({ id }) => {
-		const job = load(id);
-		if (job) bot.tally([...bot.live.filter(live => live.id !== id), job]);
-		state.status.poll();
-	});
-	pi.events.on("ompd:ended", ({ id }) => {
-		bot.tally(bot.live.filter(live => live.id !== id));
-		state.status.poll();
-	});
-	pi.events.on("ompd:task", event => {
-		if (event?.task?.owner === OWNER) state.status.poll();
-	});
 
 	pi.on("session_start", begin);
 	pi.on("session_switch", begin);
@@ -1139,7 +852,6 @@ export default function ompBot(pi) {
 		bot.cancel("nap");
 		bot.turnStart = bot.submitted || Date.now();
 		bot.submitted = 0;
-		state.status.clearFlash();
 		bot.active = true;
 		bot.stopped = false;
 		bot.running.clear();
@@ -1159,11 +871,7 @@ export default function ompBot(pi) {
 
 	pi.on("tool_execution_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		const target =
-			event.toolName === "write" && typeof event.args?.path === "string"
-				? event.args.path.match(/^agent:\/\/([^/]+)$/)?.[1]
-				: undefined;
-		const label = target ? `Messaging ${target}` : (DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size));
+		const label = DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size);
 		bot.running.set(event.toolCallId, label);
 		bot.set(label === DOING.ask ? "waiting" : "working", label);
 	});
@@ -1182,7 +890,7 @@ export default function ompBot(pi) {
 	pi.on("agent_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
 		if (event.willContinue) {
-			bot.set("waiting", "Waiting on helpers");
+			bot.set("thinking", pick(THINKING, Date.now()));
 			return;
 		}
 		bot.active = false;

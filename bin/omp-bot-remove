@@ -32,11 +32,9 @@ ungrant() {
 }
 dir=$state/bots/$name
 if bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json"); then
-	"$root/bin/omp-bot-ctl" retire "$name"
 	if [ -d "$dir" ]; then
 		exec 8>"$dir/lock"
 		if ! flock -w 15 8; then
-			"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
 			echo "omp-bot-remove: $name is still running; close its tab first" >&2
 			exit 75
 		fi
@@ -53,7 +51,6 @@ if bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json");
 	mkdir -p "$state/archive"
 	if [ -d "$dir" ]; then mv "$dir" "$archive"; else mkdir "$archive"; fi
 	printf '%s\n' "$bot" >"$archive/roster.json"
-	"$root/bin/omp-bot-ctl" unretire "$name" 2>/dev/null || true
 	echo "removed $name"
 elif [ "$purge" = 0 ]; then
 	echo "omp-bot-remove: no bot named $name" >&2

@@ -24,10 +24,6 @@
 	background: var(--t, var(--accent-fill));
 	box-shadow: none;
 }
-:root:not(#bot) [data-role='omp.bot.asked.note'],
-:root:not(#bot) [data-role='omp.bot.away'] {
+ :root:not(#bot) [data-role='omp.bot.asked.note'] {
 	color: var(--t3);
-}
-:root:not(#bot) [data-role='omp.bot.away'] {
-	font-size: 0.85em;
 }

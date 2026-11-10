@@ -5,98 +5,6 @@ local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local TABS = tern.plugin.data .. "/../agent-tabs/kv.json"
-local HEALTH_POLL_MS = 15000
-
-local CHAO_EYES = { "oval", "round", "dot" }
-local CHAO_TYPES = { "neutral", "neutral", "hero", "dark" }
-local SPRITES: { [string]: { string } } = {
-	neutral = {
-		"...........oo......",
-		".........ooddo.....",
-		".....oooodiaado....",
-		"...oonijjjjjjino...",
-		"..oembbbbbbbbbmeo..",
-		".osmbbbbbbbbbbbmso.",
-		".ombbbbbbbbbbbbbmo.",
-		"ocmbbwwbbbbbwwbbmco",
-		"osmbweewbbbweewbmso",
-		"osmbweewbbbweewbmso",
-		"osmmweewbbbweewmmso",
-		"ocmmweewbbbweewmmco",
-		"oesmmwwmmmmmwwmmseo",
-		".oecsssssssssssceo.",
-		"..oooecsssssceooo..",
-		".oosmcmmmmmmmcmsoo.",
-		"odjbmsmbbbbbmsmbjdo",
-		"oiaiecsmmmmmsceiaio",
-		"odinoecsssssceonido",
-		".ooodsseoooessdooo.",
-		"..odajmscocsmjado..",
-		"..ondimscocsmidno..",
-		"...oooooo.oooooo...",
-	},
-	hero = {
-		"........oo.....oo........",
-		".......oaao...oaao.......",
-		".......oajjo.ojjao.......",
-		"........ojbo.objo........",
-		".........obbobbo.........",
-		".........oocbcoo.........",
-		".......oocbbbbbcoo.......",
-		"......obbbbbbbbbbbo......",
-		".....ocbbbbbbbbbbbco.....",
-		"....osbbbbbbbbbbbbbso....",
-		"....obbbbbbbbbbbbbbbo....",
-		"...ocbbbccbbbbbccbbbco...",
-		"...osbbccbcbbbccbcbbso...",
-		"...osbbcbbcbbbcbbcbbso...",
-		"...osbbcbbcbbbcbbcbbso...",
-		"...osbbcbccbbbcbccbbso...",
-		"...ocsbbccbbbbbccbbsco...",
-		"..oooccsbbbbbbbbbsccooo..",
-		".oyyyooocccssscccoooyyyo.",
-		"oyyyoosbcsbbbbbscbsooyyyo",
-		"oyyoajjbsbbbbbbbsbjjaoyyo",
-		".oooajjjcsbbbbbscjjjaooo.",
-		"...oaaaoccsssssccoaaao...",
-		"....oooajscooocsjaooo....",
-		".....oajjjscocsjjjao.....",
-		".....oaaajscocsjaaao.....",
-		"......oooooo.oooooo......",
-	},
-	dark = {
-		"...........oooo........",
-		".......ooooooooooo.oo..",
-		"....ooooobbbbbbbboodao.",
-		"...ooobbbbbbbboobbbddao",
-		"..oobbbbbbbbbbbbobboodo",
-		".oobbbbbbbbbbbbbbobo...",
-		".obbbbbbbbbbbbbbbooo...",
-		"oobbbbbbbbbbbbbbboo....",
-		"oobbewbbbbbbbwebboo....",
-		"oobbewwbbbbbwwebboo....",
-		"oobbewwbbbbbwwebboo....",
-		"oobbewwebbbewwebboo....",
-		"oobbeweebbbeweebboo....",
-		"ooobbeebbbbbeebbooo....",
-		".oooobbbbbbbbboooo.....",
-		"..oooodooooodoooo......",
-		".ddoboaoooooaobodd.....",
-		"dadobobaaaaabobodao....",
-		"daddooooaaaooooddao....",
-		"daaaoooobbbooooaaao....",
-		".ooddoooooooooddoo.....",
-		"..oaddbboooboddao......",
-		"..oaaadbbobbdaaao......",
-		"...oooooo.oooooo.......",
-	},
-}
-local INK: { [string]: string } = { o = "#000", w = "#f8f8f8", b = "var(--mb)", m = "var(--mm)", s = "var(--ms)", c = "var(--mc)", e = "var(--me)", a = "var(--ma)", i = "var(--mi)", d = "var(--md)", n = "var(--mn)", j = "var(--mj)", y = "var(--my)" }
-local TYPE_INK: { [string]: string } = {
-	neutral = "--mb: color-mix(in srgb, var(--bot) 35%, #fff); --mm: color-mix(in srgb, var(--bot) 50%, #fff); --ms: color-mix(in srgb, var(--bot) 70%, #fff); --mc: color-mix(in srgb, var(--bot) 82%, #000); --me: color-mix(in srgb, var(--bot) 55%, #000); --ma: #f8f820; --mi: #d8d868; --md: #c0b830; --mn: #88a850; --mj: #d8f8b0;",
-	hero = "--mb: #f8f8f8; --ms: #bec2bf; --mc: #647c9a; --mj: #c8ebf1; --ma: #89a8dd; --my: #f7df56;",
-	dark = "--mb: color-mix(in srgb, var(--bot) 22%, #152745); --me: #1c63a1; --ma: #d52b38; --md: #a71a30;",
-}
 
 local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
@@ -112,30 +20,6 @@ local function hash(name: string): number
 	return bit32.bxor(h, bit32.rshift(h, 16))
 end
 
-local function chao(bot: Bot): string
-	local kind = CHAO_TYPES[(hash(bot.name) // #CHAO_EYES) % #CHAO_TYPES + 1]
-	local own = type(bot.chao) == "string" and { type = bot.chao } or (type(bot.chao) == "table" and bot.chao or {})
-	return SPRITES[own.type] and own.type or kind
-end
-
-local function mini(kind: string): string
-	local rows = SPRITES[kind]
-	local left = (18 - #rows[1]) // 2
-	local top = (18 - #rows) // 2
-	local shadows: { string } = {}
-	for y, line in ipairs(rows) do
-		for x = 1, #line do
-			local ink = INK[line:sub(x, x)]
-			if ink then
-				shadows[#shadows + 1] = (left + x + 29) .. "px " .. (top + y + 29) .. "px 0 " .. ink
-			end
-		end
-	end
-	return table.concat(shadows, ", ")
-end
-
--- The pixel Chao is switched off: avatars.css draws every bot from the parts in avatars.json instead.
-local CHAO = false
 local AVATAR = tern.json.decode(tern.fs.read(tern.plugin.dir .. "/avatars.json"))
 local PARTS = { "body", "color", "eyes", "accessory", "motion" }
 
@@ -192,32 +76,6 @@ end
 
 local function roster(): { Bot }
 	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
-end
-
-type Down = { reason: string, since: number }
-local down: { [string]: Down } = {}
-
-local function show_health(bots: { Bot })
-	local rules = {}
-	local tints: { [string]: number } = {}
-	for _, bot in ipairs(bots) do
-		if bot.tint then
-			tints[bot.tint] = (tints[bot.tint] or 0) + 1
-		end
-	end
-	for _, bot in ipairs(bots) do
-		local out = down[bot.name]
-		if bot.tint and out and tints[bot.tint] == 1 then
-			local row = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .sub"
-			rules[#rules + 1] = row .. " { font-size: 0; }\n" .. row .. "::after { content: " .. tern.json.encode("down: " .. out.reason) .. "; color: #e5534b; }"
-		end
-		if CHAO and bot.tint then
-			local dot = "#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
-			local kind = chao(bot)
-			rules[#rules + 1] = dot .. " { " .. TYPE_INK[kind] .. " }\n" .. dot .. "::after { box-shadow: " .. mini(kind) .. "; }"
-		end
-	end
-	tern.css("health", table.concat(rules, "\n"))
 end
 
 -- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
@@ -339,7 +197,6 @@ end
 
 local function show(bots: { Bot })
 	current = bots
-	show_health(bots)
 	show_avatars(bots)
 	register(bots)
 end
@@ -650,59 +507,6 @@ tern.command({ id = "stage", title = "Bots: Stage demo", available = function()
 	return false
 end, run = stage })
 
-local function poll()
-	tern.process.run({ ROOT .. "/bin/omp-bot-ctl", "status", "--json" }, { env = state_env(), timeout_ms = 10000 }, function(result, cx)
-		if result.status ~= 0 then
-			return
-		end
-		local ok, bots = pcall(tern.json.decode, result.stdout)
-		if not ok or type(bots) ~= "table" then
-			return
-		end
-		local now: { [string]: Down } = {}
-		for _, bot in ipairs(bots) do
-			if type(bot.down) == "table" then
-				now[bot.bot] = { reason = tostring(bot.down.reason), since = tonumber(bot.down.since) or 0 }
-			end
-		end
-		local changed = false
-		for name, out in now do
-			if not down[name] or down[name].since ~= out.since then
-				changed = true
-				if cx then
-					cx:toast("error", name .. " is down", out.reason)
-				end
-			end
-		end
-		for name in down do
-			if not now[name] then
-				changed = true
-				if cx then
-					cx:toast("info", name .. " is back")
-				end
-			end
-		end
-		if changed then
-			down = now
-			show_health(roster())
-			tern.chrome.refresh()
-		end
-	end)
-end
-
-local function tick()
-	tern.timer(HEALTH_POLL_MS, tick)
-	poll()
-end
-
-tern.chrome.status(function(_pane)
-	local segments = {}
-	for name, out in down do
-		segments[#segments + 1] = { text = name .. " down: " .. out.reason, icon = "sparkle", tone = "error" }
-	end
-	return #segments > 0 and segments or nil
-end)
-
 local legacy = tern.kv.get("open")
 if legacy then
 	local kv = tern.fs.exists(TABS) and tern.json.decode(tern.fs.read(TABS)) or {}
@@ -715,7 +519,6 @@ if legacy then
 end
 
 show(roster())
-tern.timer(0, tick)
 
 for _, event in ipairs({ "focus", "tab_created", "tab_closed", "pane_created", "pane_closed", "agent_state" }) do
 	tern.on(event, function(_ev, cx: WindowCx)
