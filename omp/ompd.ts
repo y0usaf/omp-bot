@@ -76,13 +76,12 @@ function verdict(task: Task): string {
 function notice(task: Task, log: string | null): string {
 	const check = task.checked;
 	let what: string;
-	if (task.dropped !== null) what = `dropped: ${task.dropped}`;
-	else if (check?.code === 0) what = "check passed; the task is done";
-	else if (check) what = `check failed (${check.code === null ? check.reason ?? "no exit code" : `exit ${check.code}`}); the task stays ${task.state}${log ? `, log ${log}` : ""}`;
+	if (task.dropped !== null) what = verdict(task);
+	else if (check) what = `${verdict(task)}${check.code !== 0 && log ? `, log ${log}` : ""}`;
 	else if (task.question !== null) what = `asks: ${task.question}`;
 	else if (task.answer !== null) what = `answered: ${task.answer}`;
 	else what = task.note ?? `is ${task.state}`;
-	return `[ompd task ${task.id.slice(0, 8)} ${task.title}] ${what}`;
+	return `[ompd task ${task.id.slice(-8)} ${task.title}] ${what}`;
 }
 
 function botTask(): { jobs?: string[] } | undefined {
@@ -117,7 +116,7 @@ function ownReport(job: Job): string | undefined {
 
 function report(job: Job): string {
 	const task = job.task ? loadTask(job.task) : undefined;
-	const line = task ? `\n[task ${task.id.slice(0, 8)}: ${verdict(task)}]` : "";
+	const line = task ? `\n[task ${task.id.slice(-8)}: ${verdict(task)}]` : "";
 	const own = ownReport(job);
 	if (own !== undefined) return `[ompd job ${job.id} ended: ${outcome(job)} after ${seconds(job)}]${line}\n${own}\n(log: ${join(dir(job.id), "log")})`;
 	const text = job.command.trim().replace(/\s*\n\s*/g, " ↵ ");
