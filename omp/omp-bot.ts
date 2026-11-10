@@ -1086,8 +1086,15 @@ export default function ompBot(pi) {
 	pi.events.on("ompd:background", ({ id }) => {
 		const job = load(id);
 		if (job) bot.tally([...bot.live.filter(live => live.id !== id), job]);
+		state.status.poll();
 	});
-	pi.events.on("ompd:ended", ({ id }) => bot.tally(bot.live.filter(live => live.id !== id)));
+	pi.events.on("ompd:ended", ({ id }) => {
+		bot.tally(bot.live.filter(live => live.id !== id));
+		state.status.poll();
+	});
+	pi.events.on("ompd:task", event => {
+		if (event?.task?.owner === OWNER) state.status.poll();
+	});
 
 	pi.on("session_start", begin);
 	pi.on("session_switch", begin);
@@ -1129,6 +1136,7 @@ export default function ompBot(pi) {
 		bot.cancel("nap");
 		bot.turnStart = bot.submitted || Date.now();
 		bot.submitted = 0;
+		state.status.clearFlash();
 		bot.active = true;
 		bot.stopped = false;
 		bot.running.clear();
