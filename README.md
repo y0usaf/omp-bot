@@ -28,7 +28,7 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-remove NAME [--purge]` | Take a bot off the roster and archive its conversation; `--purge` also deletes its persisted folders. |
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
 | `bin/ompd jobs\|show ID\|kill ID\|run [--task ID] [--monitor REGEX] ...` | Inspect or start jobs by hand. |
-| `bin/ompd task add --title T [--check CMD] [--ask Q] ...` / `tasks [--owner O] [--all] [--json]` | Tasks ompd owns. A task with a check command is done only when that command exits 0; `task add` prints its id and `task check\|ask\|answer\|note\|drop` work on one. |
+| `bin/ompd task add --title T [--key K] [--check CMD] [--ask Q] ...` / `tasks [--owner O] [--all] [--json]` | Tasks ompd owns. A task with a check command is done only when that command exits 0; `task add` prints its id and `task check\|ask\|answer\|note\|drop` work on one. The same owner and `--key` return the first task instead of adding another. |
 
 In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot**, **Bots: Remove bot** and **Bots: Change avatar** to the palette, plus each bot's avatar in its tab, header, messages and Tern's own notification card under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
@@ -80,6 +80,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_HELD_MAX_MS` | 300000 | Longest backoff while a bot is open in a tab. |
 | `OMP_BOT_DRAIN_MS` | 120000 | How long `omp-botd` lets busy bots finish on SIGTERM. |
 | `OMP_BOT_MAX_HELPERS` | 8 | Helpers per bot at once (nesting stops at 2 deep). |
+| `OMP_BOT_HELPER_MINUTES` | 60 | Longest a helper may run before ompd kills it. |
 | `OMPD_SERVICE` | unset | `1`: a service runs ompd; bots wait for it instead of starting one. |
 | `OMPD_FOREGROUND_S` | 300 | How long a command or helper is waited for before it continues in the background. |
 | `OMPD_JOB_MEMORY` | `12G` | Memory cap per job cgroup, no swap. |

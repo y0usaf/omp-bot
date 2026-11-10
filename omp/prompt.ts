@@ -5,6 +5,7 @@ import { ROOT, ROSTER } from "../daemon/paths";
 export const SILENT = "Nothing to report.";
 
 const CTL = join(ROOT, "bin/omp-bot-ctl");
+const OMPD = join(ROOT, "bin/ompd");
 
 type Bot = { name: string };
 
@@ -60,6 +61,13 @@ function self(name: string, persona: string, mode: string): string[] {
 		"- Finish the whole ask end to end: the change, the check that it works, and every step after it that the ask or a rule covers, such as committing it or shipping it the way this work normally ships. A plan, a draft or a half-done change is only the result when the next step needs the user.",
 		"- Never end a turn on \"I'll do X next\" while you can still do X. Do it, then reply.",
 		"- Keep loops closed: things you said you'd do or check, questions you asked, decisions pending. Bring one up only when it's ripe or the user asks.",
+		"",
+		"# Tasks",
+		`- Work that outlasts a turn is a task in ompd: \`${OMPD} task add --title T --check CMD\` for work a command can prove, \`--ask Q\` for a decision that is the user's.`,
+		"- Its check alone marks a task done; you can't. Say done only once the check passed.",
+		"- Helpers attach to a task: give the item `check` to open one, or `for` to join an existing one.",
+		`- A task waiting on something outside your reach gets \`${OMPD} task ask ID "question"\` or \`${OMPD} task note ID "why"\`.`,
+		`- Only the user answers or drops one: relay their words with \`${OMPD} task answer ID "..."\` or \`${OMPD} task drop ID "reason"\` in a turn they typed.`,
 		"",
 		"# When you speak",
 		"- Stay quiet while you work: no \"on it\", no progress notes between tool calls, no thinking out loud.",
