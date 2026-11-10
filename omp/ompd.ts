@@ -3,7 +3,7 @@ import { connect, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { dir, type Job, load, MONITOR_MS, request, SOCKET, taskDetails, taskLine, V } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
-import { final, loadTask, type Task } from "../daemon/tasks";
+import { final, loadTask, type Task, verdict } from "../daemon/tasks";
 
 const UNKNOWN = "Previous OMP process exited before this tool returned";
 const FOREGROUND_S = Number(process.env.OMPD_FOREGROUND_S) || 300;
@@ -65,23 +65,13 @@ function failed(job: Job): boolean {
 	return job.state === "lost" || job.code !== 0;
 }
 
-function verdict(task: Task): string {
-	const check = task.checked;
-	if (task.dropped !== null) return `dropped: ${task.dropped}`;
-	if (check?.code === 0) return "check passed; the task is done";
-	if (check) return `check failed (${check.code === null ? check.reason ?? "no exit code" : `exit ${check.code}`}); the task stays ${task.state}`;
-	return `task ${task.state}`;
-}
-
 function notice(task: Task, log: string | null): string {
-	const check = task.checked;
-	let what: string;
-	if (task.dropped !== null) what = verdict(task);
-	else if (check) what = `${verdict(task)}${check.code !== 0 && log ? `, log ${log}` : ""}`;
-	else if (task.question !== null) what = `asks: ${task.question}`;
-	else if (task.answer !== null) what = `answered: ${task.answer}`;
-	else what = task.note ?? `is ${task.state}`;
-	return `[ompd task ${task.id.slice(-8)} ${task.title}] ${what}`;
+	const parts = [verdict(task)];
+	if (task.checked && task.checked.code !== 0 && log) parts.push(`log ${log}`);
+	if (task.question !== null) parts.push(`asks: ${task.question}`);
+	if (task.answer !== null) parts.push(`answered: ${task.answer}`);
+	if (task.note) parts.push(`note: ${task.note}`);
+	return `[ompd task ${task.id.slice(-8)} ${task.title}] ${parts.join("; ")}`;
 }
 
 function botTask(): { jobs?: string[] } | undefined {
@@ -223,7 +213,8 @@ export default function ompd(pi) {
 	async function heard(next: Task, log: string | null) {
 		pi.events.emit("ompd:task", { task: next });
 		if (MAIN_BOT) {
-			const wake = next.answer !== null || (next.checked !== null && next.checked.code !== 0);
+			const acted = next.answer !== null || (next.checked !== null && next.checked.code !== 0);
+			const wake = acted && (next.check === null || next.state === "open");
 			pi.sendMessage({ customType: "ompd-task", content: notice(next, log), display: !BOT, details: { id: next.id, task: next } }, wake ? { deliverAs: "followUp", triggerTurn: true } : { deliverAs: "nextTurn" });
 		}
 		await call({ op: "task-ack", id: next.id, seq: next.seq });
@@ -290,8 +281,9 @@ export default function ompd(pi) {
 			return undefined;
 		}
 		const text = open.length ? open.map(task => [taskLine(task), ...taskDetails(task, 0)].join("\n")).join("\n") : "No open tasks.";
-		if (text === listed || (!open.length && !listed)) return undefined;
-		listed = text;
+		const now = JSON.stringify(open.map(task => [task.id, task.state, task.seq, task.note]));
+		if (now === listed || (!open.length && !listed)) return undefined;
+		listed = now;
 		return { message: { customType: "ompd-tasks", content: text, display: false, details: { tasks: open } } };
 	});
 

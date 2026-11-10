@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { escapeHarnessTags } from "@oh-my-pi/pi-coding-agent/session/harness-tags";
 import { dir, type Job, load, request, safeEnv } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
-import { final, loadTask, type Task } from "../daemon/tasks";
+import { final, loadTask, type Task, verdict } from "../daemon/tasks";
 
 const BOT = process.env.OMP_BOT_NAME ?? "";
 const SELF = process.env.OMP_BOT_HELPER ?? "";
@@ -101,14 +101,6 @@ function result(job: Job): string {
 	} catch {
 		return "(it wrote no result and no log)";
 	}
-}
-
-function rowVerdict(task: Task): string {
-	if (task.dropped !== null) return `task dropped: ${task.dropped}`;
-	const check = task.checked;
-	if (check?.code === 0) return "check passed; the task is done";
-	if (check) return `check failed (${check.code === null ? check.reason ?? "no exit code" : `exit ${check.code}`}); the task stays ${task.state}`;
-	return `task ${task.state}`;
 }
 
 function checkResult(task: Task): string {
@@ -436,14 +428,21 @@ export default function helpers(pi) {
 			const known = await definitions(resolve(ctx.cwd));
 			const unknown = params.tasks.map(item => item.agent || "task").filter(name => !known.some(found => found.name === name));
 			if (unknown.length) throw new Error(`No agent named ${[...new Set(unknown)].join(", ")}; the agents are ${known.map(found => found.name).join(", ")}. Nothing was started.`);
-			const listed: Task[] = params.tasks.some(item => item.for) ? (await call({ op: "task-list", owner: owner() })).tasks : [];
-			const linked = params.tasks.map(item => {
-				if (!item.for) return undefined;
-				const matches = listed.filter(task => task.id.startsWith(item.for!.trim()));
-				if (matches.length !== 1) throw new Error(`${matches.length ? `task ${item.for} is ambiguous` : `no task ${item.for}`}: give the id of the ompd task this helper works on, or drop \`for\` and give \`check\` instead. Nothing was started.`);
-				if (final(matches[0])) throw new Error(`task ${matches[0].id} is already ${matches[0].state}: give a task that is still open, or drop \`for\` and give \`check\` instead. Nothing was started.`);
-				return matches[0].id;
-			});
+			const linked: (string | undefined)[] = [];
+			for (const item of params.tasks) {
+				if (!item.for) {
+					linked.push(undefined);
+					continue;
+				}
+				const found: Task = await call({ op: "task-get", id: item.for.trim() }).then(
+					reply => reply.task,
+					error => {
+						throw new Error(`${error instanceof Error ? error.message : error}: give the id of the ompd task this helper works on, or drop \`for\` and give \`check\` instead. Nothing was started.`);
+					},
+				);
+				if (final(found)) throw new Error(`task ${found.id} is already ${found.state}: give a task that is still open, or drop \`for\` and give \`check\` instead. Nothing was started.`);
+				linked.push(found.id);
+			}
 			const taken = new Set<string>();
 			const started: Helper[] = [];
 			for (const [index, item] of params.tasks.entries()) {
@@ -483,7 +482,7 @@ export default function helpers(pi) {
 					return `## ${helper.id} (running, ompd job ${helper.job}, task ${helper.task})\n[Keeps running outside this session; its verdict arrives in this conversation once its check settles. Message it with write agent://${helper.id}; \`${OMPD} kill ${helper.job}\` stops it.]`;
 				}
 				const task = loadTask(helper.task);
-				const header = task ? rowVerdict(task) : job === DELIVERED ? "ended" : outcome(job);
+				const header = task ? verdict(task) : job === DELIVERED ? "ended" : outcome(job);
 				const parts = [task ? checkResult(task) : "", job === DELIVERED ? "[Ended; its result was already delivered to this conversation as a message.]" : result(job).trimEnd()];
 				return `## ${helper.id} (${header})\n${parts.filter(Boolean).join("\n\n")}`;
 			});

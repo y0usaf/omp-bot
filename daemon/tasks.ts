@@ -43,6 +43,14 @@ export function final(task: Task): boolean {
 	return task.state === "done" || task.state === "dropped";
 }
 
+export function verdict(task: Task): string {
+	if (task.dropped !== null) return `dropped: ${task.dropped}`;
+	const check = task.checked;
+	if (check?.code === 0) return "check passed; the task is done";
+	if (check) return `check failed (${check.code === null ? check.reason ?? "no exit code" : `exit ${check.code}`}); the task stays ${task.state}`;
+	return `task ${task.state}`;
+}
+
 export function loadTask(id: string): Task | undefined {
 	try {
 		return JSON.parse(readFileSync(join(TASKS, id, "task.json"), "utf8"));
