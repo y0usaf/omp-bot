@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { escapeHarnessTags } from "@oh-my-pi/pi-coding-agent/session/harness-tags";
 import { dir, type Job, load, request, safeEnv } from "../daemon/ompd";
 import { ROOT, STATE } from "../daemon/paths";
+import { final, loadTask, type Task } from "../daemon/tasks";
 
 const BOT = process.env.OMP_BOT_NAME ?? "";
 const SELF = process.env.OMP_BOT_HELPER ?? "";
@@ -14,14 +15,15 @@ const REPORT_BYTES = 64 * 1024;
 const DEPTH = Number(process.env.OMP_BOT_HELPER_DEPTH) || (SELF ? 1 : 0);
 const MAX_DEPTH = 2;
 const MAX_HELPERS = Number(process.env.OMP_BOT_MAX_HELPERS) || 8;
+const MINUTES = Number(process.env.OMP_BOT_HELPER_MINUTES) || 60;
 const INHERITED = /^(?:\*|(?:@|pi\/)?default|(?:@|pi\/)task)$/;
 const PATCHED = Symbol.for("omp-bot.helpers.send");
 const WAKE = /^\[wake\][^\S\n]*(?:\n\s*)?/;
 const DELIVERED = { state: "done" } as Job;
 const awaited: Set<string> = ((globalThis as any)[Symbol.for("ompd.awaited")] ??= new Set());
 
-type Helper = { id: string; parent: string; agent: string; description: string; job: string; tool: string; started: number; cwd: string };
-type Item = { task: string; solutionSpace?: string; name?: string; agent?: string; tools?: string[]; model?: string | string[] };
+type Helper = { id: string; parent: string; agent: string; description: string; job: string; task: string; tool: string; started: number; cwd: string };
+type Item = { task: string; check?: string; for?: string; title?: string; minutes?: number; solutionSpace?: string; name?: string; agent?: string; tools?: string[]; model?: string | string[] };
 
 const owner = () => process.env.OMPD_OWNER || `bot:${BOT}`;
 const self = () => SELF || MAIN;
@@ -99,6 +101,25 @@ function result(job: Job): string {
 	} catch {
 		return "(it wrote no result and no log)";
 	}
+}
+
+function rowVerdict(task: Task): string {
+	if (task.dropped !== null) return `task dropped: ${task.dropped}`;
+	const check = task.checked;
+	if (check?.code === 0) return "check passed; the task is done";
+	if (check) return `check failed (${check.code === null ? check.reason ?? "no exit code" : `exit ${check.code}`}); the task stays ${task.state}`;
+	return `task ${task.state}`;
+}
+
+function checkResult(task: Task): string {
+	const check = task.checked;
+	if (!check) return "";
+	const head = check.job ? `[check exited ${check.code ?? "-"}: ompd job ${check.job}, log ${join(dir(check.job), "log")}]` : `[its check did not run: ${check.reason ?? "unknown"}]`;
+	let lines = "";
+	try {
+		if (check.job) lines = readFileSync(join(dir(check.job), "log"), "utf8").trimEnd().split("\n").slice(-20).join("\n");
+	} catch {}
+	return lines ? `${head}\n${lines}` : head;
 }
 
 function baseArgs(): string[] {
@@ -188,7 +209,7 @@ export default function helpers(pi) {
 		return agents;
 	}
 
-	async function start(item: Item, context: string, cwd: string, tool: string, taken: Set<string>): Promise<Helper> {
+	async function start(item: Item, context: string, cwd: string, tool: string, task: string, taken: Set<string>): Promise<Helper> {
 		const again = records().find(helper => helper.tool === tool);
 		if (again) return again;
 		const agent = (await definitions(cwd)).find(found => found.name === (item.agent || "task"));
@@ -196,7 +217,7 @@ export default function helpers(pi) {
 		taken.add(id);
 		const home = join(HELPERS, id);
 		mkdirSync(join(home, "sessions"), { recursive: true });
-		const helper: Helper = { id, parent: self(), agent: agent.name, description: goal(item.task), job: "", tool, started: Date.now(), cwd };
+		const helper: Helper = { id, parent: self(), agent: agent.name, description: goal(item.task), job: "", task, tool, started: Date.now(), cwd };
 		writeAtomic(join(home, "system.md"), systemPrompt(helper, agent.systemPrompt ?? "", context));
 		writeAtomic(join(home, "assignment.md"), `Complete assignment thoroughly:\n\n${item.task.trim()}\n`);
 		let args = [...baseArgs(), "--session-dir", join(home, "sessions"), "--append-system-prompt", join(home, "system.md")];
@@ -234,10 +255,11 @@ export default function helpers(pi) {
 				op: "run",
 				owner: owner(),
 				tool,
+				task,
 				command: `rm -f ${quote(join(home, "stdin"))} && mkfifo ${quote(join(home, "stdin"))} && printf '%s\n' ${quote(`Helper transcripts: ${join(home, "sessions")}; final result: report beside this log`)} && exec ${[...args, "--mode", "rpc", "--no-ui"].map(quote).join(" ")} <>${quote(join(home, "stdin"))} 2> >(head -c ${REPORT_BYTES}; cat >/dev/null) >/dev/null`,
 				cwd,
 				env,
-				timeout: 0,
+				timeout: (item.minutes ?? MINUTES) * 60,
 				rerunnable: false,
 			});
 			helper.job = job.id;
@@ -383,12 +405,16 @@ export default function helpers(pi) {
 	pi.registerTool({
 		name: "task",
 		label: "Task",
-		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its result arrives in this conversation as a message when it ends, even after a restart, so never poll for it, and call wait only when nothing else is left to do${SELF ? "" : "; it waits quietly for your next turn unless the helper failed, asked to wake you (it was told to only when you must act now) or is the last job a background task waits on"}. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
+		description: `Starts helpers: each task is a subagent that runs as an omp session of its own, an ompd job outside this session with its own process and log, so this session restarting, its tab reopening or its omp crashing doesn't stop it. Every item attaches to a task in ompd's table: give \`check\`, a shell command that exits 0 only when the work is really finished, to open one, or \`for\`, the id of an existing task it works on, for a second helper on the same item or research with no check. Each item needs exactly one of them. A helper's section states the verdict from that task once its check has settled, never the helper's own claim; \`minutes\` caps how long it may run before ompd kills it (default ${MINUTES}). Every task gets \`context\` (shared background) and its own \`task\` (the complete assignment: helpers don't see this conversation); \`name\` (CamelCase) is its id, \`agent\` one of omp's agent definitions (task by default), \`tools\` and \`model\` override the agent's. The tool waits up to ${FOREGROUND_S}s and returns the results of the helpers done by then; one still running keeps running and its verdict arrives in this conversation as a message once its check settles, even after a restart, so never poll for it, and call wait only when nothing else is left to do${SELF ? "" : "; it waits quietly for your next turn unless the helper failed, asked to wake you (it was told to only when you must act now) or is the last job a background task waits on"}. Message a running helper with \`write\` to \`agent://<id>\`; it messages you the same way. \`${OMPD} kill JOB\` stops one. Without a \`model\` from the task or its agent, a helper runs on the task model role (the smol role when no task role is set), not this session's model; give \`model\` for work that needs a strong one, such as Lean proofs or compilers. At most ${MAX_HELPERS} of this bot's helpers run at once, and helpers start helpers at most ${MAX_DEPTH} deep: a call that would pass either is refused whole. A helper's environment keeps only non-secret variables and its model's API key; it asks for any other secret with the secret tool.`,
 		parameters: z.object({
 			context: z.string().optional(),
 			tasks: z.array(
 				z.object({
 					task: z.string(),
+					check: z.string().optional().describe("A shell command that exits 0 only when this item is really finished. It opens an ompd task the helper joins."),
+					for: z.string().optional().describe("The id (or unique prefix) of an existing ompd task this helper works on, instead of check."),
+					title: z.string().optional().describe("The task's title; defaults to the assignment's first line."),
+					minutes: z.number().optional().describe(`Kills the helper after this many minutes; default ${MINUTES}.`),
 					solutionSpace: z.string().optional(),
 					name: z.string().optional(),
 					agent: z.string().optional(),
@@ -399,6 +425,10 @@ export default function helpers(pi) {
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			if (!params.tasks.length) throw new Error("tasks is empty: give at least one task");
+			for (const item of params.tasks) {
+				if (Boolean(item.check?.trim()) === Boolean(item.for?.trim()))
+					throw new Error("Each item needs exactly one of `check` (a shell command that exits 0 only when the work is really finished) and `for` (the id of an ompd task it works on). Nothing was started.");
+			}
 			if (DEPTH >= MAX_DEPTH) throw new Error(`Helpers nest at most ${MAX_DEPTH} deep and this one is at depth ${DEPTH}, so it can't start helpers. Nothing was started: do the work yourself, or report back to ${SELF ? "your parent" : BOT} what still needs doing.`);
 			const fresh = params.tasks.filter((_, index) => !records().some(helper => helper.tool === `${toolCallId}#${index}`)).length;
 			const live = records().filter(running).length;
@@ -406,9 +436,21 @@ export default function helpers(pi) {
 			const known = await definitions(resolve(ctx.cwd));
 			const unknown = params.tasks.map(item => item.agent || "task").filter(name => !known.some(found => found.name === name));
 			if (unknown.length) throw new Error(`No agent named ${[...new Set(unknown)].join(", ")}; the agents are ${known.map(found => found.name).join(", ")}. Nothing was started.`);
+			const listed: Task[] = params.tasks.some(item => item.for) ? (await call({ op: "task-list", owner: owner() })).tasks : [];
+			const linked = params.tasks.map(item => {
+				if (!item.for) return undefined;
+				const matches = listed.filter(task => task.id.startsWith(item.for!.trim()));
+				if (matches.length !== 1) throw new Error(`${matches.length ? `task ${item.for} is ambiguous` : `no task ${item.for}`}: give the id of the ompd task this helper works on, or drop \`for\` and give \`check\` instead. Nothing was started.`);
+				if (final(matches[0])) throw new Error(`task ${matches[0].id} is already ${matches[0].state}: give a task that is still open, or drop \`for\` and give \`check\` instead. Nothing was started.`);
+				return matches[0].id;
+			});
 			const taken = new Set<string>();
 			const started: Helper[] = [];
-			for (const [index, item] of params.tasks.entries()) started.push(await start(item, params.context ?? "", resolve(ctx.cwd), `${toolCallId}#${index}`, taken));
+			for (const [index, item] of params.tasks.entries()) {
+				const created: Task | undefined = item.check?.trim() ? (await call({ op: "task-add", owner: owner(), title: item.title?.trim() || goal(item.task), check: item.check, cwd: resolve(ctx.cwd), key: `${toolCallId}#${index}`, env: process.env })).task : undefined;
+				if (created) pi.events.emit("ompd:task", { task: created });
+				started.push(await start(item, params.context ?? "", resolve(ctx.cwd), `${toolCallId}#${index}`, created?.id ?? linked[index]!, taken));
+			}
 			for (const helper of started) awaited.add(helper.job);
 			const done = new Map<string, Job>();
 			try {
@@ -424,6 +466,8 @@ export default function helpers(pi) {
 						}
 						const job = ended(now ?? ({ id: helper.job, state: "running" } as Job));
 						if (!job) continue;
+						const task = loadTask(helper.task);
+						if (task && (task.state === "running" || task.state === "checking")) continue;
 						done.set(helper.id, job);
 						await call({ op: "ack", id: helper.job });
 					}
@@ -434,12 +478,16 @@ export default function helpers(pi) {
 			}
 			const sections = started.map(helper => {
 				const job = done.get(helper.id);
-				if (job === DELIVERED) return `## ${helper.id}\n[Ended; its result was already delivered to this conversation as a message.]`;
-				if (job) return `## ${helper.id} (${outcome(job)})\n${result(job).trimEnd()}`;
-				pi.events.emit("ompd:background", { id: helper.job });
-				return `## ${helper.id} (running, ompd job ${helper.job})\n[Keeps running outside this session; its result arrives in this conversation as a message when it ends. Message it with write agent://${helper.id}; \`${OMPD} kill ${helper.job}\` stops it.]`;
+				if (!job) {
+					pi.events.emit("ompd:background", { id: helper.job });
+					return `## ${helper.id} (running, ompd job ${helper.job}, task ${helper.task})\n[Keeps running outside this session; its verdict arrives in this conversation once its check settles. Message it with write agent://${helper.id}; \`${OMPD} kill ${helper.job}\` stops it.]`;
+				}
+				const task = loadTask(helper.task);
+				const header = task ? rowVerdict(task) : job === DELIVERED ? "ended" : outcome(job);
+				const parts = [task ? checkResult(task) : "", job === DELIVERED ? "[Ended; its result was already delivered to this conversation as a message.]" : result(job).trimEnd()];
+				return `## ${helper.id} (${header})\n${parts.filter(Boolean).join("\n\n")}`;
 			});
-			return { content: [{ type: "text", text: sections.join("\n\n") }], details: { helpers: started.map(helper => ({ id: helper.id, job: helper.job })) } };
+			return { content: [{ type: "text", text: sections.join("\n\n") }], details: { helpers: started.map(helper => ({ id: helper.id, job: helper.job, task: helper.task })) } };
 		},
 	});
 }
