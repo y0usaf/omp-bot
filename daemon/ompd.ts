@@ -170,7 +170,7 @@ function serve() {
 	}
 
 	function taskLog(task: Task): string | null {
-		return task.checked ? join(dir(task.checked.job), "log") : null;
+		return task.checked?.job ? join(dir(task.checked.job), "log") : null;
 	}
 
 	function notifyTask(task: Task) {
@@ -221,8 +221,15 @@ function serve() {
 	function jobEnded(job: Job) {
 		const task = job.task ? tasks.get(job.task) : undefined;
 		if (!task) return;
+		if (!final(task) && task.check !== null && task.checkJob === null && !task.jobs.some(liveJob)) {
+			try {
+				return startCheck(task);
+			} catch (error) {
+				task.checked = { job: "", code: null, reason: error instanceof Error ? error.message : String(error), at: Date.now() };
+				return changed(task);
+			}
+		}
 		recompute(task);
-		if (!final(task) && task.check !== null && task.checkJob === null && !task.jobs.some(liveJob)) startCheck(task);
 	}
 
 	function stop(id: string, reason: string) {
@@ -606,13 +613,18 @@ function serve() {
 				return reply({ job });
 			}
 			case "task-add": {
+				const owner = String(message.owner ?? "");
+				if (!owner) throw new Error("task-add needs an owner");
 				const title = String(message.title ?? "").trim();
 				if (!title) throw new Error("task-add needs a title");
+				const key = String(message.key ?? "").trim() || null;
+				if (key) {
+					const existing = [...tasks.values()].find(task => task.owner === owner && task.key === key);
+					if (existing) return reply({ task: existing });
+				}
 				const check = String(message.check ?? "").trim() || null;
 				const question = String(message.question ?? "").trim() || null;
 				if (!check && !question) throw new Error("a task needs a check command, or a question for the user");
-				const owner = String(message.owner ?? "");
-				if (!owner) throw new Error("task-add needs an owner");
 				const id = Bun.randomUUIDv7();
 				const now = Date.now();
 				const env = safeEnv({ ...message.env });
@@ -620,6 +632,7 @@ function serve() {
 					v: V,
 					id,
 					owner,
+					key,
 					title,
 					check,
 					cwd: String(message.cwd ?? process.cwd()),
@@ -785,8 +798,8 @@ const USAGE = `usage: ompd COMMAND
   jobs [--owner O]                       list jobs
   show ID                                a job's record and log path
   kill ID                                kill a job's processes
-  task add --title T [--check CMD] [--cwd DIR] [--check-timeout S] [--note N] [--ask Q] [--owner O]
-                                         add a task and print its id
+  task add --title T [--key K] [--check CMD] [--cwd DIR] [--check-timeout S] [--note N] [--ask Q] [--owner O]
+                                         add a task and print its id; the same owner and key return the first one
   tasks [--owner O] [--all] [--json]     list tasks
   task show ID                           a task's record as JSON
   task ask ID QUESTION                   ask the user a question about it
@@ -808,14 +821,14 @@ function age(ms: number): string {
 	return `${Math.round(seconds / 86_400)}d`;
 }
 
-function taskLine(task: Task): string {
+export function taskLine(task: Task): string {
 	return `${task.id.slice(0, 8)}  ${task.state}  ${age(Date.now() - task.created)}  ${task.owner}  ${task.title}`;
 }
 
-function taskDetails(task: Task, running: number): string[] {
+export function taskDetails(task: Task, running: number): string[] {
 	const lines: string[] = [];
 	if (task.check) lines.push(`  check: ${task.check}`);
-	if (task.checked) lines.push(`  last check: exit ${task.checked.code ?? "-"} ${age(Date.now() - task.checked.at)} ago (log ${join(dir(task.checked.job), "log")})`);
+	if (task.checked) lines.push(`  last check: exit ${task.checked.code ?? "-"} ${age(Date.now() - task.checked.at)} ago${task.checked.job ? ` (log ${join(dir(task.checked.job), "log")})` : ` (${task.checked.reason ?? "it did not run"})`}`);
 	if (task.question) lines.push(`  question: ${task.question}`);
 	if (task.answer) lines.push(`  answer: ${task.answer}`);
 	if (task.note) lines.push(`  note: ${task.note}`);
@@ -889,7 +902,7 @@ if (import.meta.main) {
 				const id = rest[0];
 				const text = rest.slice(1).join(" ").trim();
 				if (sub === "add") {
-					const reply = await request({ op: "task-add", owner: owner("owner"), title: opt("title"), check: opt("check"), cwd: opt("cwd"), checkTimeout: opt("check-timeout"), note: opt("note"), question: opt("ask"), env: process.env });
+					const reply = await request({ op: "task-add", owner: owner("owner"), title: opt("title"), key: opt("key"), check: opt("check"), cwd: opt("cwd"), checkTimeout: opt("check-timeout"), note: opt("note"), question: opt("ask"), env: process.env });
 					console.log(reply.task.id);
 					break;
 				}

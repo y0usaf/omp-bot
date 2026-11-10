@@ -10,6 +10,7 @@ export type Task = {
 	v: number;
 	id: string;
 	owner: string;
+	key: string | null;
 	title: string;
 	check: string | null;
 	cwd: string;
