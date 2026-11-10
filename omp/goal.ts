@@ -1,21 +1,38 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE } from "./paths";
 
-const CHECK_MS = 10 * 60 * 1000;
+const CHECK_MS = Number(process.env.OMP_BOT_GOAL_CHECK_MS) || 10 * 60 * 1000;
 const TAIL = 3000;
 
 function text(message: string) {
 	return { content: [{ type: "text", text: message }], details: {} };
 }
 
-async function run(check: string, cwd: string) {
-	const proc = Bun.spawn(["bash", "-c", check], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-	const timer = setTimeout(() => proc.kill(), CHECK_MS);
-	const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+async function run(check: string, cwd: string, log: string) {
+	const proc = Bun.spawn(["setsid", "bash", "-c", 'exec >"$0" 2>&1 </dev/null; eval "$1"', log, check], { cwd, stdio: ["ignore", "ignore", "ignore"] });
+	const group = (signal: string) => {
+		try {
+			process.kill(-proc.pid, signal);
+		} catch {}
+	};
+	const timer = setTimeout(() => {
+		group("SIGTERM");
+		setTimeout(() => group("SIGKILL"), 2000);
+	}, CHECK_MS);
+	const code = await proc.exited;
 	clearTimeout(timer);
-	const both = `${out}${err}`.trim();
-	return { code, output: both.length > TAIL ? `…${both.slice(-TAIL)}` : both };
+	group("SIGKILL");
+	let output = "";
+	if (existsSync(log)) {
+		const size = statSync(log).size;
+		const fd = openSync(log, "r");
+		const buf = Buffer.alloc(Math.min(size, TAIL));
+		readSync(fd, buf, 0, buf.length, size - buf.length);
+		closeSync(fd);
+		output = `${size > TAIL ? "…" : ""}${buf.toString("utf8")}`.trim();
+	}
+	return { code, output: code === 0 || proc.signalCode === null ? output : `${output}\n(check killed after ${CHECK_MS / 1000}s)`.trim() };
 }
 
 export default function goal(pi) {
@@ -57,7 +74,7 @@ export default function goal(pi) {
 		if (!g || checking) return;
 		checking = true;
 		try {
-			const { code, output } = await run(g.check, g.cwd);
+			const { code, output } = await run(g.check, g.cwd, join(STATE, "bots", name, "goal.out"));
 			if (code === 0) {
 				rmSync(file, { force: true });
 				tell(`Goal met: \`${g.check}\` exited 0.\n\nObjective: ${g.objective}\n\n${output}`, false);
