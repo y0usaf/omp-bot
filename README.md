@@ -27,7 +27,8 @@ A bot is an omp session with extensions from this repo loaded. Each bot is drawn
 | `bin/omp-bot-ctl restart BOT [--now]` | Restart a bot once idle; `--now` stops its turn and retries the task. |
 | `bin/omp-bot-remove NAME [--purge]` | Take a bot off the roster and archive its conversation; `--purge` also deletes its persisted folders. |
 | `bin/omp-bot-demo [--stop]` | Open a separate Tern window with only the bots. |
-| `bin/ompd jobs\|show ID\|kill ID\|run [--monitor REGEX] ...` | Inspect or start jobs by hand. |
+| `bin/ompd jobs\|show ID\|kill ID\|run [--task ID] [--monitor REGEX] ...` | Inspect or start jobs by hand. |
+| `bin/ompd task add --title T [--check CMD] [--ask Q] ...` / `tasks [--owner O] [--all] [--json]` | Tasks ompd owns. A task with a check command is done only when that command exits 0; `task add` prints its id and `task check\|ask\|answer\|note\|drop` work on one. |
 
 In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot**, **Bots: Remove bot** and **Bots: Change avatar** to the palette, plus each bot's avatar in its tab, header, messages and Tern's own notification card under every look (`tern/avatars.css`), and the base style of the chat's own cards and working row (`tern/chat.css`).
 
