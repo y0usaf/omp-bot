@@ -55,6 +55,7 @@ export default function core(pi) {
 	let decisions: Decision[] = [];
 	const dismissed = new Set<string>();
 	let asking: { id: string; controller: AbortController } | undefined;
+	let injected: string | undefined;
 	keep(saved());
 
 	pi.setLabel("Bot core");
@@ -162,7 +163,9 @@ export default function core(pi) {
 				started = false;
 				readySent = false;
 				try {
-					pi.sendUserMessage(prompt(message));
+					const text = prompt(message);
+					injected = text;
+					pi.sendUserMessage(text);
 				} catch (error) {
 					report({ op: "fail", error: `could not start: ${error instanceof Error ? error.message : error}` });
 					keep(undefined);
@@ -266,7 +269,9 @@ export default function core(pi) {
 
 	pi.on("input", async (event, c) => {
 		if (c.agent?.kind === "sub") return;
-		send({ op: "live", git: approvesGit(event.text) });
+		const live = event.text !== injected;
+		injected = undefined;
+		send({ op: "live", git: approvesGit(event.text), live });
 	});
 
 	pi.on("agent_start", async (_event, c) => {
@@ -278,7 +283,7 @@ export default function core(pi) {
 
 	pi.on("agent_end", async (event, c) => {
 		if (c.agent?.kind === "sub") return;
-		if (!event.willContinue) send({ op: "live", git: false });
+		if (!event.willContinue) send({ op: "live", git: false, live: false });
 		if (event.willContinue || !current || !started || stopped) return;
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
