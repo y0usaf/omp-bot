@@ -240,13 +240,30 @@ end
 local current: { Bot } = {}
 local faces = ""
 
+-- A tab of a bot keeps that bot's tint, also when a reopened tab (or an attach) came back without one.
+local function ensure_colors(cx: WindowCx)
+	local by_name: { [string]: Bot } = {}
+	for _, bot in ipairs(current) do
+		by_name[bot.name] = bot
+	end
+	for _, tab in ipairs(cx.session:tabs()) do
+		local bot = tab.name and by_name[tab.name]
+		if bot and bot.tint and not tab.color then
+			cx.layout:color_tab(tab.id, bot.tint :: any)
+		end
+	end
+end
+
 local function show_faces(cx: WindowCx?)
 	if not cx then
 		return
 	end
+	ensure_colors(cx)
 	local by_tint: { [string]: Bot } = {}
+	local by_name: { [string]: Bot } = {}
 	local shared: { [string]: boolean } = {}
 	for _, bot in ipairs(current) do
+		by_name[bot.name] = bot
 		if bot.tint then
 			shared[bot.tint] = by_tint[bot.tint] ~= nil
 			by_tint[bot.tint] = bot
@@ -254,8 +271,12 @@ local function show_faces(cx: WindowCx?)
 	end
 	local owner: { [number]: Bot } = {}
 	for _, tab in ipairs(cx.session:tabs()) do
-		if tab.color and by_tint[tab.color] and not shared[tab.color] then
-			owner[tab.id] = by_tint[tab.color]
+		local bot = tab.name and by_name[tab.name]
+		if not bot and tab.color and by_tint[tab.color] and not shared[tab.color] then
+			bot = by_tint[tab.color]
+		end
+		if bot then
+			owner[tab.id] = bot
 		end
 	end
 	local faces_of, faces_text = {}, {}

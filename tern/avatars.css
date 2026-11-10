@@ -32,9 +32,10 @@
 	box-shadow: none;
 	transform: scale(1.25);
 	transform-origin: center;
-	animation: none;
 	transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c.out { display: none; }
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:not(.out) + .tn-dk-c:not(.out) { display: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-g,
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c > .ico { display: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before { content: none; }
