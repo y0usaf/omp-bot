@@ -443,7 +443,7 @@ class BotStatus {
 			.join(" · ");
 	}
 
-	card() {
+	dock() {
 		const groups = TASK_GROUPS.map(([state, title]) => ({ state, title, tasks: this.open.filter(task => task.state === state) })).filter(group => group.tasks.length > 0);
 		if (groups.length === 0 && this.flash.length === 0) return NONE;
 		if (this.stamp === this.version) return this.node;
@@ -454,7 +454,7 @@ class BotStatus {
 			items: group.tasks.map(task => ({ id: task.id, text: [span(task.title), span(` — ${taskDetail(task, this.bot.live)}`, "muted")], status: taskStatus(task) })),
 		}));
 		if (this.flash.length > 0) phases.push({ id: "done", title: "Done", collapsed: false, items: this.flash.map(task => ({ id: task.id, text: [span(task.title)], status: task.state })) });
-		this.node = node("card", { role: "omp.bot.tasks", head: [span("Tasks", "muted")] }, [node("checklist", { mode: "full", phases }, [], "tasks")]);
+		this.node = row([node("checklist", { phases, mode: "hud", role: "omp.hud.todo" }, undefined, "tasks")], { role: "omp.hud.activity", justify: "end" });
 		return this.node;
 	}
 
@@ -500,7 +500,7 @@ class BotTasks {
 	}
 
 	describe() {
-		return this.status.card();
+		return this.status.dock();
 	}
 }
 
@@ -967,7 +967,7 @@ function patchTranscript(state) {
 			previous = item;
 			shownBlocks.push(item);
 		}
-		if (!s.bot.hero) shownBlocks.push(s.tasks, s.status);
+		if (!s.bot.hero) shownBlocks.push(s.status);
 		const before = shownBy.get(this);
 		if (before && same(before, shownBlocks)) return before;
 		shownBy.set(this, shownBlocks);
@@ -989,7 +989,10 @@ function patchDock(state) {
 		if (!proto[DOCK_PATCHED].state.on) return surface;
 		let marked = docks.get(surface);
 		if (!marked) {
-			marked = { ...surface, dock: [new Marked(surface.dock, "omp.bot.dock")] };
+			const dock = [...surface.dock];
+			const at = dock.indexOf(this.editor);
+			dock.splice(at < 0 ? dock.length : at, 0, proto[DOCK_PATCHED].state.tasks);
+			marked = { ...surface, dock: [new Marked(dock, "omp.bot.dock")] };
 			docks.set(surface, marked);
 		}
 		return marked;
