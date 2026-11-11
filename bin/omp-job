@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+state=${OMP_BOT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omp-bot}
+runs=$state/runs
+usage() {
+	cat >&2 <<'EOF'
+usage: omp-job start NAME DIR MODEL BRIEF_FILE [HOURS]
+                         run omp -p on BRIEF_FILE in DIR, detached; returns once it has made its first tool call
+       omp-job ls        every run: state, exit code, last activity, last step
+EOF
+	exit 2
+}
+last_step() {
+	local f
+	f=$(ls -t "$1"/session/*.jsonl 2>/dev/null | head -n 1) || true
+	[ -n "$f" ] || return 0
+	jq -r 'select(.type == "message") | .message | select(.role == "assistant") | .content[]? | select(.type == "toolCall" or .type == "text") | if .type == "toolCall" then "\(.name) \((.arguments.command // .arguments.path // .arguments.code // "") | tostring | gsub("\n"; " ") | .[0:80])" else "says: \(.text | gsub("\n"; " ") | .[0:80])" end' "$f" 2>/dev/null | tail -n 1
+}
+case ${1:-} in
+start)
+	[ $# -ge 5 ] || usage
+	name=$2 dir=$3 model=$4 brief=$5 hours=${6:-2}
+	run=$runs/$name
+	if [ -f "$run/pid" ] && [ ! -f "$run/exit" ] && kill -0 "$(cat "$run/pid")" 2>/dev/null; then echo "omp-job: $name is already running" >&2; exit 1; fi
+	[ -d "$dir" ] || { echo "omp-job: $dir is not a directory" >&2; exit 1; }
+	rm -rf "$run"
+	mkdir -p "$run"
+	cp "$brief" "$run/brief.md"
+	date +%s >"$run/started"
+	printf '%s\n' "$model" >"$run/model"
+	printf '%s\n' "${OMP_BOT_NAME:-}" >"$run/owner"
+	(cd "$dir" && exec setsid sh -c 'echo $$ >"$0/pid"; timeout "$1h" env -u OMP_BOT_NAME -u OMPD_SERVICE "$2" -p --no-extensions --session-dir "$0/session" --model "$3" "$(cat "$0/brief.md")" >"$0/output" 2>&1; echo $? >"$0/exit"' "$run" "$hours" "${OMP_BIN:-omp}" "$model" </dev/null >/dev/null 2>&1 &)
+	for _ in $(seq 120); do
+		sleep 1
+		if [ -f "$run/exit" ]; then
+			[ "$(cat "$run/exit")" != 0 ] || { echo "omp-job: $name already finished: $(last_step "$run")"; exit 0; }
+			echo "omp-job: $name exited $(cat "$run/exit") before finishing:" >&2
+			tail -c 2000 "$run/output" >&2
+			exit 1
+		fi
+		step=$(last_step "$run")
+		case $step in "" | says:*) ;; *) echo "omp-job: $name is working in $dir: $step"; exit 0 ;; esac
+	done
+	echo "omp-job: $name made no tool call in 120s; still running, check omp-job ls" >&2
+	exit 1
+	;;
+ls)
+	now=$(date +%s)
+	for run in "$runs"/*/; do
+		[ -d "$run" ] || continue
+		run=${run%/}
+		f=$(ls -t "$run"/session/*.jsonl 2>/dev/null | head -n 1) || true
+		idle=$([ -n "$f" ] && echo "$((now - $(stat -c %Y "$f")))s ago" || echo never)
+		if [ -f "$run/exit" ]; then st="exited $(cat "$run/exit")"; elif [ -f "$run/pid" ] && kill -0 "$(cat "$run/pid")" 2>/dev/null; then st=running; else st="dead (no exit code)"; fi
+		printf '%s\t%s\tstarted %smin ago\tactive %s\t%s\n' "${run##*/}" "$st" "$(((now - $(cat "$run/started" 2>/dev/null || echo "$now")) / 60))" "$idle" "$(last_step "$run")"
+	done
+	;;
+*) usage ;;
+esac
