@@ -89,7 +89,7 @@ while :; do
 	code=0
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
 	started=$(date +%s)
-	flock -n -E 75 -o "$dir/lock" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
+	flock -n -E 75 -o "$dir/lock" "$omp" -e "$root/omp/look.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
 	if [ "$code" = 75 ]; then
 		echo "omp-bot: $name is already open somewhere else" >&2
 		exit 75

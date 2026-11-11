@@ -1,16 +1,22 @@
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { chatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome";
 import { Loader } from "@oh-my-pi/pi-tui/components/loader";
+import { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { chaoOf, drawChao } from "./chao.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
+const LIVE = Symbol.for("omp-bot.look");
 const NONE = col([], { role: "omp.bot.none" });
+const HIDDEN =
+	"\n# Tool activity\nYour tool calls are hidden from the transcript, so say in words what you found and what you ran rather than pointing at a card.\n";
 const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const HISTORY_CHUNK = 40;
@@ -129,11 +135,24 @@ function same(a, b) {
 	return a.length === b.length && a.every((item, i) => item === b[i]);
 }
 
+function switched() {
+	let raw;
+	try {
+		raw = settings.getGlobalSettings();
+	} catch {
+		raw = undefined;
+	}
+	const want = raw?.display?.chatLook;
+	return want && typeof want === "object" ? want : {};
+}
+
 class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
 		this.look = chaoOf(this.name, process.env.OMP_BOT_TINT);
 		this.tint = this.look.tint;
+		this.mode = process.env.OMP_BOT !== "0" && Boolean(process.env.OMP_BOT_NAME);
+		this.want = {};
 		this.mood = "idle";
 		this.line = pick(IDLE, Date.now());
 		this.hero = true;
@@ -154,6 +173,10 @@ class Bot {
 	rename(name) {
 		this.name = name;
 		this.look = chaoOf(name, this.tint);
+	}
+
+	on(piece) {
+		return typeof this.want[piece] === "boolean" ? this.want[piece] : this.mode;
 	}
 
 	set(mood, line) {
@@ -593,6 +616,7 @@ function patchTranscript(state) {
 	const clear = proto.clear;
 	const shownBy = new WeakMap();
 	const wrapped = new WeakMap();
+	const plainWraps = new WeakMap();
 	const events = new WeakMap();
 	const advice = new WeakMap();
 	const stamps = new WeakMap();
@@ -607,6 +631,18 @@ function patchTranscript(state) {
 		const questions = isPartial || result?.isError ? undefined : asked(result?.details);
 		if (questions) answers.set(this, questions);
 		return updateResult.call(this, result, isPartial, toolCallId);
+	};
+
+	const docks = new WeakMap();
+	const surface = Composer.prototype.describeSurface;
+	Composer.prototype.describeSurface = function (cx) {
+		const described = surface.call(this, cx);
+		let docked = docks.get(described);
+		if (!docked) {
+			docked = { main: described.main, dock: [new Marked(described.dock, "omp.chat.dock")] };
+			docks.set(described, docked);
+		}
+		return docked;
 	};
 
 	proto.clear = function () {
@@ -627,7 +663,27 @@ function patchTranscript(state) {
 		return is;
 	}
 
+	function marked(block) {
+		const source = block?.mode === "thinking" ? undefined : (block?.source ?? block);
+		const role =
+			source instanceof UserMessageComponent || source instanceof AssistantMessageComponent
+				? "omp.chat.msg"
+				: advises(block)
+					? "omp.chat.advice"
+					: undefined;
+		if (!role) return block;
+		let kept = plainWraps.get(block);
+		if (!kept) {
+			kept = new Marked([block], role);
+			plainWraps.set(block, kept);
+		}
+		if (isNativeSettled(block) && !isNativeSettled(kept)) settleNative(kept);
+		return kept;
+	}
+
 	function shown(block) {
+		const bot = proto[PATCHED].state.bot;
+		if (!bot.on("bubbles")) return marked(block);
 		if (block?.mode === "thinking" || advises(block)) return undefined;
 		const questions = answers.get(block);
 		if (questions) {
@@ -692,25 +748,30 @@ function patchTranscript(state) {
 	proto.nativeBlocks = function () {
 		const blocks = inner.call(this);
 		const s = proto[PATCHED].state;
-		if (!s.on || !s.top) return blocks;
-		let page = pages.get(this);
-		if (!page && blocks.length > 0) {
-			s.clock?.sync();
+		if (!s.top) return blocks;
+		const bot = s.bot;
+		const stamped = bot.on("timestamps");
+		const earlier = bot.on("earlier");
+		if (stamped || earlier) s.clock?.sync();
+		let page = earlier ? pages.get(this) : undefined;
+		if (!page && earlier && blocks.length > 0) {
 			page = { start: Math.max(0, blocks.length - HISTORY_CHUNK), restored: blocks.length };
-			page.control = new BotHistory(s.bot, () => {
+			page.control = new BotHistory(bot, () => {
 				page.start = Math.max(0, page.start - HISTORY_CHUNK);
 			});
 			pages.set(this, page);
 		}
 		const start = page?.start ?? 0;
-		for (let i = blocks.length - 1; i >= start; i--) {
-			const item = shown(blocks[i]);
-			if (item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer) {
-				stamp(item, i < page.restored);
+		if (stamped) {
+			for (let i = blocks.length - 1; i >= start; i--) {
+				const item = shown(blocks[i]);
+				if (item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer) {
+					stamp(item, i < (page?.restored ?? blocks.length));
+				}
 			}
 		}
-		const shownBlocks = [s.top];
-		if (start > 0) shownBlocks.push(page.control);
+		const shownBlocks = bot.on("status") ? [s.top] : [];
+		if (page && start > 0) shownBlocks.push(page.control);
 		let last;
 		let previous;
 		for (let i = start; i < blocks.length; i++) {
@@ -721,7 +782,7 @@ function patchTranscript(state) {
 				shownBlocks.push(item);
 				continue;
 			}
-			const ts = stamp(item);
+			const ts = stamped ? stamp(item) : undefined;
 			const separated = ts !== undefined && apart(ts, last);
 			if (separated) shownBlocks.push(timeOf(item, ts));
 			if (ts !== undefined) last = ts;
@@ -729,7 +790,7 @@ function patchTranscript(state) {
 			previous = item;
 			shownBlocks.push(item);
 		}
-		if (!s.bot.hero) shownBlocks.push(s.status);
+		if (bot.on("status") && !bot.hero) shownBlocks.push(s.status);
 		const before = shownBy.get(this);
 		if (before && same(before, shownBlocks)) return before;
 		shownBy.set(this, shownBlocks);
@@ -747,17 +808,19 @@ function patchWorkingRow(state) {
 	const innerDescribe = proto.describe;
 	proto[HUD_PATCHED] = { state };
 	proto.render = function (width) {
-		return proto[HUD_PATCHED].state.on ? [] : innerRender.call(this, width);
+		return proto[HUD_PATCHED].state.bot.on("working") ? [] : innerRender.call(this, width);
 	};
 	proto.describe = function (cx) {
-		return proto[HUD_PATCHED].state.on ? row([]) : innerDescribe.call(this, cx);
+		return proto[HUD_PATCHED].state.bot.on("working") ? row([]) : innerDescribe.call(this, cx);
 	};
 }
 
-export default function ompBot(pi) {
+export default function look(pi) {
+	if (globalThis[LIVE]) return;
+	globalThis[LIVE] = true;
 	const bot = new Bot();
+	bot.want = switched();
 	const state = {
-		on: process.env.OMP_BOT !== "0",
 		bot,
 		top: undefined,
 		status: new BotStatus(bot),
@@ -767,21 +830,21 @@ export default function ompBot(pi) {
 	let abort;
 	let unlisten;
 
-	pi.setLabel("Bot mode");
+	pi.setLabel("Chat look");
 
 	function mount() {
 		if (!ui) return;
 		state.top = new BotTop(bot, () => abort?.());
 		ui.setWidget(
 			"omp-bot",
-			state.on
+			bot.on("status")
 				? tui => {
 						bot.tui = tui;
 						return new BotHero(bot);
 					}
 				: undefined,
 		);
-		ui.setWidget("omp-bot-floor", state.on && bot.hero ? () => new BotFloor() : undefined, { placement: "belowEditor" });
+		ui.setWidget("omp-bot-floor", bot.on("status") && bot.hero ? () => new BotFloor() : undefined, { placement: "belowEditor" });
 	}
 
 	function attach(ctx) {
@@ -796,13 +859,14 @@ export default function ompBot(pi) {
 	function listen() {
 		unlisten?.();
 		unlisten = ui.onTerminalInput(data => {
-			if (state.on && typeof data === "string" && data.length > 0 && data[0] !== "\x1b") bot.type();
+			if (bot.on("status") && typeof data === "string" && data.length > 0 && data[0] !== "\x1b") bot.type();
 		});
 	}
 
 	function begin(_event, ctx) {
 		if (ctx.agent?.kind === "sub" || ctx.mode !== "tui") return;
 		attach(ctx);
+		bot.want = switched();
 		bot.hero = !ctx.sessionManager?.getEntries?.().some(entry => entry.type === "message");
 		state.clock = new Clock(ctx.sessionManager);
 		patchTranscript(state);
@@ -822,14 +886,14 @@ export default function ompBot(pi) {
 	});
 
 	pi.registerCommand("bot", {
-		description: "Bot mode: a Chao that works for you; /bot toggles it, /bot name NAME renames it",
+		description: "Bot look: a Chao that works for you; /bot toggles it, /bot name NAME renames it",
 		handler: async (args, ctx) => {
 			const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
 			if (parts[0] === "name" && parts[1]) {
 				bot.rename(parts.slice(1).join(" "));
 				bot.set(bot.mood, `Hi, I'm ${bot.name}.`);
 			} else {
-				state.on = !state.on;
+				bot.mode = !bot.mode;
 			}
 			attach(ctx);
 			mount();
@@ -839,10 +903,14 @@ export default function ompBot(pi) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
-		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small Chao: your replies and one status word, nothing else.\n`;
+		if (ctx.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
+		const persona = bot.on("status")
+			? `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small Chao: your replies and one status word, nothing else.\n`
+			: "";
+		const hidden = ctx.mode === "tui" && chatTranscriptDisplayPreferences.hideToolActivity ? HIDDEN : "";
+		if (!persona && !hidden) return undefined;
 		const systemPrompt = [...event.systemPrompt];
-		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
+		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${hidden}${persona}`;
 		return { systemPrompt };
 	});
 

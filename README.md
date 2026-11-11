@@ -27,6 +27,22 @@ In Tern, the `tern/` plugin adds **Bots: Open all**, **Bots: Open bot**, **Bots:
 
 To try prompts safely, set `OMP_BOT_NO_TOOLS=1` and a throwaway `OMP_BOT_STATE`. A separate state folder isolates memory, not access to the machine.
 
+## Chat look
+
+`omp/look.ts` draws the chat look and every omp session can load it, in a Tern pane or anywhere else. A bot wears all five pieces; a plain session wears only what its omp settings switch on, in `~/.omp/agent/config.yml`:
+
+```yaml
+display:
+  chatLook:
+    bubbles: true      # replies and prompts in the Chao's tint instead of plain chat bubbles
+    timestamps: true   # a time row wherever messages are far apart
+    status: true       # the Chao with its status phrase, and its greeting in a fresh session
+    working: true      # that phrase in place of omp's own working row
+    earlier: true      # the last 40 messages, with "Show earlier messages" for the rest
+```
+
+A key left out follows the session: on in a bot, off in a plain session. `/bot` toggles the whole look at runtime, and `/bot name NAME` renames the Chao.
+
 ## Dependencies
 
 omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh, tar and finix's `omp-box`. Bot memory needs OptChat (from finix's `modules/dev/ai/omp/optchat`).
@@ -73,7 +89,7 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **One process per bot.** `bots/NAME/lock` keeps a bot from running twice. A bot runs while its tab is open and stops when the tab closes.
 - **One conversation.** Each start resumes the bot's latest session. The bot exits with code 76 to restart; finix's Agent Tabs plugin reopens it in the same tab.
 - **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
-- **Avatar.** `omp/omp-bot.ts` redraws the transcript and composer around a Chao: replies and prompts get its tint, the working row shows what the turn is doing, and `omp/chao.ts` draws the face. `/bot` toggles it, `/bot name NAME` renames it.
+- **Avatar.** `omp/look.ts` redraws the transcript and composer around a Chao: replies and prompts get its tint, the working row shows what the turn is doing, and `omp/chao.ts` draws the face. The same file gives every other omp session the look it is switched to: one key per piece under `display.chatLook` in omp's own `config.yml`. `/bot` toggles the whole look in a session, `/bot name NAME` renames the Chao.
 - **Tabs.** The Tern plugin registers each bot as an agent tab, colours its tab by tint, and draws avatars from `tern/avatars.json` and the PNG sprites.
 
 ## Persistence
