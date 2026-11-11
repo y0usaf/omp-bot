@@ -63,7 +63,6 @@ persona=$(field persona)
 [ -z "${OMP_BOT_CHAT_LOOK_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CHAT_LOOK_EXTENSION" "$@"
 [ "${OMP_BOT_NO_TOOLS:-}" != 1 ] || set -- --no-tools "$@"
 [ "$(field extensions)" = true ] || set -- --no-extensions "$@"
-[ "$(field goal)" != true ] || set -- -e "$root/omp/goal.ts" "$@"
 model=$(field model)
 model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
