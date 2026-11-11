@@ -20,10 +20,11 @@ case ${1:-} in
 start)
 	[ $# -ge 5 ] || usage
 	name=$2 dir=$3 model=$4 brief=$5 hours=${6:-2}
+	case $name in "" | .* | *[!A-Za-z0-9._-]*) echo "omp-job: '$name' is not a run name (letters, digits, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;; esac
 	run=$runs/$name
-	if [ -f "$run/pid" ] && [ ! -f "$run/exit" ] && kill -0 "$(cat "$run/pid")" 2>/dev/null; then echo "omp-job: $name is already running" >&2; exit 1; fi
+	[ ! -e "$run" ] || { echo "omp-job: $run already exists; pick a new name" >&2; exit 1; }
 	[ -d "$dir" ] || { echo "omp-job: $dir is not a directory" >&2; exit 1; }
-	rm -rf "$run"
+	[ -r "$brief" ] || { echo "omp-job: cannot read $brief" >&2; exit 1; }
 	mkdir -p "$run"
 	cp "$brief" "$run/brief.md"
 	date +%s >"$run/started"
