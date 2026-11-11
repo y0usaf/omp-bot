@@ -46,6 +46,7 @@ omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh
 | `memory` | `optchat` (default) or `none` for omp's own compaction. |
 | `persist` | Folders under `~` that must survive a reboot. |
 | `box` | `true` runs the bot's omp inside omp-box. |
+| `work` | `true` gives the bot an open-work list, `bots/NAME/work.txt`: one `todo` or `wait` line per unfinished ask. When a turn ends with `todo` lines left, the bot is sent them and keeps going, until the list has none, a nudged turn makes no tool call, or `OMP_BOT_WORK_NUDGES` (6) nudges in a row. |
 | `avatar` | Parts overriding the ones the name picks: `{"body": "ghost", "color": "#ff8800", "eyes": "happy", "accessory": "halo", "motion": "hop"}`. |
 | | Part names are in `tern/avatars.json`; `body` may also name a drawn sprite in `tern/avatars/` (`lloyd`, `sol`, ...). **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
 
