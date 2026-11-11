@@ -77,6 +77,9 @@ optchat)
 	mkdir -p "$dir/optchat"
 	export OPTCHAT_DIR="$dir/optchat" OPTCHAT_BOT="$name" OPTCHAT_RULES="$dir/rules.md" OPTCHAT_BOTS="$state/bots"
 	set -- -e "$OMP_BOT_OPTCHAT/extension.ts" --config "$root/omp/memory.yml" "$@"
+	"$root/bin/omp-bot-memory" "$name" >>"$dir/optchat/optchatd.log" 2>&1 &
+	summariser=$!
+	trap 'kill "$summariser" 2>/dev/null' EXIT
 	;;
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
