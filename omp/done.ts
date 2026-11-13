@@ -122,7 +122,7 @@ export default function (pi) {
 		pi.sendMessage(
 			{
 				customType: "done-check",
-				content: `Not done: \`${mine.command}\` exited ${result.code} (round ${rounds} of ${mine.rounds}).\n${tail || "(no output)"}\n\nKeep working until it passes.`,
+				content: `Not done: the done-check exited ${result.code} (round ${rounds} of ${mine.rounds}).\n${tail || "(no output)"}\n\nKeep working until it passes.`,
 				display: false,
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
