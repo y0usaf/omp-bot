@@ -84,7 +84,7 @@ optchat)
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
+set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" -e "$root/omp/done.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
 rm -f "$OMP_BOT_RELAUNCH"
 cutoffs=0

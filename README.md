@@ -66,6 +66,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_EXTENSION`, `OMP_BOT_CWD_EXTENSION`, `OMP_BOT_SECRETS_EXTENSION`, `OMP_BOT_WORK_FOLD_EXTENSION`, `OMP_BOT_CHAT_LOOK_EXTENSION` | none | Extra omp extensions every bot loads. |
 | `OMP_BOT_NO_TOOLS` | unset | `1` starts bots with `--no-tools`. |
 | `OMP_BOT_NAP_MS` | 45000 | Idle time before the Chao curls up for a nap. |
+| `OMP_BOT_CHECK_ROUNDS` | 3 | Times a done-check sends a helper back to work before a bot reports it as still failing. |
 
 Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BOX_EXT` and `OMP_BOT_BOX_PATH` from `box.env`; see `bin/omp-bot-box`.
 
@@ -74,6 +75,7 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **One process per bot.** `bots/NAME/lock` keeps a bot from running twice. A bot runs while its tab is open and stops when the tab closes.
 - **One conversation.** Each start resumes the bot's latest session. The bot exits with code 76 to restart; finix's Agent Tabs plugin reopens it in the same tab.
 - **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
+- **Done-checks.** A bot can add `check` to a helper it starts: a shell command the helper never sees. When the helper stops, `omp/done.ts` runs it in the bot's folder; while it exits non-zero the helper is told the output and carries on, up to `OMP_BOT_CHECK_ROUNDS` rounds, and the bot then gets the helper's result with the check's outcome.
 - **Avatar.** `omp/omp-bot.ts` redraws the transcript and composer around a Chao: replies and prompts get its tint, the working row shows what the turn is doing, and `omp/chao.ts` draws the face. `/bot` toggles it, `/bot name NAME` renames it.
 - **Tabs.** The Tern plugin registers each bot as an agent tab, colours its tab by tint, and draws avatars from `tern/avatars.json` and the PNG sprites.
 
