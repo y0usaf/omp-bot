@@ -34,16 +34,28 @@ jq -e '.type == "session" and (.id | type) == "string"' "$work/header" > /dev/nu
 tail -c "$keep" "$file" | sed '1d' | jq -c . > "$work/tail"
 [ -s "$work/tail" ] || exit 0
 
-# buildSessionContext resolves the model, thinking level, tier, mode and rules
-# from the leaf's ancestors only, so every carried entry has to sit on the chain.
-grep '"type":"model_usage"' "$file" > "$work/carry"
-grep '"type":"thinking_level_change"' "$file" | tail -n 1 >> "$work/carry"
-grep '"type":"service_tier_change"' "$file" | tail -n 1 >> "$work/carry"
-grep '"type":"mode_change"' "$file" | tail -n 1 >> "$work/carry"
-grep '"type":"ttsr_injection"' "$file" | tail -n 3 >> "$work/carry"
-grep '"type":"model_change"' "$file" | jq -r '(.role // "default") + "\t" + tojson' > "$work/roles"
-awk -F '\t' '{ last[$1] = $2 } END { for (role in last) print last[role] }' "$work/roles" >> "$work/carry"
-jq -c . "$work/carry" | jq -sc 'sort_by(.timestamp // "") | foreach .[] as $e ({p: null}; {p: $e.id, e: ($e + {parentId: .p})}; .e)' > "$work/settings.jsonl"
+jq -cR 'try (fromjson | select(.id) | [.id, (.parentId // ""), .type, (.role // "default")]) catch empty' "$file" > "$work/index"
+jq -r 'select(.id) | .id' "$work/tail" > "$work/tailids"
+awk -F '"' -v tailids="$work/tailids" '
+	BEGIN { while ((getline line < tailids) > 0) tail[line] = 1 }
+	{ id = $2; parent[id] = $4; type[id] = $6; role[id] = $8; leaf = id }
+	END {
+		for (id = leaf; id != "" && !(id in seen); id = parent[id]) { seen[id] = 1; chain[++n] = id }
+		for (i = n; i >= 1; i--) {
+			id = chain[i]
+			if (id in tail) continue
+			t = type[id]
+			if (t == "model_usage") keep[id] = 1
+			else if (t == "thinking_level_change" || t == "service_tier_change" || t == "mode_change") last[t] = id
+			else if (t == "model_change") last[t "\t" role[id]] = id
+			else if (t == "ttsr_injection") { ttsr[++k] = id }
+		}
+		for (key in last) keep[last[key]] = 1
+		for (i = k - 2; i <= k; i++) if (i >= 1) keep[ttsr[i]] = 1
+		for (id in keep) print id
+	}' "$work/index" | jq -R . | jq -s 'map({(.): true}) | add // {}' > "$work/keep"
+jq -cR --slurpfile keep "$work/keep" 'try (fromjson | select(.id and $keep[0][.id])) catch empty' "$file" > "$work/carry"
+jq -sc 'sort_by(.timestamp // "") | foreach .[] as $e ({p: null}; {p: $e.id, e: ($e + {parentId: .p})}; .e)' "$work/carry" > "$work/settings.jsonl"
 root=$(tail -n 1 "$work/settings.jsonl" | jq -r '.id // ""')
 
 {
