@@ -17,15 +17,31 @@ const parse = line => {
 
 const run = command => {
 	const { promise, resolve } = Promise.withResolvers();
-	const child = spawn("bash", ["-c", command], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"] });
+	const child = spawn("bash", ["-c", command], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], detached: true });
 	let out = "";
-	child.stdout.on("data", d => (out += d));
-	child.stderr.on("data", d => (out += d));
-	const timer = setTimeout(() => child.kill("SIGKILL"), CHECK_SECONDS * 1000);
-	child.on("close", (code, signal) => {
+	const add = d => (out = (out + d).slice(-4000));
+	child.stdout.on("data", add);
+	child.stderr.on("data", add);
+	let done = false;
+	let code;
+	const finish = exit => {
+		if (done) return;
+		done = true;
 		clearTimeout(timer);
-		resolve({ exit: code ?? signal, out: out.slice(-4000) });
+		try {
+			process.kill(-child.pid, "SIGKILL");
+		} catch {}
+		child.stdout.destroy();
+		child.stderr.destroy();
+		resolve({ exit, out });
+	};
+	const timer = setTimeout(() => finish(`timeout after ${CHECK_SECONDS}s`), CHECK_SECONDS * 1000);
+	child.on("exit", (c, signal) => {
+		code = c ?? signal;
+		setTimeout(() => finish(code), 500);
 	});
+	child.on("close", () => finish(code));
+	child.on("error", error => finish(error.message));
 	return promise;
 };
 
