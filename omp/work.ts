@@ -9,6 +9,11 @@ const CHECK_SECONDS = Number(process.env.OMP_BOT_WORK_CHECK_SECONDS) || 60;
 const DAY = 86_400_000;
 
 const parse = line => {
+	const d = /^done (.*?) build: (.*?) seen: (.*)$/.exec(line.trim());
+	if (d) {
+		const ask = d[1].trim();
+		return { kind: "done", ask, key: ask.replace(/\s*\([^()]*\)$/, ""), build: d[2].trim(), seen: d[3].trim(), line: line.trim() };
+	}
 	const m = /^(todo|wait|drop) (.*?)(?: check: (.*))?$/.exec(line.trim());
 	if (!m) return undefined;
 	const ask = m[2].trim();
@@ -52,7 +57,7 @@ export default function work(pi) {
 	const file = join(dir, "work.txt");
 	const stateFile = join(dir, "work.json");
 	const logFile = join(dir, "done.log");
-	const rule = `\n\n# Open work\n${file} lists everything the user asked you for that isn't finished, one line each and nothing else:\n- \`todo <ask> check: <command>\` while you can act on it.\n- \`wait <ask> (<helper name>) check: <command>\` while a running helper has it.\n- \`wait <ask> (user: "<the question you asked them>") check: <command>\` only when you asked the user a question and it is unanswered; quote it. A rule of theirs that already covers the work means it is yours: todo, not wait.\n- \`check: <command>\` is a shell command (run from home, ${CHECK_SECONDS}s limit) that exits 0 only once the work is done, meaning the user can try it: it tests the deployed thing or the pushed revision, never that code exists. \`check: manual <what must be seen>\` for what only eyes or the real monitor can judge.\nAdd a line when you take work on. After each turn the checks run: a passing one removes its line and logs the command, exit and output to ${logFile}; you're told so, and tell the user. Never delete a line with a command check yourself; it comes back. Delete a manual-check line only once that check was seen. To drop work, replace its line with \`drop <ask> (why)\` and tell the user why in one line. A question you answer outright gets no line.`;
+	const rule = `\n\n# Open work\n${file} lists everything the user asked you for that isn't finished, one line each and nothing else:\n- \`todo <ask> check: <command>\` while you can act on it.\n- \`wait <ask> (<helper name>) check: <command>\` while a running helper has it.\n- \`wait <ask> (user: "<the question you asked them>") check: <command>\` only when you asked the user a question and it is unanswered; quote it. A rule of theirs that already covers the work means it is yours: todo, not wait.\n- \`check: <command>\` is a shell command (run from home, ${CHECK_SECONDS}s limit) that exits 0 only once the work is done, meaning the user can try it: it tests the deployed thing or the pushed revision, never that code exists. \`check: manual <what must be seen>\` for what only eyes or the real monitor can judge.\nAdd a line when you take work on. After each turn the checks run: a passing one removes its line and logs the command, exit and output to ${logFile}; you're told so, and tell the user. Deleting a line never closes it; it comes back. A manual-check item closes only when you replace its line with \`done <ask> build: <the exact revision or store path tested> seen: <what was observed, with numbers or file paths>\`, written after the check was actually seen; it is logged to ${logFile}. To drop work, replace its line with \`drop <ask> (why)\` and tell the user why in one line. A question you answer outright gets no line.`;
 	const read = () => (existsSync(file) ? readFileSync(file, "utf8") : "");
 	const load = () => {
 		try {
@@ -91,20 +96,39 @@ export default function work(pi) {
 		const next = {};
 		const keep = [];
 		const notes = [];
-		const dropped = new Set(text.split("\n").map(parse).filter(item => item?.kind === "drop").map(item => item.key));
-		const closed = new Set();
+		const items = text.split("\n").map(parse).filter(Boolean);
+		const dropped = new Set(items.filter(item => item.kind === "drop").map(item => item.key));
+		const known = new Map([...Object.entries(state).map(([key, old]) => [key, old.check]), ...items.filter(item => item.check).map(item => [item.key, item.check])]);
+		const valid = item => known.get(item.key)?.startsWith("manual") && item.build && item.seen;
+		const closed = new Set(items.filter(item => item.kind === "done" && valid(item)).map(item => item.key));
 		for (const line of text.split("\n")) {
 			if (!line.trim()) continue;
 			const item = parse(line);
 			if (!item) {
 				keep.push(line);
-				notes.push(`Not a todo/wait line, fix it: ${line}`);
+				notes.push(`Not a todo/wait/drop line or a complete done line (done <ask> build: … seen: …), fix it: ${line}`);
 				continue;
 			}
 			if (item.kind === "drop") {
 				log({ ask: item.ask, dropped: true });
 				continue;
 			}
+			if (item.kind === "done") {
+				const check = known.get(item.key);
+				if (!valid(item)) {
+					keep.push(line);
+					notes.push(
+						check?.startsWith("manual")
+							? `A done line needs both build: and seen: filled in: ${line}`
+							: `done only closes a manual-check item; this ask has ${check ? "a command check, which closes itself" : "no open item"}: ${line}`,
+					);
+					continue;
+				}
+				log({ ask: item.ask, check, closed: "seen", build: item.build, seen: item.seen });
+				notes.push(`Closed on what was seen: ${item.ask}\nTell the user it's done.`);
+				continue;
+			}
+			if (closed.has(item.key)) continue;
 			if (dropped.has(item.key)) continue;
 			if (item.check && !item.check.startsWith("manual")) {
 				const result = await run(item.check);
@@ -130,11 +154,9 @@ export default function work(pi) {
 		}
 		for (const [key, old] of Object.entries(state)) {
 			if (next[key] || dropped.has(key) || closed.has(key)) continue;
-			if (old.check && !old.check.startsWith("manual")) {
-				keep.push(old.line);
-				next[key] = old;
-				notes.push(`Restored, deleted before its check passed (use drop to drop it): ${old.line}`);
-			} else log({ ask: key, check: old.check ?? null, closed: "deleted by bot" });
+			keep.push(old.line);
+			next[key] = old;
+			notes.push(`Restored, deleted without closing it (manual checks close with a done line, else drop): ${old.line}`);
 		}
 		const out = keep.length ? `${keep.join("\n")}\n` : "";
 		if (out !== text) writeFileSync(file, out);
