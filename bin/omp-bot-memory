@@ -1,9 +1,16 @@
 #!/bin/sh
+# omp-bot-memory NAME
+#
+# Runs NAME's OptChat summariser only while it has something to summarize. The
+# summary writer is a whole omp process (~200 MB resident) that would otherwise
+# sit idle between turns, so this holds the bot's memory lock and starts it when
+# the message log has rows the view has not seen, or the summary tree still has
+# merges to do; it stops itself after OPTCHAT_IDLE_MS without work.
 set -eu
 [ $# -eq 1 ] || { echo "usage: omp-bot-memory NAME" >&2; exit 2; }
 name=$1
 case $name in
-"" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name' (letters, digits, space, '.', '_' or '-', not starting with '.')" >&2; exit 2 ;;
+"" | .* | *[!A-Za-z0-9._\ -]*) echo "omp-bot: invalid bot name '$name'" >&2; exit 2 ;;
 esac
 config=${XDG_CONFIG_HOME:-$HOME/.config}/omp-bot/env
 [ ! -r "$config" ] || . "$config"
@@ -16,5 +23,39 @@ export OPTCHAT_DIR="$dir" OPTCHAT_BOT="$name"
 exec 9>"$dir/optchatd.lock"
 flock -n 9 || { echo "omp-bot-memory: $name's memory is already running ($dir/optchatd.lock is held)" >&2; exit 1; }
 [ -p "$dir/optchatd.ctl" ] || mkfifo "$dir/optchatd.ctl"
-exec "${OMP_BIN:-omp}" --mode rpc --no-ui --no-session --no-extensions --no-tools --no-lsp --no-skills --no-rules --no-title \
-	-e "$OMP_BOT_OPTCHAT/service.ts" <>"$dir/optchatd.ctl"
+
+child=
+trap '[ -z "$child" ] || kill "$child" 2>/dev/null' TERM INT
+trap '[ -z "$child" ] || kill "$child" 2>/dev/null; exit 0' EXIT
+
+# Whether the summariser may have work: a missing state means "run it" rather
+# than "skip it"; otherwise any message log written after the view it last saved
+# has rows it has not read. Merges it still owes after that are its own to
+# finish, which is why it stops itself only once it has nothing left to do.
+work() {
+	if [ ! -f "$dir/view.json" ]; then
+		set +f
+		for log in "$dir"/log/*.jsonl; do
+			[ -e "$log" ] || continue
+			return 0
+		done
+		return 1
+	fi
+	[ -z "$(find "$dir/log" -maxdepth 1 -name '*.jsonl' -newer "$dir/view.json" -print -quit 2>/dev/null)" ] || return 0
+	return 1
+}
+
+while :; do
+	if work; then
+		started=$(date +%s)
+		"${OMP_BIN:-omp}" --mode rpc --no-ui --no-session --no-extensions --no-tools --no-lsp --no-skills --no-rules --no-title \
+			-e "$OMP_BOT_OPTCHAT/service.ts" <>"$dir/optchatd.ctl" &
+		child=$!
+		wait "$child" || true
+		child=
+		# A summariser that gives up at once would otherwise restart in a loop.
+		[ $(($(date +%s) - started)) -ge 10 ] || sleep 30
+	else
+		sleep 5
+	fi
+done

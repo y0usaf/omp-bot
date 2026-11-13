@@ -1,0 +1,64 @@
+#!/bin/sh
+# omp-bot-trim SESSIONS_DIR
+#
+# Keeps a bot's newest session transcript small enough that omp can restore it
+# without holding a whole conversation in memory. omp restores every entry of a
+# session into JS objects (~5x the JSONL bytes) and keeps them for the process
+# lifetime, while a bot's model context is the OptChat memory view plus the
+# recent turns: the rest is only ever read from disk (zoom, history://) or from
+# the memory. So the file is cut down to a header, the entries that decide the
+# model, thinking level, rules and spend, and the last OMP_BOT_TRIM_BYTES of
+# turns. The full transcript moves to SESSIONS_DIR/archive/. The session id,
+# title and mtime stay, so nothing downstream (OptChat's per-session log,
+# `ls -t`) changes.
+set -eu
+[ $# -eq 1 ] || { echo "usage: omp-bot-trim SESSIONS_DIR" >&2; exit 2; }
+dir=$1
+keep=${OMP_BOT_TRIM_BYTES:-8000000}
+case $keep in '' | *[!0-9]*) echo "omp-bot-trim: OMP_BOT_TRIM_BYTES is not a byte count" >&2; exit 2 ;; esac
+file=$(ls -t "$dir"/*.jsonl 2>/dev/null | head -n 1) || exit 0
+[ -n "$file" ] && [ -f "$file" ] || exit 0
+size=$(wc -c < "$file")
+[ "$size" -gt $((keep * 2)) ] || exit 0
+
+base=$(basename "$file")
+work=$(mktemp -d "$dir/.trim.XXXXXX") || exit 0
+trap 'rm -rf "$work"' EXIT
+trap 'rm -rf "$work"; exit 1' HUP INT TERM
+
+head -n 1 "$file" > "$work/title"
+grep -q '"pad"' "$work/title" || : > "$work/title"
+sed -n 2p "$file" > "$work/header"
+jq -e '.type == "session" and (.id | type) == "string"' "$work/header" > /dev/null || exit 0
+
+tail -c "$keep" "$file" | sed '1d' | jq -c . > "$work/tail"
+[ -s "$work/tail" ] || exit 0
+
+# buildSessionContext resolves the model, thinking level, tier, mode and rules
+# from the leaf's ancestors only, so every carried entry has to sit on the chain.
+grep '"type":"model_usage"' "$file" > "$work/carry"
+grep '"type":"thinking_level_change"' "$file" | tail -n 1 >> "$work/carry"
+grep '"type":"service_tier_change"' "$file" | tail -n 1 >> "$work/carry"
+grep '"type":"mode_change"' "$file" | tail -n 1 >> "$work/carry"
+grep '"type":"ttsr_injection"' "$file" | tail -n 3 >> "$work/carry"
+grep '"type":"model_change"' "$file" | jq -r '(.role // "default") + "\t" + tojson' > "$work/roles"
+awk -F '\t' '{ last[$1] = $2 } END { for (role in last) print last[role] }' "$work/roles" >> "$work/carry"
+jq -c . "$work/carry" | jq -sc 'sort_by(.timestamp // "") | foreach .[] as $e ({p: null}; {p: $e.id, e: ($e + {parentId: .p})}; .e)' > "$work/settings.jsonl"
+root=$(tail -n 1 "$work/settings.jsonl" | jq -r '.id // ""')
+
+{
+	[ ! -s "$work/title" ] || cat "$work/title"
+	cat "$work/header"
+	[ ! -s "$work/settings.jsonl" ] || cat "$work/settings.jsonl"
+	head -n 1 "$work/tail" | jq -c --arg p "$root" '.parentId = (if $p == "" then null else $p end)'
+	tail -n +2 "$work/tail"
+} > "$work/new"
+
+[ "$(grep -c '' "$work/new")" -gt 2 ] || exit 0
+jq -e -c . "$work/new" > /dev/null || exit 0
+mkdir -p "$dir/archive"
+archive=$dir/archive/$base
+[ ! -e "$archive" ] || archive=$dir/archive/"${base%.jsonl}.$(date +%s).jsonl"
+mv "$file" "$archive"
+touch -r "$archive" "$work/new"
+mv "$work/new" "$file"

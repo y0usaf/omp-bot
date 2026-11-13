@@ -90,6 +90,7 @@ rm -f "$OMP_BOT_RELAUNCH"
 cutoffs=0
 while :; do
 	code=0
+	[ "$memory" != optchat ] || flock -n -E 75 -o "$dir/lock" "$root/bin/omp-bot-trim" "$dir/sessions" || true
 	session=$(ls -t "$dir/sessions"/*.jsonl 2>/dev/null | head -n 1) || session=
 	started=$(date +%s)
 	flock -n -E 75 -o "$dir/lock" "$omp" -e "$root/omp/omp-bot.ts" ${session:+--restore} ${session:+"$session"} "$@" || code=$?
