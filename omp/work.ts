@@ -1,15 +1,51 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { STATE } from "./paths";
 
 const MAX = Number(process.env.OMP_BOT_WORK_NUDGES) || 6;
+const CHECK_SECONDS = Number(process.env.OMP_BOT_WORK_CHECK_SECONDS) || 60;
+const DAY = 86_400_000;
+
+const parse = line => {
+	const m = /^(todo|wait|drop) (.*?)(?: check: (.*))?$/.exec(line.trim());
+	if (!m) return undefined;
+	const ask = m[2].trim();
+	return { kind: m[1], ask, key: ask.replace(/\s*\([^()]*\)$/, ""), check: m[3]?.trim(), line: line.trim() };
+};
+
+const run = command => {
+	const { promise, resolve } = Promise.withResolvers();
+	const child = spawn("bash", ["-c", command], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"] });
+	let out = "";
+	child.stdout.on("data", d => (out += d));
+	child.stderr.on("data", d => (out += d));
+	const timer = setTimeout(() => child.kill("SIGKILL"), CHECK_SECONDS * 1000);
+	child.on("close", (code, signal) => {
+		clearTimeout(timer);
+		resolve({ exit: code ?? signal, out: out.slice(-4000) });
+	});
+	return promise;
+};
 
 export default function work(pi) {
 	const name = process.env.OMP_BOT_NAME;
 	if (!name) return;
-	const file = join(STATE, "bots", name, "work.txt");
-	const rule = `\n\n# Open work\n${file} lists everything the user asked you for that isn't finished, one line each and nothing else: \`todo <ask>\` while you can act on it, \`wait <ask> (<on whom>)\` while it waits on the user or a running helper. Add a line when you take work on and keep it current. Delete the line when the work is done, meaning the user can try it, or when you drop it, telling the user why in one line. A question you answer outright gets no line. When a turn ends with a todo line left, you are sent the todo lines to keep going.`;
+	const dir = join(STATE, "bots", name);
+	const file = join(dir, "work.txt");
+	const stateFile = join(dir, "work.json");
+	const logFile = join(dir, "done.log");
+	const rule = `\n\n# Open work\n${file} lists everything the user asked you for that isn't finished, one line each and nothing else:\n- \`todo <ask> check: <command>\` while you can act on it.\n- \`wait <ask> (<helper name>) check: <command>\` while a running helper has it.\n- \`wait <ask> (user: "<the question you asked them>") check: <command>\` only when you asked the user a question and it is unanswered; quote it. A rule of theirs that already covers the work means it is yours: todo, not wait.\n- \`check: <command>\` is a shell command (run from home, ${CHECK_SECONDS}s limit) that exits 0 only once the work is done, meaning the user can try it: it tests the deployed thing or the pushed revision, never that code exists. \`check: manual <what must be seen>\` for what only eyes or the real monitor can judge.\nAdd a line when you take work on. After each turn the checks run: a passing one removes its line and logs the command, exit and output to ${logFile}; you're told so, and tell the user. Never delete a line with a command check yourself; it comes back. Delete a manual-check line only once that check was seen. To drop work, replace its line with \`drop <ask> (why)\` and tell the user why in one line. A question you answer outright gets no line.`;
 	const read = () => (existsSync(file) ? readFileSync(file, "utf8") : "");
+	const load = () => {
+		try {
+			return JSON.parse(readFileSync(stateFile, "utf8"));
+		} catch {
+			return {};
+		}
+	};
+	const log = entry => appendFileSync(logFile, `${JSON.stringify({ time: new Date().toISOString(), ...entry })}\n`);
 	let nudges = 0;
 	let nudging = false;
 	let calls = 0;
@@ -33,14 +69,67 @@ export default function work(pi) {
 		if (c.agent?.kind === "sub" || event.willContinue || c.hasPendingMessages()) return;
 		const reason = event.messages?.findLast(message => message.role === "assistant")?.stopReason;
 		if (reason === "aborted" || reason === "error" || reason === "length") return;
-		const todo = read().split("\n").filter(line => line.startsWith("todo "));
-		if (todo.length === 0 || nudges >= MAX || (nudges > 0 && calls === 0)) return;
+		const text = read();
+		const state = load();
+		const now = Date.now();
+		const next = {};
+		const keep = [];
+		const notes = [];
+		const dropped = new Set(text.split("\n").map(parse).filter(item => item?.kind === "drop").map(item => item.key));
+		const closed = new Set();
+		for (const line of text.split("\n")) {
+			if (!line.trim()) continue;
+			const item = parse(line);
+			if (!item) {
+				keep.push(line);
+				notes.push(`Not a todo/wait line, fix it: ${line}`);
+				continue;
+			}
+			if (item.kind === "drop") {
+				log({ ask: item.ask, dropped: true });
+				continue;
+			}
+			if (dropped.has(item.key)) continue;
+			if (item.check && !item.check.startsWith("manual")) {
+				const result = await run(item.check);
+				if (result.exit === 0) {
+					log({ ask: item.ask, check: item.check, exit: 0, output: result.out });
+					closed.add(item.key);
+					notes.push(`Check passed, closed: ${item.ask}\nTell the user it's done.`);
+					continue;
+				}
+				if (item.kind === "todo") notes.push(`${line}\n  check exit ${result.exit}: ${result.out.trim().split("\n").slice(-3).join(" | ")}`);
+			} else if (item.kind === "todo") notes.push(line);
+			if (!item.check) notes.push(`No check, add one: ${line}`);
+			const user = /\(user\b[^()]*\)$/.test(item.ask);
+			if (item.kind === "wait" && user && !/\(user: "[^"]+"\)$/.test(item.ask))
+				notes.push(`Waits on the user without a question you asked, so it's yours: act on it, or ask and quote the question: ${line}`);
+			let since = state[item.key]?.since ?? now;
+			if (item.kind === "wait" && user && now - since > DAY) {
+				notes.push(`Unanswered for a day, ask again or act on it: ${line}`);
+				since = now;
+			}
+			next[item.key] = { line, check: item.check, since };
+			keep.push(line);
+		}
+		for (const [key, old] of Object.entries(state)) {
+			if (next[key] || dropped.has(key) || closed.has(key)) continue;
+			if (old.check && !old.check.startsWith("manual")) {
+				keep.push(old.line);
+				next[key] = old;
+				notes.push(`Restored, deleted before its check passed (use drop to drop it): ${old.line}`);
+			} else log({ ask: key, check: old.check ?? null, closed: "deleted by bot" });
+		}
+		const out = keep.length ? `${keep.join("\n")}\n` : "";
+		if (out !== text) writeFileSync(file, out);
+		writeFileSync(stateFile, JSON.stringify(next));
+		if (notes.length === 0 || nudges >= MAX || (nudges > 0 && calls === 0)) return;
 		nudges += 1;
 		nudging = true;
 		pi.sendMessage(
 			{
 				customType: "work",
-				content: `Open work you can act on:\n${todo.join("\n")}\n\nKeep going. Mark a line wait if it now waits on the user or a helper; delete it once done or dropped.`,
+				content: `Open work:\n${notes.join("\n")}\n\nKeep going.`,
 				display: false,
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
