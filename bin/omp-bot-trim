@@ -30,20 +30,24 @@ head -n 1 "$file" > "$work/title"
 grep -q '"pad"' "$work/title" || : > "$work/title"
 sed -n 2p "$file" > "$work/header"
 jq -e '.type == "session" and (.id | type) == "string"' "$work/header" > /dev/null || exit 0
+sed -E ':p; s/(^|[^\\])((\\\\)*)\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})/\1\2\x01\4\x01\5/; tp
+	:l; s/(^|[^\\\x01])((\\\\)*)\\u[dD][89a-fA-F][0-9a-fA-F]{2}/\1\2\\ufffd/; tl
+	s/\x01/\\u/g' "$file" > "$work/all"
 
-tail -c "$keep" "$file" | sed '1d' | jq -c . > "$work/tail"
+tail -c "$keep" "$work/all" | sed '1d' | jq -c . > "$work/tail"
 [ -s "$work/tail" ] || exit 0
 
-jq -cR 'try (fromjson | select(.id) | [.id, (.parentId // ""), .type, (.role // "default")]) catch empty' "$file" > "$work/index"
+jq -cR 'try (fromjson | select(.id) | [.id, (.parentId // ""), .type, (.role // "default")]) catch empty' "$work/all" > "$work/index"
 jq -r 'select(.id) | .id' "$work/tail" > "$work/tailids"
-awk -F '"' -v tailids="$work/tailids" '
+awk -F '"' -v tailids="$work/tailids" -v suffix="$work/suffix" '
 	BEGIN { while ((getline line < tailids) > 0) tail[line] = 1 }
 	{ id = $2; parent[id] = $4; type[id] = $6; role[id] = $8; leaf = id }
 	END {
 		for (id = leaf; id != "" && !(id in seen); id = parent[id]) { seen[id] = 1; chain[++n] = id }
+		for (i = 1; i <= n && (chain[i] in tail); i++) { live[chain[i]] = 1; print chain[i] > suffix }
 		for (i = n; i >= 1; i--) {
 			id = chain[i]
-			if (id in tail) continue
+			if (id in live) continue
 			t = type[id]
 			if (t == "model_usage") keep[id] = 1
 			else if (t == "thinking_level_change" || t == "service_tier_change" || t == "mode_change") last[t] = id
@@ -54,16 +58,19 @@ awk -F '"' -v tailids="$work/tailids" '
 		for (i = k - 2; i <= k; i++) if (i >= 1) keep[ttsr[i]] = 1
 		for (id in keep) print id
 	}' "$work/index" | jq -R . | jq -s 'map({(.): true}) | add // {}' > "$work/keep"
-jq -cR --slurpfile keep "$work/keep" 'try (fromjson | select(.id and $keep[0][.id])) catch empty' "$file" > "$work/carry"
+jq -cR --slurpfile keep "$work/keep" 'try (fromjson | select(.id and $keep[0][.id])) catch empty' "$work/all" > "$work/carry"
 jq -sc 'sort_by(.timestamp // "") | foreach .[] as $e ({p: null}; {p: $e.id, e: ($e + {parentId: .p})}; .e)' "$work/carry" > "$work/settings.jsonl"
 root=$(tail -n 1 "$work/settings.jsonl" | jq -r '.id // ""')
+[ -s "$work/suffix" ] || exit 0
+jq -R . "$work/suffix" | jq -s 'map({(.): true}) | add' > "$work/live"
+jq -c --slurpfile live "$work/live" 'select(.id and $live[0][.id])' "$work/tail" > "$work/active"
 
 {
 	[ ! -s "$work/title" ] || cat "$work/title"
 	cat "$work/header"
 	[ ! -s "$work/settings.jsonl" ] || cat "$work/settings.jsonl"
-	head -n 1 "$work/tail" | jq -c --arg p "$root" '.parentId = (if $p == "" then null else $p end)'
-	tail -n +2 "$work/tail"
+	head -n 1 "$work/active" | jq -c --arg p "$root" '.parentId = (if $p == "" then null else $p end)'
+	tail -n +2 "$work/active"
 } > "$work/new"
 
 [ "$(grep -c '' "$work/new")" -gt 2 ] || exit 0
