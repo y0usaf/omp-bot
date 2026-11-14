@@ -22,6 +22,7 @@ size=$(wc -c < "$file")
 [ "$size" -gt $((keep * 2)) ] || exit 0
 
 base=$(basename "$file")
+rm -rf "$dir"/.trim.*
 work=$(mktemp -d "$dir/.trim.XXXXXX") || exit 0
 trap 'rm -rf "$work"' EXIT
 trap 'rm -rf "$work"; exit 1' HUP INT TERM
@@ -78,6 +79,6 @@ jq -e -c . "$work/new" > /dev/null || exit 0
 mkdir -p "$dir/archive"
 archive=$dir/archive/$base
 [ ! -e "$archive" ] || archive=$dir/archive/"${base%.jsonl}.$(date +%s).jsonl"
-mv "$file" "$archive"
-touch -r "$archive" "$work/new"
-mv "$work/new" "$file"
+ln "$file" "$archive"
+touch -r "$file" "$work/new"
+mv -f "$work/new" "$file"
