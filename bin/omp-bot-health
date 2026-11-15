@@ -8,7 +8,7 @@ state() {
 	[ -n "${OMP_BOT_BOX_STATUS:-}" ] && [ -r "$OMP_BOT_BOX_STATUS" ] || return 0
 	jq -r 'if .state == "starting" then "starting" elif .state == "failed" then "it gave up starting: \(.reason // "no reason given")" elif .state == "crashed" then "it crashed (\(.failures) in a row): \(.reason // "no reason given")" else empty end' "$OMP_BOT_BOX_STATUS" 2>/dev/null || true
 }
-if out=$(timeout 20 ssh -F "$OMP_BOT_BOX_SSH_CONFIG" -o ConnectTimeout=5 -T box 'echo ok' 2>&1) && [ "$out" = ok ]; then exit 0; fi
+if out=$(timeout 20 ssh -n -F "$OMP_BOT_BOX_SSH_CONFIG" -o ConnectTimeout=5 -T box 'echo ok' 2>&1) && [ "$out" = ok ]; then exit 0; fi
 out=${out//$'\r'/}
 why=$(state)
 [ "$why" != starting ] || { echo "it is starting"; exit 2; }
