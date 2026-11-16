@@ -78,8 +78,8 @@ local function face(body: string, ink: string): string
 			end
 		end
 	end
-	rect(def.eyes[1] - 1, def.eyes[3] - 1, 2, 3, "#fff")
-	rect(def.eyes[2] - 1, def.eyes[3] - 1, 2, 3, "#fff")
+	rect(def.eyes[1], def.eyes[3], 2, 3, "#fff")
+	rect(def.eyes[2], def.eyes[3], 2, 3, "#fff")
 	return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'>" .. table.concat(parts) .. "</svg>"
 end
 
@@ -166,7 +166,7 @@ local function show_faces(cx: WindowCx?)
 	end
 	local rules = {}
 	for index, selector in ipairs(faces_of) do
-		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) 0 0 / 100% 100% no-repeat; box-shadow: none; }"
+		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) center / 32px 32px no-repeat; image-rendering: pixelated; box-shadow: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. "::before, :root:not(#bot) " .. selector .. "::after { content: none; }"
 	end
@@ -425,7 +425,7 @@ local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
 	local rules = {}
 	for i, face in ipairs(faces) do
 		local row = ":root:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item)"
-		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 32px; height: 32px; background: var(--bot-face) 0 0 / 100% 100% no-repeat; }"
+		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 32px; height: 32px; background: var(--bot-face) center / 32px 32px no-repeat; image-rendering: pixelated; }"
 		rules[#rules + 1] = row .. " .ck-ic > .ico { display: none; }"
 		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { animation: bot-hop 1600ms steps(1, end) infinite; }"
 	end
