@@ -46,6 +46,7 @@ omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh
 | `memory` | `optchat` (default) or `none` for omp's own compaction. |
 | `persist` | Folders under `~` that must survive a reboot. |
 | `box` | `true` runs the bot's omp inside omp-box. |
+| `secrets` | The shared secrets a boxed bot may read, by name. Without it a boxed bot gets none, so sharing a secret never quietly hands it to every bot. |
 | `work` | `true` gives the bot an open-work list, `bots/NAME/work.txt`: one `todo` or `wait` line per unfinished ask, each ending `check: <command>` (exits 0 once done) or `check: manual <what>`; a wait on the user quotes the question asked. After each turn the checks run (`OMP_BOT_WORK_CHECK_SECONDS`, 60): a pass removes the line and logs command, exit and output to `bots/NAME/done.log`; a checked line deleted before passing comes back, and `drop <ask> (why)` drops one. The bot is sent todo lines, check results, uncovered or unquoted lines and day-old questions, until none are left, a nudged turn makes no tool call, or `OMP_BOT_WORK_NUDGES` (6) nudges in a row. |
 | `avatar` | Body and colour overriding the ones the name picks: `{"body": "hex", "ink": "orchid"}`. |
 | | Body and ink names are in `tern/avatars.json`. **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
@@ -68,7 +69,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_NAP_MS` | 45000 | Idle time before the bot curls up for a nap. |
 | `OMP_BOT_CHECK_ROUNDS` | 3 | Times a done-check sends a helper back to work before a bot reports it as still failing. |
 
-Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BOX_EXT` and `OMP_BOT_BOX_PATH` from `box.env`; see `bin/omp-bot-box`.
+Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BOX_EXT`, `OMP_BOT_BOX_PATH` and `OMP_BOT_BOX_USERS` from `box.env`; see `bin/omp-bot-box`. `OMP_BOT_BOX_USERS` maps each boxed bot to the guest user and home finix gives it, plus any host folders inside the user's home that bot also gets.
 
 ## How it works
 
@@ -85,7 +86,11 @@ On a machine whose home resets at boot, `OMP_BOT_PERSIST` keeps a bot's `persist
 
 ## Boxed bots
 
-`"box": true` runs the bot's omp inside omp-box, finix's microVM, over ssh. Its tab and memory stay on the host. `bin/omp-bot-box` shares the bot's folder and `persist` folders into the box at the same paths. Secrets stay in `bots/NAME/secrets`, encrypted, and are decrypted only inside the box.
+`"box": true` runs the bot's omp inside omp-box, finix's microVM, over ssh. Its tab and memory stay on the host.
+
+The box runs each boxed bot as a Unix user of its own (`OMP_BOT_BOX_USERS`, from finix), with a home of its own and no sudo, so the bot reaches only the folders granted to it: its state folder, its `persist` folders and the finite set of folders finix gives it, each at the same place under its guest home that it has under yours. Nothing else of yours or of another bot is reachable: your home is 0700, each bot's home is 0700, and the box mounts every grant as root at boot, so no bot can mount or see anything else. A bot session also gets a private `/tmp`, and `/proc` is mounted so one user cannot see another's processes.
+
+Secrets stay in `bots/NAME/secrets`, encrypted, and are decrypted only inside the box. Only the shared secrets the bot's roster entry lists in `secrets` are copied there, each sealed with the bot's own key; `omp-secret` in the box lists what it has and nothing else.
 
 If the box goes away, the tab waits for it and resumes. Five quick cut-offs in a row close the tab instead.
 
