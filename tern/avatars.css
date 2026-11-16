@@ -1,5 +1,6 @@
 :root:not(#bot) [data-role^='omp.bot.chao.'] {
 	--bot-px: 2px;
+	--bot-ink: #575c66;
 	--bot-eye: #fff;
 	display: flex !important;
 	flex: none;
@@ -34,9 +35,7 @@
 	box-shadow: none;
 }
 :root:not(#bot) [data-role='omp.bot.px.b'] { background-color: var(--bot-ink); }
-:root:not(#bot) [data-role='omp.bot.px.e'] {
-	background-color: var(--bot-eye);
-}
+:root:not(#bot) :is([data-role='omp.bot.px.e'], [data-role='omp.bot.px.edge']) { background-color: var(--bot-eye); }
 :root:not(#bot) #tabbar .tt[data-tc] > .tn-dk { --dk: 40px; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c {
 	left: 4px;
@@ -64,7 +63,7 @@
 :root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover {
 	animation: bot-hop 900ms steps(1, end) 1;
 }
-:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.e'] {
+:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.edge'] {
 	animation: bot-blink 900ms steps(1, end) 1;
 }
 :root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c {
@@ -75,7 +74,7 @@
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] {
 	animation: bot-hop 1600ms steps(1, end) infinite;
 }
-:root:not(#bot) [data-role^='omp.bot.chat.'] :is([data-role='omp.bot.chao.thinking'], [data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking'], [data-role='omp.bot.chao.waiting']) [data-role='omp.bot.px.e'] {
+:root:not(#bot) [data-role^='omp.bot.chat.'] :is([data-role='omp.bot.chao.thinking'], [data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking'], [data-role='omp.bot.chao.waiting']) [data-role='omp.bot.px.edge'] {
 	animation: bot-blink 1600ms steps(1, end) infinite;
 }
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
@@ -84,10 +83,10 @@
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; }
 @media (prefers-reduced-motion: reduce) {
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
-	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.e'],
+	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.edge'],
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 	:root:not(#bot) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'],
-	:root:not(#bot) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'] [data-role='omp.bot.px.e'],
+	:root:not(#bot) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'] [data-role='omp.bot.px.edge'],
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; transition: none; }
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover { translate: none; }
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c { scale: 1.25; }
@@ -98,6 +97,6 @@
 	40% { translate: 0 calc(-3 * var(--bot-px)); }
 }
 @keyframes bot-blink {
-	0%, 84%, 94%, 100% { clip-path: none; }
-	85%, 93% { clip-path: inset(var(--bot-px) 0); }
+	0%, 84%, 94%, 100% { background-color: var(--bot-eye); }
+	85%, 93% { background-color: var(--bot-ink); }
 }

@@ -53,21 +53,23 @@ function stamp(body, variant) {
 	return grid;
 }
 
-function cells(chars) {
-	return [...chars].map(c => col([], { role: `omp.bot.px.${c}` }));
-}
-
-function pixels(grid) {
-	const rows = grid.filter(line => line.some(c => c !== "."));
-	const left = Math.min(...rows.map(line => line.findIndex(c => c !== ".")));
-	const right = Math.max(...rows.map(line => line.findLastIndex(c => c !== ".")));
-	return rows.map(line => row(cells(line.slice(left, right + 1).join("")), { role: "omp.bot.line", gap: "none" }));
+function pixels(grid, body) {
+	const drawn = grid.map((line, y) => ({ line, y })).filter(({ line }) => line.some(c => c !== "."));
+	const left = Math.min(...drawn.map(({ line }) => line.findIndex(c => c !== ".")));
+	const right = Math.max(...drawn.map(({ line }) => line.findLastIndex(c => c !== ".")));
+	const lid = y => y === body.eyes[2] || y === body.eyes[2] + 2;
+	return drawn.map(({ line, y }) =>
+		row(
+			[...line.slice(left, right + 1)].map(c => col([], { role: `omp.bot.px.${c === "e" && lid(y) ? "edge" : c}` })),
+			{ role: "omp.bot.line", gap: "none" },
+		),
+	);
 }
 
 export function drawChao(look, mood) {
 	const body = AVATARS.bodies[look.body] ?? AVATARS.bodies[AVATARS.default.body];
 	const variant = SHUT[mood] ? "shut" : SQUINT[mood] ? "blink" : "open";
-	return col([col(pixels(stamp(body, variant)), { role: "omp.bot.body", gap: "none", align: "center" })], {
+	return col([col(pixels(stamp(body, variant), body), { role: "omp.bot.body", gap: "none", align: "center" })], {
 		role: `omp.bot.chao.${mood}`,
 		gap: "none",
 		align: "center",
