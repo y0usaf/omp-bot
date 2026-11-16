@@ -81,7 +81,7 @@
 	height: 32px;
 	border-radius: 0;
 	background-color: transparent;
-	background-image: var(--bot-face);
+	background-image: var(--bot-shut);
 	background-size: 32px 32px;
 	background-position: center;
 	background-repeat: no-repeat;
@@ -94,7 +94,16 @@
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:not(.out) + .tn-dk-c:not(.out) { display: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-g,
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c > .ico { display: none; }
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before { content: none; }
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: 0;
+	pointer-events: none;
+	background: var(--bot-eyes) center / 32px 32px no-repeat;
+	image-rendering: pixelated;
+	animation: bot-face-blink var(--bot-blink, 5.4s) steps(1, end) var(--bot-blink-delay, 0s) infinite;
+}
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::after { box-shadow: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:not([data-st])::after { content: none; }
 :root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.']) :is([data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking']) {
@@ -120,12 +129,14 @@
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c::before,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.chao.'] > * { animation: none; }
 @media (prefers-reduced-motion: reduce) {
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']),
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
+	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before,
 	:root:not(#bot) [data-role^='omp.bot.chao.'] > * { animation: none; transition: none; }
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover { translate: none; }
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c { translate: none; }

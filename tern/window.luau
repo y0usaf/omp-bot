@@ -126,14 +126,19 @@ local function image(source: string): string
 	return "url(\"data:image/svg+xml," .. source:gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E") .. "\")"
 end
 
--- One still image for everywhere but a bot chat: the body with its resting face, since a tab or a card shows a still.
-local function face(body: string, ink: string): string
-	return svg(eye_parts(body_parts({}, body, ink), "open", "c", "#fff"))
+-- One still image for everywhere but a bot chat: the body with one face, since a tab or a card shows a still.
+local function face(body: string, ink: string, shape: string): string
+	return svg(eye_parts(body_parts({}, body, ink), shape, "c", "#fff"))
 end
 
+-- The resting face, the same body with its eyes shut, and the open eyes on their own. avatars.css blinks a tab by hiding
+-- the open eyes over the shut pair, so a bot blinks in the tab list too, not only in a chat body.
 local function avatar(bot: Bot): string
 	local got = look(bot)
-	return "--bot-face: " .. image(face(got.body, got.ink)) .. "; --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
+	return "--bot-face: " .. image(face(got.body, got.ink, "open"))
+		.. "; --bot-shut: " .. image(face(got.body, got.ink, "shut"))
+		.. "; --bot-eyes: " .. image(svg(eye_parts({}, "open", "c", "#fff")))
+		.. "; --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
 end
 
 -- A bot's own clock: how often it blinks and glances, and where in those cycles it starts, seeded by its name so six

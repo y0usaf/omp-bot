@@ -322,13 +322,12 @@ class BotStatus {
 	describe() {
 		const b = this.bot;
 		const failed = !b.active && b.mood === "error";
-		if (!b.active && !b.boop && !failed) return NONE;
 		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
-		const busy = !b.boop && !asking && !failed;
+		const busy = b.active && !b.boop && !asking && !failed;
 		const status = b.boop ?? b.line;
 		return row(
 			[
-				b.active || b.boop || failed ? b.chao() : drawChao(b.look, poseOf("waiting")),
+				b.chao(),
 				busy
 					? node("shimmer", {
 							spans: [{ t: status, s: "muted" }],
