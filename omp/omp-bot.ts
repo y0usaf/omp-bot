@@ -149,9 +149,6 @@ class Bot {
 		this.typing = false;
 		this.awake = ["idle", this.line];
 		this.timers = {};
-		this.lid = undefined;
-		this.stare = undefined;
-		this.cx = undefined;
 	}
 
 	rename(name) {
@@ -163,11 +160,6 @@ class Bot {
 		if (this.mood === mood && this.line === line) return;
 		this.mood = mood;
 		if (line !== undefined) this.line = line;
-		if (mood === "sleep" || mood === "drowsy") {
-			this.cancel("blink");
-			this.lid = undefined;
-			this.stare = undefined;
-		} else if (this.timers.blink === undefined) this.blink();
 		this.render();
 	}
 
@@ -233,54 +225,8 @@ class Bot {
 		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
 	}
 
-	pose() {
-		const mood = this.face();
-		const rest = poseOf(mood);
-		return { mood, shape: this.lid ?? rest.shape, gaze: this.stare ?? rest.gaze };
-	}
-
-	blink(delay = 2600 + Math.random() * 4400) {
-		this.cancel("blink");
-		if (this.mood === "sleep" || this.mood === "drowsy" || this.cx?.reduceMotion) return;
-		this.after("blink", delay, () => this.blinkStep(0));
-	}
-
-	blinkStep(step) {
-		this.lid = ["squint", "shut", "squint", undefined][step];
-		this.render();
-		if (step === 3) {
-			this.blink();
-			return;
-		}
-		this.after("blink", step === 1 ? 70 : 55, () => this.blinkStep(step + 1));
-	}
-
-	glance(delay = 6000 + Math.random() * 7000) {
-		this.cancel("glance");
-		if (this.cx?.reduceMotion) return;
-		this.after("glance", delay, () => {
-			if (this.mood !== "idle" && this.mood !== "listen") {
-				this.glance();
-				return;
-			}
-			const ways = ["l", "r", "d", "u"];
-			this.stare = ways[Math.floor(Math.random() * ways.length)];
-			this.render();
-			this.after("glance", 900 + Math.random() * 700, () => {
-				this.stare = undefined;
-				this.render();
-				this.glance();
-			});
-		});
-	}
-
-	live() {
-		this.blink();
-		this.glance();
-	}
-
 	chao() {
-		return drawChao(this.look, this.pose());
+		return drawChao(this.look, poseOf(this.face()));
 	}
 }
 
@@ -300,9 +246,8 @@ class BotHero {
 		return [truncateToWidth(replaceTabs(` ◉ ${b.name} · ${b.boop ?? b.line}`), width)];
 	}
 
-	describe(cx) {
+	describe() {
 		const b = this.bot;
-		b.cx = cx ?? b.cx;
 		if (!b.hero) return col([], { role: "omp.bot.none" });
 		return col(
 			[
@@ -338,9 +283,8 @@ class BotTop {
 		return [];
 	}
 
-	describe(cx) {
+	describe() {
 		const b = this.bot;
-		b.cx = cx ?? b.cx;
 		return row(
 			[
 				b.chao(),
@@ -375,9 +319,8 @@ class BotStatus {
 		return [];
 	}
 
-	describe(cx) {
+	describe() {
 		const b = this.bot;
-		b.cx = cx ?? b.cx;
 		const failed = !b.active && b.mood === "error";
 		if (!b.active && !b.boop && !failed) return NONE;
 		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
@@ -867,7 +810,6 @@ export default function ompBot(pi) {
 		listen();
 		mount();
 		bot.nap();
-		bot.live();
 	}
 
 	pi.on("session_start", begin);

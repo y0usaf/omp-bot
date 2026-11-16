@@ -66,6 +66,7 @@ export function drawChao(look, pose: Pose) {
 		[
 			col([], { role: `omp.bot.skin.${look.body}.${look.ink}`, gap: "none" }),
 			col([], { role: `omp.bot.face.${pose.shape}.${pose.gaze}`, gap: "none" }),
+			col([], { role: "omp.bot.lid", gap: "none" }),
 		],
 		{ role: `omp.bot.chao.${pose.mood}`, gap: "none", align: "center", actions: { click: "boop" } },
 	);

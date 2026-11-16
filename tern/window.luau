@@ -136,6 +136,21 @@ local function avatar(bot: Bot): string
 	return "--bot-face: " .. image(face(got.body, got.ink)) .. "; --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
 end
 
+-- A bot's own clock: how often it blinks and glances, and where in those cycles it starts, seeded by its name so six
+-- bots do not blink together. Stepped CSS animations, so Tern draws only when a step lands, and nothing at all offscreen.
+local function tempo(name: string): string
+	local h = hash(name)
+	local a, b = h % 256, h // 256 % 256
+	local c, d = h // 65536 % 256, h // 16777216 % 256
+	local blink = 4.6 + a / 255 * 2.8
+	local glance = 10 + c / 255 * 8
+	return string.format(
+		"--bot-blink: %.2fs; --bot-blink-delay: -%.2fs; --bot-glance: %.2fs; --bot-glance-delay: -%.2fs;",
+		blink, blink * b / 255,
+		glance, glance * d / 255
+	)
+end
+
 -- Every skin and every face frame avatars.css paints: a chat body is a skin under a face, so a blink or a look is an
 -- image Tern already has, not a redraw of the pixel grid.
 local ART: string? = nil
@@ -154,6 +169,7 @@ local function art(): string
 			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. shape .. "." .. gaze .. "'] { background-image: " .. image(svg(eye_parts({}, shape, gaze, "#fff"))) .. "; }"
 		end
 	end
+	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg(eye_parts({}, "shut", "c", "#fff"))) .. "; }"
 	ART = table.concat(rules, "\n")
 	return ART
 end
@@ -177,7 +193,7 @@ local function show_avatars(bots: { Bot })
 	end
 	for _, bot in ipairs(bots) do
 		if bot.tint and tints[bot.tint] == 1 then
-			rules[#rules + 1] = ":root:not(#bot) :is([data-role^='omp.bot.'][data-role$='." .. bot.tint .. "'], #tabbar .tt[data-tc='" .. bot.tint .. "']) { " .. avatar(bot) .. " }"
+			rules[#rules + 1] = ":root:not(#bot) :is([data-role^='omp.bot.'][data-role$='." .. bot.tint .. "'], #tabbar .tt[data-tc='" .. bot.tint .. "']) { " .. avatar(bot) .. " " .. tempo(bot.name) .. " }"
 		end
 	end
 	tern.css("avatars", table.concat(rules, "\n"))

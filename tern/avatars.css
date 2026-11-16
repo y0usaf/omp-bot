@@ -13,8 +13,7 @@
 :root:not(#bot) [data-role^='omp.bot.hero.'] [data-role^='omp.bot.chao.'] {
 	--bot-px: 4px;
 }
-:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role^='omp.bot.skin.'],
-:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role^='omp.bot.face.'] {
+:root:not(#bot) [data-role^='omp.bot.chao.'] > :is([data-role^='omp.bot.skin.'], [data-role^='omp.bot.face.'], [data-role='omp.bot.lid']) {
 	position: absolute;
 	inset: 0;
 	display: block !important;
@@ -56,6 +55,24 @@
 }
 :root:not(#bot) [data-role='omp.bot.px.b'] { background-color: var(--bot-ink, #575c66); }
 :root:not(#bot) :is([data-role='omp.bot.px.e'], [data-role='omp.bot.px.edge']) { background-color: #fff; }
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role='omp.bot.lid'] { opacity: 0; }
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role^='omp.bot.face'] {
+	animation: bot-face-blink var(--bot-blink, 5.4s) steps(1, end) var(--bot-blink-delay, 0s) infinite;
+}
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role='omp.bot.lid'] {
+	animation: bot-lid-blink var(--bot-blink, 5.4s) steps(1, end) var(--bot-blink-delay, 0s) infinite;
+}
+:root:not(#bot) [data-role='omp.bot.chao.idle'] > [data-role^='omp.bot.face'] {
+	animation:
+		bot-glance var(--bot-glance, 12s) steps(1, end) var(--bot-glance-delay, 0s) infinite,
+		bot-face-blink var(--bot-blink, 5.4s) steps(1, end) var(--bot-blink-delay, 0s) infinite;
+}
+:root:not(#bot) [data-role='omp.bot.chao.idle'] > [data-role='omp.bot.lid'] {
+	animation:
+		bot-glance var(--bot-glance, 12s) steps(1, end) var(--bot-glance-delay, 0s) infinite,
+		bot-lid-blink var(--bot-blink, 5.4s) steps(1, end) var(--bot-blink-delay, 0s) infinite;
+}
+:root:not(#bot) [data-role='omp.bot.chao.sleep'] > * { animation-name: none; }
 :root:not(#bot) #tabbar .tt[data-tc] > .tn-dk { --dk: 40px; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c {
 	left: 4px;
@@ -102,12 +119,14 @@
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']),
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
-:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; }
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.chao.'] > * { animation: none; }
 @media (prefers-reduced-motion: reduce) {
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']),
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
-	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; transition: none; }
+	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
+	:root:not(#bot) [data-role^='omp.bot.chao.'] > * { animation: none; transition: none; }
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover { translate: none; }
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c { translate: none; }
 }
@@ -124,4 +143,23 @@
 	0%, 100% { translate: 0 0; }
 	35% { translate: 0 calc(-1 * var(--bot-px)); }
 	70% { translate: 0 0; }
+}
+@keyframes bot-face-blink {
+	0%, 91% { opacity: 1; }
+	94%, 96% { opacity: 0; }
+	97%, 100% { opacity: 1; }
+}
+@keyframes bot-lid-blink {
+	0%, 91% { opacity: 0; }
+	94%, 96% { opacity: 1; }
+	97%, 100% { opacity: 0; }
+}
+@keyframes bot-glance {
+	0% { translate: 0 0; }
+	37% { translate: calc(-1 * var(--bot-px)) 0; }
+	46% { translate: 0 0; }
+	63% { translate: calc(1 * var(--bot-px)) 0; }
+	72% { translate: 0 0; }
+	86% { translate: 0 calc(1 * var(--bot-px)); }
+	94%, 100% { translate: 0 0; }
 }
