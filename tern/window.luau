@@ -57,36 +57,105 @@ local function look(bot: Bot): { body: string, ink: string }
 	return { body = body, ink = ink }
 end
 
--- The body as one flat svg: a run of pixels per row, the eyes over them, since a face everywhere but a chat row is one image.
-local function face(body: string, ink: string): string
-	local def = AVATAR.bodies[body]
-	local parts = {}
-	local function rect(x: number, y: number, w: number, h: number, fill: string)
-		parts[#parts + 1] = "<rect x='" .. x .. "' y='" .. y .. "' width='" .. w .. "' height='" .. h .. "' fill='" .. fill .. "'/>"
+-- Every body wears the same face: two eyes two pixels wide, in the one place a chat row, a tab and a notification card
+-- all agree on, so one frame of it is one image any body can use. A shape is runs of white pixels off an eye's top left
+-- corner, and a gaze moves them one pixel toward where the bot looks.
+local EYES = { left = 5, right = 9, top = 6 }
+local GAZES = { c = { 0, 0 }, l = { -1, 0 }, r = { 1, 0 }, u = { 0, -1 }, d = { 0, 1 } }
+local GAZE_NAMES = { "c", "l", "r", "u", "d" }
+local SHAPES = {
+	open = { left = { { 0, 0, 2, 3 } }, right = { { 0, 0, 2, 3 } } },
+	squint = { left = { { 0, 1, 2, 2 } }, right = { { 0, 1, 2, 2 } } },
+	wide = { left = { { 0, 0, 2, 4 } }, right = { { 0, 0, 2, 4 } } },
+	shut = { left = { { 0, 2, 2, 1 } }, right = { { 0, 2, 2, 1 } } },
+	happy = { left = { { 0, 2, 1, 1 }, { 1, 1, 1, 1 } }, right = { { 1, 2, 1, 1 }, { 0, 1, 1, 1 } } },
+	sad = { left = { { 0, 1, 1, 1 }, { 1, 2, 1, 1 } }, right = { { 1, 1, 1, 1 }, { 0, 2, 1, 1 } } },
+}
+
+-- The ink moved toward black (factor < 1) or white (factor > 1), so one body can carry a shade and a highlight.
+local function shade(hex: string, factor: number): string
+	local function jump(v: number): number
+		local aim = factor < 1 and v * factor or v + (255 - v) * (factor - 1)
+		return math.max(0, math.min(255, math.floor(aim + 0.5)))
 	end
-	for y, line in ipairs(def.rows) do
+	return string.format("#%02x%02x%02x", jump(tonumber(hex:sub(2, 3), 16)), jump(tonumber(hex:sub(4, 5), 16)), jump(tonumber(hex:sub(6, 7), 16)))
+end
+
+local function rect(parts: { string }, x: number, y: number, w: number, h: number, fill: string)
+	parts[#parts + 1] = "<rect x='" .. x .. "' y='" .. y .. "' width='" .. w .. "' height='" .. h .. "' fill='" .. fill .. "'/>"
+end
+
+-- A body's rows as one run of pixels per run of a tone: b is the ink, s its shade, l its light.
+local function body_parts(parts: { string }, body: string, ink: string): { string }
+	local tones = { b = AVATAR.inks[ink], s = shade(AVATAR.inks[ink], 0.76), l = shade(AVATAR.inks[ink], 1.22) }
+	for y, line in ipairs(AVATAR.bodies[body].rows) do
 		local x = 1
 		while x <= #line do
-			if line:sub(x, x) ~= "b" then
+			local tone = line:sub(x, x)
+			if tone == "." then
 				x = x + 1
 			else
 				local from = x
-				while x <= #line and line:sub(x, x) == "b" do
+				while x <= #line and line:sub(x, x) == tone do
 					x = x + 1
 				end
-				rect(from - 1, y - 1, x - from, 1, ink)
+				rect(parts, from - 1, y - 1, x - from, 1, tones[tone] or AVATAR.inks[ink])
 			end
 		end
 	end
-	rect(def.eyes[1], def.eyes[3], 2, 3, "#fff")
-	rect(def.eyes[2], def.eyes[3], 2, 3, "#fff")
+	return parts
+end
+
+local function eye_parts(parts: { string }, shape: string, gaze: string, fill: string): { string }
+	local gx, gy = GAZES[gaze][1], GAZES[gaze][2]
+	local def = SHAPES[shape]
+	for _, eye in ipairs({ { EYES.left, def.left }, { EYES.right, def.right } }) do
+		for _, run in ipairs(eye[2]) do
+			rect(parts, eye[1] + run[1] + gx, EYES.top + run[2] + gy, run[3], run[4], fill)
+		end
+	end
+	return parts
+end
+
+local function svg(parts: { string }): string
 	return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'>" .. table.concat(parts) .. "</svg>"
+end
+
+-- Tern loads an SVG only as a percent-escaped data URL.
+local function image(source: string): string
+	return "url(\"data:image/svg+xml," .. source:gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E") .. "\")"
+end
+
+-- One still image for everywhere but a bot chat: the body with its resting face, since a tab or a card shows a still.
+local function face(body: string, ink: string): string
+	return svg(eye_parts(body_parts({}, body, ink), "open", "c", "#fff"))
 end
 
 local function avatar(bot: Bot): string
 	local got = look(bot)
-	local url = face(got.body, AVATAR.inks[got.ink]):gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E")
-	return "--bot-face: url(\"data:image/svg+xml," .. url .. "\"); --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
+	return "--bot-face: " .. image(face(got.body, got.ink)) .. "; --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
+end
+
+-- Every skin and every face frame avatars.css paints: a chat body is a skin under a face, so a blink or a look is an
+-- image Tern already has, not a redraw of the pixel grid.
+local ART: string? = nil
+local function art(): string
+	if ART then
+		return ART
+	end
+	local rules = {}
+	for _, body in ipairs(BODY_NAMES) do
+		for _, ink in ipairs(INK_NAMES) do
+			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.skin." .. body .. "." .. ink .. "'] { background-image: " .. image(svg(body_parts({}, body, ink))) .. "; }"
+		end
+	end
+	for shape in SHAPES do
+		for _, gaze in ipairs(GAZE_NAMES) do
+			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. shape .. "." .. gaze .. "'] { background-image: " .. image(svg(eye_parts({}, shape, gaze, "#fff"))) .. "; }"
+		end
+	end
+	ART = table.concat(rules, "\n")
+	return ART
 end
 
 local function quote(s: string): string
@@ -99,7 +168,7 @@ end
 
 -- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
 local function show_avatars(bots: { Bot })
-	local rules = { ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
+	local rules = { art(), ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
 	local tints: { [string]: number } = {}
 	for _, bot in ipairs(bots) do
 		if bot.tint then

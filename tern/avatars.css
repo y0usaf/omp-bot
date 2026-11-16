@@ -1,18 +1,39 @@
 :root:not(#bot) [data-role^='omp.bot.chao.'] {
 	--bot-px: 2px;
-	--bot-eye: #fff;
-	display: flex !important;
+	position: relative;
+	display: block !important;
 	flex: none;
+	width: calc(16 * var(--bot-px));
+	height: calc(16 * var(--bot-px));
+	padding: 0;
 	cursor: pointer;
+	transform-origin: 50% 100%;
 	transition: translate 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 :root:not(#bot) [data-role^='omp.bot.hero.'] [data-role^='omp.bot.chao.'] {
 	--bot-px: 4px;
 }
-:root:not(#bot) [data-role^='omp.bot.chao.'] [data-role='omp.bot.body'] {
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role^='omp.bot.skin.'],
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role^='omp.bot.face.'] {
+	position: absolute;
+	inset: 0;
+	display: block !important;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background-position: 50% 50%;
+	background-repeat: no-repeat;
+	background-size: 100% 100%;
+	box-shadow: none;
+	image-rendering: pixelated;
+}
+:root:not(#bot) [data-role^='omp.bot.chao.'] > [data-role='omp.bot.body'] {
+	position: absolute;
+	inset: 0;
 	display: flex !important;
 	flex-direction: column;
 	align-items: center;
+	justify-content: center;
 	gap: 0;
 	padding: 0;
 }
@@ -22,7 +43,7 @@
 	gap: 0;
 	padding: 0;
 }
-:root:not(#bot) [data-role^='omp.bot.px.'] {
+:root:not(#bot) [data-role^='omp.bot.chao.'] [data-role^='omp.bot.px.'] {
 	flex: none;
 	display: block !important;
 	width: var(--bot-px);
@@ -34,7 +55,7 @@
 	box-shadow: none;
 }
 :root:not(#bot) [data-role='omp.bot.px.b'] { background-color: var(--bot-ink, #575c66); }
-:root:not(#bot) :is([data-role='omp.bot.px.e'], [data-role='omp.bot.px.edge']) { background-color: var(--bot-eye); }
+:root:not(#bot) :is([data-role='omp.bot.px.e'], [data-role='omp.bot.px.edge']) { background-color: #fff; }
 :root:not(#bot) #tabbar .tt[data-tc] > .tn-dk { --dk: 40px; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c {
 	left: 4px;
@@ -59,32 +80,33 @@
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before { content: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::after { box-shadow: none; }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:not([data-st])::after { content: none; }
+:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.']) :is([data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking']) {
+	animation: bot-bob 1.5s steps(1, end) infinite;
+}
+:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.']) [data-role='omp.bot.chao.thinking'] {
+	animation: bot-think 2.4s steps(1, end) infinite;
+}
+:root:not(#bot) :is([data-role='omp.bot.chao.boop'], [data-role='omp.bot.chao.happy'], [data-role='omp.bot.chao.listen']) {
+	animation: bot-hop 620ms cubic-bezier(0.3, 0.7, 0.4, 1) 1;
+}
 :root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover {
 	animation: bot-hop 900ms steps(1, end) 1;
 }
-:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.edge'] {
-	animation: bot-blink 900ms steps(1, end) 1;
-}
+:root:not(#bot) [data-role='omp.bot.chao.sleep']:hover { animation: none; }
 :root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c {
 	animation: bot-hop 900ms steps(1, end) 1;
 }
-:root:not(#bot) [data-role^='omp.bot.chat.'] :is([data-role='omp.bot.chao.thinking'], [data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking'], [data-role='omp.bot.chao.waiting']),
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] {
 	animation: bot-hop 1600ms steps(1, end) infinite;
 }
-:root:not(#bot) [data-role^='omp.bot.chat.'] :is([data-role='omp.bot.chao.thinking'], [data-role='omp.bot.chao.working'], [data-role='omp.bot.chao.talking'], [data-role='omp.bot.chao.waiting']) [data-role='omp.bot.px.edge'] {
-	animation: bot-blink 1600ms steps(1, end) infinite;
-}
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']),
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
-:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'],
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; }
 @media (prefers-reduced-motion: reduce) {
+	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']),
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover,
-	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover [data-role='omp.bot.px.edge'],
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
-	:root:not(#bot) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'],
-	:root:not(#bot) [data-role^='omp.bot.chat.'] [data-role^='omp.bot.chao.'] [data-role='omp.bot.px.edge'],
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] { animation: none; transition: none; }
 	:root:not(#bot) :is([data-role='omp.bot.event.avatar'], [data-role^='omp.bot.chao.']):hover { translate: none; }
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c { translate: none; }
@@ -94,7 +116,12 @@
 	20%, 60% { translate: 0 calc(-2 * var(--bot-px)); }
 	40% { translate: 0 calc(-3 * var(--bot-px)); }
 }
-@keyframes bot-blink {
-	0%, 84%, 94%, 100% { background-color: var(--bot-eye); }
-	85%, 93% { background-color: var(--bot-ink, #575c66); }
+@keyframes bot-bob {
+	0%, 100% { translate: 0 0; }
+	50% { translate: 0 calc(-1 * var(--bot-px)); }
+}
+@keyframes bot-think {
+	0%, 100% { translate: 0 0; }
+	35% { translate: 0 calc(-1 * var(--bot-px)); }
+	70% { translate: 0 0; }
 }

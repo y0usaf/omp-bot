@@ -1,17 +1,10 @@
 import { readFileSync } from "node:fs";
-import { col, row } from "@oh-my-pi/pi-tui/native/describe";
+import { col } from "@oh-my-pi/pi-tui/native/describe";
 
 const TINTS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
 const AVATARS = JSON.parse(readFileSync(new URL("../tern/avatars.json", import.meta.url), "utf8"));
-const EYES = {
-	open: ["ee", "ee", "ee"],
-	blink: ["..", "ee", ".."],
-	shut: ["..", "..", "ee"],
-};
 const BODIES = Object.keys(AVATARS.bodies).sort();
 const INKS = Object.keys(AVATARS.inks).sort();
-const SHUT: Record<string, true> = { sleep: true, drowsy: true };
-const SQUINT: Record<string, true> = { boop: true, happy: true };
 
 function hash(name) {
 	let h = 0x811cb697;
@@ -41,38 +34,39 @@ export function chaoOf(name, tint) {
 	return { body, ink, tint: TINTS.includes(shade) ? shade : TINTS[h % TINTS.length] };
 }
 
-function stamp(body, variant) {
-	const [left, right, top] = body.eyes;
-	const grid = body.rows.map(line => [...line]);
-	for (const [dy, line] of EYES[variant].entries()) {
-		for (const [dx, c] of [...line].entries()) {
-			if (c !== "e") continue;
-			for (const x of [left + dx, right + dx]) if (grid[top + dy][x] !== ".") grid[top + dy][x] = "e";
-		}
-	}
-	return grid;
+export type Shape = "open" | "squint" | "wide" | "shut" | "happy" | "sad";
+export type Gaze = "c" | "l" | "r" | "u" | "d";
+export interface Pose {
+	mood: string;
+	shape: Shape;
+	gaze: Gaze;
 }
 
-function pixels(grid, body) {
-	const drawn = grid.map((line, y) => ({ line, y })).filter(({ line }) => line.some(c => c !== "."));
-	const left = Math.min(...drawn.map(({ line }) => line.findIndex(c => c !== ".")));
-	const right = Math.max(...drawn.map(({ line }) => line.findLastIndex(c => c !== ".")));
-	const lid = y => y === body.eyes[2] || y === body.eyes[2] + 2;
-	return drawn.map(({ line, y }) =>
-		row(
-			[...line.slice(left, right + 1)].map(c => col([], { role: `omp.bot.px.${c === "e" && lid(y) ? "edge" : c}` })),
-			{ role: "omp.bot.line", gap: "none" },
-		),
+const MOODS: Record<string, { shape: Shape; gaze: Gaze }> = {
+	idle: { shape: "open", gaze: "c" },
+	listen: { shape: "open", gaze: "d" },
+	thinking: { shape: "squint", gaze: "u" },
+	working: { shape: "squint", gaze: "d" },
+	talking: { shape: "open", gaze: "c" },
+	waiting: { shape: "wide", gaze: "u" },
+	boop: { shape: "happy", gaze: "c" },
+	happy: { shape: "happy", gaze: "c" },
+	drowsy: { shape: "squint", gaze: "d" },
+	sleep: { shape: "shut", gaze: "c" },
+	error: { shape: "sad", gaze: "u" },
+};
+
+export function poseOf(mood: string): Pose {
+	const face = MOODS[mood] ?? MOODS.idle;
+	return { mood, shape: face.shape, gaze: face.gaze };
+}
+
+export function drawChao(look, pose: Pose) {
+	return col(
+		[
+			col([], { role: `omp.bot.skin.${look.body}.${look.ink}`, gap: "none" }),
+			col([], { role: `omp.bot.face.${pose.shape}.${pose.gaze}`, gap: "none" }),
+		],
+		{ role: `omp.bot.chao.${pose.mood}`, gap: "none", align: "center", actions: { click: "boop" } },
 	);
-}
-
-export function drawChao(look, mood) {
-	const body = AVATARS.bodies[look.body] ?? AVATARS.bodies[AVATARS.default.body];
-	const variant = SHUT[mood] ? "shut" : SQUINT[mood] ? "blink" : "open";
-	return col([col(pixels(stamp(body, variant), body), { role: "omp.bot.body", gap: "none", align: "center" })], {
-		role: `omp.bot.chao.${mood}`,
-		gap: "none",
-		align: "center",
-		actions: { click: "boop" },
-	});
 }
