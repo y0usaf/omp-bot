@@ -60,6 +60,7 @@ function delivered(session, id) {
 export default function supervise(pi) {
 	if (!process.env.OMP_BOT_NAME) return;
 	let ctx;
+	let booted = false;
 
 	pi.setLabel("Bot helpers");
 
@@ -80,13 +81,16 @@ export default function supervise(pi) {
 		const session = c.sessionManager?.getSessionFile?.();
 		if (!session) return;
 		let previous = 0;
-		try {
-			previous = Number(readFileSync(BOOT, "utf8")) || 0;
-		} catch {}
-		try {
-			mkdirSync(BOT, { recursive: true });
-			writeFileSync(BOOT, String(Date.now()));
-		} catch {}
+		if (!booted) {
+			booted = true;
+			try {
+				previous = Number(readFileSync(BOOT, "utf8")) || 0;
+			} catch {}
+			try {
+				mkdirSync(BOT, { recursive: true });
+				writeFileSync(BOOT, String(Date.now()));
+			} catch {}
+		}
 		let files;
 		try {
 			files = readdirSync(DIR);
