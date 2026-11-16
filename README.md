@@ -1,6 +1,6 @@
 # omp-bot
 
-omp-bot opens named omp sessions ("bots") in your Tern tabs, each drawn as a Chao avatar with its own persona, folder, model and OptChat memory.
+omp-bot opens named omp sessions ("bots") in your Tern tabs, each drawn as a small pixel body with its own colour, persona, folder, model and OptChat memory.
 
 A bot is an ordinary omp session with a few extensions from this repo loaded. It runs while its tab is open, keeps one conversation for good, and reads its memory as a summary tree rather than the whole transcript.
 
@@ -47,8 +47,8 @@ omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh
 | `persist` | Folders under `~` that must survive a reboot. |
 | `box` | `true` runs the bot's omp inside omp-box. |
 | `work` | `true` gives the bot an open-work list, `bots/NAME/work.txt`: one `todo` or `wait` line per unfinished ask, each ending `check: <command>` (exits 0 once done) or `check: manual <what>`; a wait on the user quotes the question asked. After each turn the checks run (`OMP_BOT_WORK_CHECK_SECONDS`, 60): a pass removes the line and logs command, exit and output to `bots/NAME/done.log`; a checked line deleted before passing comes back, and `drop <ask> (why)` drops one. The bot is sent todo lines, check results, uncovered or unquoted lines and day-old questions, until none are left, a nudged turn makes no tool call, or `OMP_BOT_WORK_NUDGES` (6) nudges in a row. |
-| `avatar` | Parts overriding the ones the name picks: `{"body": "ghost", "color": "#ff8800", "eyes": "happy", "accessory": "halo", "motion": "hop"}`. |
-| | Part names are in `tern/avatars.json`; `body` may also name a drawn sprite in `tern/avatars/` (`lloyd`, `sol`, ...). **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
+| `avatar` | Body and colour overriding the ones the name picks: `{"body": "hex", "ink": "orchid"}`. |
+| | Body and ink names are in `tern/avatars.json`. **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
 
 A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. `bots/NAME/rules.md` holds standing rules given to the bot word for word; its `pin_rule` tool appends to it. `tools/NAME/bin/` goes on that bot's `PATH` only.
 
@@ -65,7 +65,7 @@ A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. 
 | `OMP_BOT_PERSIST` | none | Hook run as `HOOK mount PATH` / `HOOK purge PATH` for `persist` folders. |
 | `OMP_BOT_EXTENSION`, `OMP_BOT_CWD_EXTENSION`, `OMP_BOT_SECRETS_EXTENSION`, `OMP_BOT_WORK_FOLD_EXTENSION`, `OMP_BOT_CHAT_LOOK_EXTENSION` | none | Extra omp extensions every bot loads. |
 | `OMP_BOT_NO_TOOLS` | unset | `1` starts bots with `--no-tools`. |
-| `OMP_BOT_NAP_MS` | 45000 | Idle time before the Chao curls up for a nap. |
+| `OMP_BOT_NAP_MS` | 45000 | Idle time before the bot curls up for a nap. |
 | `OMP_BOT_CHECK_ROUNDS` | 3 | Times a done-check sends a helper back to work before a bot reports it as still failing. |
 
 Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BOX_EXT` and `OMP_BOT_BOX_PATH` from `box.env`; see `bin/omp-bot-box`.
@@ -76,8 +76,8 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **One conversation.** Each start resumes the bot's latest session. The bot exits with code 76 to restart; finix's Agent Tabs plugin reopens it in the same tab.
 - **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
 - **Done-checks.** A bot can add `check` to a helper it starts: a shell command the helper never sees. When the helper stops, `omp/done.ts` runs it in the bot's folder; while it exits non-zero the helper is told the output and carries on, up to `OMP_BOT_CHECK_ROUNDS` rounds, and the bot then gets the helper's result with the check's outcome.
-- **Avatar.** `omp/omp-bot.ts` redraws the transcript and composer around a Chao: replies and prompts get its tint, the working row shows what the turn is doing, and `omp/chao.ts` draws the face. `/bot` toggles it, `/bot name NAME` renames it.
-- **Tabs.** The Tern plugin registers each bot as an agent tab, colours its tab by tint, and draws avatars from `tern/avatars.json` and the PNG sprites.
+- **Avatar.** `omp/omp-bot.ts` redraws the transcript and composer around a body: replies and prompts get its tint, the working row shows what the turn is doing, and `omp/chao.ts` draws the 16×16 pixel body and its eyes from `tern/avatars.json`, still at rest and moving while a turn runs. `/bot` toggles it, `/bot name NAME` renames it.
+- **Tabs.** The Tern plugin registers each bot as an agent tab, colours its tab by tint, and draws each face from the same bodies in `tern/avatars.json`.
 
 ## Persistence
 

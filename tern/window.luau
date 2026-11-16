@@ -21,53 +21,72 @@ local function hash(name: string): number
 end
 
 local AVATAR = tern.json.decode(tern.fs.read(tern.plugin.dir .. "/avatars.json"))
-local PARTS = { "body", "color", "eyes", "accessory", "motion" }
+local PARTS = { "body", "ink" }
+local BODY_NAMES, INK_NAMES = {}, {}
+for name in AVATAR.bodies do
+	BODY_NAMES[#BODY_NAMES + 1] = name
+end
+for name in AVATAR.inks do
+	INK_NAMES[#INK_NAMES + 1] = name
+end
+table.sort(BODY_NAMES)
+table.sort(INK_NAMES)
 
-local function part(kind: string, name: any): any
-	for _, item in ipairs(AVATAR[kind]) do
-		if item.name == name then
-			return item
+-- A bot's look: one body and one ink, fixed per name and overridden piecemeal by the roster's "avatar" table.
+local function look(bot: Bot): { body: string, ink: string }
+	local h = hash(bot.name)
+	local fixed = AVATAR.bots[bot.name]
+	local body = fixed and fixed.body or BODY_NAMES[h % #BODY_NAMES + 1]
+	h = h // #BODY_NAMES
+	local ink = fixed and fixed.ink or INK_NAMES[h % #INK_NAMES + 1]
+	local own = type(bot.avatar) == "table" and bot.avatar or {}
+	if own.body ~= nil then
+		if AVATAR.bodies[own.body] then
+			body = own.body
+		else
+			print("omp bots: " .. bot.name .. "'s avatar has no body " .. tostring(own.body))
 		end
 	end
-	return nil
+	if own.ink ~= nil then
+		if AVATAR.inks[own.ink] then
+			ink = own.ink
+		else
+			print("omp bots: " .. bot.name .. "'s avatar has no colour " .. tostring(own.ink))
+		end
+	end
+	return { body = body, ink = ink }
 end
 
--- A bot's parts: one of each, seeded from its name, with the roster's "avatar" table overriding any of them.
-local function parts(bot: Bot): { [string]: string }
-	local h = hash(bot.name)
-	local own = type(bot.avatar) == "table" and bot.avatar or {}
-	local got: { [string]: string } = {}
-	for _, kind in ipairs(PARTS) do
-		local list = AVATAR[kind]
-		got[kind] = list[h % #list + 1].name
-		h = h // #list
-		local want = own[kind]
-		if want ~= nil then
-			if part(kind, want) or (kind == "body" and AVATAR.sprites[want]) or (kind == "color" and type(want) == "string" and want:match("^#%x+$")) then
-				got[kind] = want
+-- The body as one flat svg: a run of pixels per row, the eyes over them, since a face everywhere but a chat row is one image.
+local function face(body: string, ink: string): string
+	local def = AVATAR.bodies[body]
+	local parts = {}
+	local function rect(x: number, y: number, w: number, h: number, fill: string)
+		parts[#parts + 1] = "<rect x='" .. x .. "' y='" .. y .. "' width='" .. w .. "' height='" .. h .. "' fill='" .. fill .. "'/>"
+	end
+	for y, line in ipairs(def.rows) do
+		local x = 1
+		while x <= #line do
+			if line:sub(x, x) ~= "b" then
+				x = x + 1
 			else
-				print("omp bots: " .. bot.name .. "'s avatar has no " .. kind .. " " .. tostring(want))
+				local from = x
+				while x <= #line and line:sub(x, x) == "b" do
+					x = x + 1
+				end
+				rect(from - 1, y - 1, x - from, 1, ink)
 			end
 		end
 	end
-	return got
+	rect(def.eyes[1] - 1, def.eyes[3] - 1, 2, 3, "#fff")
+	rect(def.eyes[2] - 1, def.eyes[3] - 1, 2, 3, "#fff")
+	return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'>" .. table.concat(parts) .. "</svg>"
 end
 
 local function avatar(bot: Bot): string
-	local got = parts(bot)
-	local rows = AVATAR.sprites[got.body]
-	if rows then
-		return "--bot-face: url(\"avatars/" .. got.body .. ".png\"); --bot-cols: 10; --bot-rows: " .. rows .. "; --bot-move: avatar-" .. got.body .. "; --bot-move-big: avatar-" .. got.body .. "-big;"
-	end
-	local body = part("body", got.body)
-	local color = part("color", got.color)
-	local ink = color and color.hex or got.color
-	local svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><mask id='e'><rect width='128' height='128' fill='white'/>"
-		.. "<g transform='translate(" .. body.eyes[1] .. " " .. body.eyes[2] .. ")'>" .. part("eyes", got.eyes).svg .. "</g></mask>"
-		.. "<g fill='" .. ink .. "' stroke='" .. ink .. "' stroke-width='0' mask='url(#e)'>" .. body.svg
-		.. "<g transform='translate(" .. body.top[1] .. " " .. body.top[2] .. ")'>" .. part("accessory", got.accessory).svg .. "</g></g></svg>"
-	local url = svg:gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E")
-	return "--bot-face: url(\"data:image/svg+xml," .. url .. "\"); --bot-cols: 1; --bot-rows: 1; --bot-move: avatar-" .. got.motion .. "; --bot-move-big: avatar-" .. got.motion .. ";"
+	local got = look(bot)
+	local url = face(got.body, AVATAR.inks[got.ink]):gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E")
+	return "--bot-face: url(\"data:image/svg+xml," .. url .. "\"); --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
 end
 
 local function quote(s: string): string
@@ -80,7 +99,7 @@ end
 
 -- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
 local function show_avatars(bots: { Bot })
-	local rules = { ":root { --bot-face: url(\"avatars/sol.png\"); --bot-cols: 10; --bot-rows: 8; --bot-move: avatar-sol; --bot-move-big: avatar-sol-big; }" }
+	local rules = { ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
 	local tints: { [string]: number } = {}
 	for _, bot in ipairs(bots) do
 		if bot.tint then
@@ -147,7 +166,7 @@ local function show_faces(cx: WindowCx?)
 	end
 	local rules = {}
 	for index, selector in ipairs(faces_of) do
-		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) 0 0 / calc(100% * var(--bot-cols)) calc(100% * var(--bot-rows)) no-repeat; box-shadow: none; }"
+		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) 0 0 / 100% 100% no-repeat; box-shadow: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. "::before, :root:not(#bot) " .. selector .. "::after { content: none; }"
 	end
@@ -406,9 +425,9 @@ local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
 	local rules = {}
 	for i, face in ipairs(faces) do
 		local row = ":root:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item)"
-		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 32px; height: 32px; background: var(--bot-face) 0 0 / calc(32px * var(--bot-cols)) calc(32px * var(--bot-rows)) no-repeat; }"
+		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 32px; height: 32px; background: var(--bot-face) 0 0 / 100% 100% no-repeat; }"
 		rules[#rules + 1] = row .. " .ck-ic > .ico { display: none; }"
-		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { animation: var(--bot-move) 4s steps(1, end) infinite; }"
+		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { animation: bot-hop 1600ms steps(1, end) infinite; }"
 	end
 	rules[#rules + 1] = "@media (prefers-reduced-motion: reduce) { :root:not(#bot) #pick .ck-item .ck-ic { animation: none !important; } }"
 	tern.css("pick", table.concat(rules, "\n"))
@@ -435,12 +454,12 @@ local function save_avatar(name: string, own: { [string]: string }?)
 	end)
 end
 
-local KIND_NAMES: { [string]: string } = { body = "body", color = "colour", eyes = "eyes", accessory = "accessory", motion = "motion" }
+local KIND_NAMES: { [string]: string } = { body = "body", ink = "colour" }
 
--- One part per pick, in PARTS order, each row drawn as the bot would look with it; a drawn sprite or "From name" ends the chain.
+-- One part per pick, in PARTS order, each row drawn as the bot would look with it; "From name" ends the chain.
 local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step: number)
 	local kind = PARTS[step]
-	local now = parts({ name = bot.name, avatar = own } :: any)
+	local now = look({ name = bot.name, avatar = own } :: any)
 	local items, faces = {}, {}
 	local function add(item: any, try: { [string]: string }?)
 		item.icon = "sparkle"
@@ -448,20 +467,14 @@ local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step
 		faces[#faces + 1] = avatar({ name = bot.name, avatar = try } :: any)
 	end
 	if kind == "body" then
-		add({ label = "From name", detail = "parts picked from the name " .. bot.name, reset = true, current = bot.avatar == nil }, nil)
-		local sprites = {}
-		for name in AVATAR.sprites do
-			sprites[#sprites + 1] = name
+		add({ label = "From name", detail = "body and colour picked from the name " .. bot.name, reset = true, current = bot.avatar == nil }, nil)
+		for _, name in ipairs(BODY_NAMES) do
+			add({ label = name, value = name, current = now.body == name }, { body = name })
 		end
-		table.sort(sprites)
-		for _, name in ipairs(sprites) do
-			add({ label = name, detail = "drawn", value = name, current = now.body == name }, { body = name })
+	else
+		for _, name in ipairs(INK_NAMES) do
+			add({ label = name, detail = AVATAR.inks[name], value = name, current = now.ink == name }, { ink = name })
 		end
-	end
-	for _, item in ipairs(AVATAR[kind]) do
-		local try = table.clone(own)
-		try[kind] = item.name
-		add({ label = item.name, detail = item.hex, value = item.name, current = now[kind] == item.name }, try)
 	end
 	local last = step == #PARTS
 	pick_faces(cx, { items = items, placeholder = bot.name .. "'s " .. KIND_NAMES[kind], icon = "sparkle", action = last and "save" or "next" }, faces):next(function(item, _, cx2)
@@ -471,15 +484,13 @@ local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step
 		end
 		if item.reset then
 			save_avatar(bot.name, nil)
-		elseif AVATAR.sprites[item.value :: string] then
-			save_avatar(bot.name, { body = item.value })
+			return
+		end
+		own[kind] = item.value
+		if last then
+			save_avatar(bot.name, own)
 		else
-			own[kind] = item.value
-			if last then
-				save_avatar(bot.name, own)
-			else
-				pick_part(cx2, bot, own, step + 1)
-			end
+			pick_part(cx2, bot, own, step + 1)
 		end
 	end)
 end
@@ -494,7 +505,7 @@ local function change_avatar(cx: WindowCx)
 	pick_faces(cx, { items = items, placeholder = "Change whose avatar?", icon = "sparkle", action = "next" }, faces):next(function(item, _, cx2)
 		tern.css("pick", "")
 		if item and cx2 then
-			pick_part(cx2, item.bot, parts(item.bot), 1)
+			pick_part(cx2, item.bot, look(item.bot), 1)
 		end
 	end)
 end

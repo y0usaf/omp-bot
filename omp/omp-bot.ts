@@ -822,7 +822,7 @@ export default function ompBot(pi) {
 	});
 
 	pi.registerCommand("bot", {
-		description: "Bot mode: a Chao that works for you; /bot toggles it, /bot name NAME renames it",
+		description: "Bot mode: a small pixel bot that works for you; /bot toggles it, /bot name NAME renames it",
 		handler: async (args, ctx) => {
 			const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
 			if (parts[0] === "name" && parts[1]) {
@@ -840,7 +840,7 @@ export default function ompBot(pi) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
 		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small Chao: your replies and one status word, nothing else.\n`;
+		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small pixel bot: your replies and one status word, nothing else.\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };
