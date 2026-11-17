@@ -93,7 +93,7 @@ The box runs each boxed bot as a Unix user of its own (`OMP_BOT_BOX_USERS`, from
 
 Secrets stay in `bots/NAME/secrets`, encrypted, and are decrypted only inside the box. Only the shared secrets the bot's roster entry lists in `secrets` are copied there, each sealed with the bot's own key; `omp-secret` in the box lists what it has and nothing else.
 
-If the box goes away, the tab waits for it and resumes. Five quick cut-offs in a row close the tab instead.
+If the box goes away, the tab waits for it and resumes. If a bot's omp dies at all — a crash, a kill, the box dropping the session (ssh's `exit 255`) — the tab stays open and the bot comes back in it with the same conversation: the launcher prints what happened and waits 2, 4, 8, 16, 30, 60, 120, then 300 seconds between starts, so a bot that fails instantly backs off and says so instead of handing the tab back to Tern's exit sheet. Only `Ctrl+C`, a clean `/quit` (`exit 0`), `exit 75` (already open elsewhere) or `exit 76` (restart) ends the tab.
 
 ## State
 
