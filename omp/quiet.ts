@@ -155,7 +155,10 @@ export function announceDone(pi, done, ctx) {
 		details: { passed: true, ask },
 	};
 	log({ ask, check: check || undefined, agent: done.agent, exit: 0, output: output || undefined });
-	const clear = keepNotice(payload);
+	let clear = () => {};
+	try {
+		clear = keepNotice(payload);
+	} catch {}
 	const post = () => {
 		try {
 			pi.sendMessage(payload);
