@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { STATE } from "./paths";
+import { announceDone } from "./quiet.ts";
 
 const MAX = Number(process.env.OMP_BOT_WORK_NUDGES) || 6;
 const CHECK_SECONDS = Number(process.env.OMP_BOT_WORK_CHECK_SECONDS) || 60;
@@ -133,9 +134,8 @@ export default function work(pi) {
 			if (item.check && !item.check.startsWith("manual")) {
 				const result = await run(item.check);
 				if (result.exit === 0) {
-					log({ ask: item.ask, check: item.check, exit: 0, output: result.out });
+					announceDone(pi, { ask: item.ask, check: item.check, output: result.out, type: "work" }, c);
 					closed.add(item.key);
-					notes.push(`Check passed, closed: ${item.ask}\nTell the user it's done.`);
 					continue;
 				}
 				if (item.kind === "todo") notes.push(`${line}\n  check exit ${result.exit}: ${result.out.trim().split("\n").slice(-3).join(" | ")}`);

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE } from "./paths.ts";
+import { announceDone, installQuietDone } from "./quiet.ts";
 
 const DIR = join(STATE, "bots", process.env.OMP_BOT_NAME ?? "-", "checks");
 const ROUNDS = Number(process.env.OMP_BOT_CHECK_ROUNDS) || 3;
@@ -22,6 +23,7 @@ export default function (pi) {
 	const name = process.env.OMP_BOT_NAME;
 	if (!name) return;
 	pi.setLabel("Bot done-checks");
+	installQuietDone(pi);
 	let mine;
 	const watched = new Map();
 	let timer;
@@ -56,26 +58,42 @@ export default function (pi) {
 		}
 	};
 
-	const settle = (id, text) => {
+	const forget = id => {
+		watched.delete(id);
+		rmSync(join(DIR, `${id}.json`), { force: true });
+		rmSync(join(DIR, `${id}.status`), { force: true });
+	};
+
+	const fail = (id, text) => {
 		const report = lastWords(id);
 		pi.sendMessage(
 			{ customType: "done-check", content: report ? `${text}\n\nHelper's last word: ${report}` : text, display: true, attribution: "agent" },
 			{ deliverAs: "followUp" },
 		);
-		watched.delete(id);
-		rmSync(join(DIR, `${id}.json`), { force: true });
-		rmSync(join(DIR, `${id}.status`), { force: true });
+		forget(id);
+	};
+
+	const pass = (id, entry, rounds) => {
+		const tries = rounds ? `after ${rounds} failed ${rounds === 1 ? "try" : "tries"}` : "";
+		announceDone(pi, {
+			ask: entry.ask || id,
+			agent: id,
+			check: entry.command,
+			note: tries,
+			output: lastWords(id),
+		}, where);
+		forget(id);
 	};
 
 	const sweep = () => {
 		for (const [id, entry] of watched) {
 			const seen = readJson(join(DIR, `${id}.status`));
 			if (seen?.state === "passed") {
-				settle(id, `Done-check on ${id} passed${seen.rounds ? ` after ${seen.rounds} failed ${seen.rounds === 1 ? "try" : "tries"}` : ""}: \`${entry.command}\``);
+				pass(id, entry, seen.rounds);
 				continue;
 			}
 			if (seen?.state === "failed") {
-				settle(
+				fail(
 					id,
 					`Done-check on ${id} failed every try (${seen.rounds}) and the helper stopped: \`${entry.command}\` exited ${seen.code}. ${seen.output || "(no output)"}`,
 				);
@@ -89,9 +107,9 @@ export default function (pi) {
 		}
 	};
 
-	const watch = (ctx, id, command) => {
+	const watch = (ctx, id, command, ask) => {
 		if (!id) return;
-		watched.set(id, { command, since: Date.now() });
+		watched.set(id, { command, ask, since: Date.now() });
 		where = ctx;
 		if (timer === undefined) {
 			timer = ctx.setInterval(sweep, POLL_MS);
@@ -160,11 +178,12 @@ export default function (pi) {
 					const { check: command, ...rest } = task ?? {};
 					if (typeof command !== "string" || command.trim().length === 0) return rest;
 					const id = String(rest.name ?? "").trim() || `Checked${randomBytes(4).toString("hex")}${index}`;
-					checks[index] = { id, command: command.trim() };
+					const ask = typeof rest.task === "string" && rest.task.trim() ? rest.task.trim() : id;
+					checks[index] = { id, command: command.trim(), ask };
 					mkdirSync(DIR, { recursive: true });
 					writeFileSync(
 						join(DIR, `${id}.json`),
-						JSON.stringify({ command: command.trim(), cwd: ctx.cwd, rounds: ROUNDS }),
+						JSON.stringify({ command: command.trim(), ask, cwd: ctx.cwd, rounds: ROUNDS }),
 					);
 					return { ...rest, name: id };
 				});
@@ -179,7 +198,7 @@ export default function (pi) {
 						rmSync(kept, { force: true });
 						want.id = spawn.id;
 					}
-					watch(ctx, want.id, want.command);
+					watch(ctx, want.id, want.command, want.ask);
 				}
 				sweep();
 				return result;
