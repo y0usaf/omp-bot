@@ -4,9 +4,7 @@ import { STATE } from "./paths.ts";
 
 const BOT = join(STATE, "bots", process.env.OMP_BOT_NAME ?? "-");
 const DIR = join(BOT, "helpers");
-const BOOT = join(BOT, "boot");
 const TAIL = 65536;
-const SLACK = 60000;
 const KEEP = 24 * 60 * 60 * 1000;
 const OUTPUT = 6000;
 
@@ -53,14 +51,31 @@ function lastMessage(file) {
 	return undefined;
 }
 
-function delivered(session, id) {
-	return session.includes(`task-result id=\\"${id}\\"`);
+function handled(session, id) {
+	const at = session.lastIndexOf(`task-result id=\\"${id}\\"`);
+	if (at < 0) return false;
+	const end = session.indexOf("\n", at);
+	if (end < 0) return false;
+	for (const line of session.slice(end + 1).split("\n")) {
+		if (!line) continue;
+		let entry;
+		try {
+			entry = JSON.parse(line);
+		} catch {
+			return false;
+		}
+		if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
+		const stop = entry.message.stopReason;
+		if (stop === "aborted" || stop === "error") continue;
+		return true;
+	}
+	return false;
 }
 
 export default function supervise(pi) {
 	if (!process.env.OMP_BOT_NAME) return;
 	let ctx;
-	let booted = false;
+	let recovered = false;
 
 	pi.setLabel("Bot helpers");
 
@@ -78,26 +93,17 @@ export default function supervise(pi) {
 	};
 
 	const recover = c => {
+		if (recovered) return;
 		const session = c.sessionManager?.getSessionFile?.();
 		if (!session) return;
-		let previous = 0;
-		if (!booted) {
-			booted = true;
-			try {
-				previous = Number(readFileSync(BOOT, "utf8")) || 0;
-			} catch {}
-			try {
-				mkdirSync(BOT, { recursive: true });
-				writeFileSync(BOOT, String(Date.now()));
-			} catch {}
-		}
+		recovered = true;
 		let files;
 		try {
 			files = readdirSync(DIR);
 		} catch {
 			return;
 		}
-		let parent = "";
+		let transcript = "";
 		const found = [];
 		for (const name of files) {
 			if (!name.endsWith(".json")) continue;
@@ -113,10 +119,6 @@ export default function supervise(pi) {
 				rmSync(file, { force: true });
 				continue;
 			}
-			if (entry.reported) {
-				if (Date.now() - entry.reported > KEEP) rmSync(file, { force: true });
-				continue;
-			}
 			if (Date.now() - (entry.since ?? 0) > KEEP || !existsSync(entry.transcript)) {
 				rmSync(file, { force: true });
 				continue;
@@ -125,21 +127,14 @@ export default function supervise(pi) {
 			const words = lastMessage(entry.transcript);
 			if (!words || words.role !== "assistant" || !words.text) continue;
 			if (words.stop === "aborted" || words.stop === "error") continue;
-			let mtime = 0;
-			try {
-				mtime = statSync(entry.transcript).mtimeMs;
-			} catch {
-				continue;
-			}
-			if (mtime < previous - SLACK || mtime > Date.now()) continue;
-			if (!parent) {
+			if (!transcript) {
 				try {
-					parent = readFileSync(session, "utf8");
+					transcript = readFileSync(session, "utf8");
 				} catch {
 					return;
 				}
 			}
-			if (delivered(parent, entry.id)) {
+			if (handled(transcript, entry.id)) {
 				rmSync(file, { force: true });
 				continue;
 			}
@@ -160,11 +155,6 @@ export default function supervise(pi) {
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
 		);
-		for (const entry of found) {
-			try {
-				writeFileSync(join(DIR, `${key(entry.parent, entry.id)}.json`), JSON.stringify({ ...entry, reported: Date.now() }));
-			} catch {}
-		}
 	};
 
 	pi.on("session_start", async (_event, c) => {
