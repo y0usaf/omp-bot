@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { STATE } from "./paths.ts";
 
@@ -72,12 +73,52 @@ class QuietDone {
 	}
 }
 
+function noticeDir() {
+	return join(STATE, "bots", process.env.OMP_BOT_NAME ?? "-", "quiet");
+}
+
+function keepNotice(payload) {
+	const file = join(noticeDir(), `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}.json`);
+	mkdirSync(noticeDir(), { recursive: true });
+	writeFileSync(file, JSON.stringify(payload));
+	return () => rmSync(file, { force: true });
+}
+
+function replayNotices(pi) {
+	let names;
+	try {
+		names = readdirSync(noticeDir()).sort();
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const file = join(noticeDir(), name);
+		let payload;
+		try {
+			payload = JSON.parse(readFileSync(file, "utf8"));
+		} catch {
+			rmSync(file, { force: true });
+			continue;
+		}
+		try {
+			pi.sendMessage(payload);
+		} catch {
+			return;
+		}
+		rmSync(file, { force: true });
+	}
+}
+
 export function installQuietDone(pi) {
 	for (const type of ["done-check", "work"]) {
 		pi.registerMessageRenderer(type, (message, options) =>
 			message?.details?.passed === true ? new QuietDone(message, options?.expanded) : undefined,
 		);
 	}
+	pi.on("session_start", async (_event, ctx) => {
+		if (ctx.agent?.kind === "sub") return;
+		ctx.setTimeout(() => replayNotices(pi), 1000);
+	});
 }
 
 function log(entry) {
@@ -91,9 +132,10 @@ function log(entry) {
 }
 
 /**
- * Post a passing check as one quiet line and record it. No `deliverAs` and no
- * `triggerTurn`: an idle session paints the message without starting a turn,
- * and a busy one folds it into the turn already running.
+ * Record and post a passing check as one quiet line. The log entry and the
+ * queued notice are written first, so a restart while the line waits for an
+ * idle session still keeps both; the notice replays at the next start. No
+ * `deliverAs` and no `triggerTurn`, so an idle append starts no turn.
  *
  * @param {{ask?: string, check?: string, output?: string, note?: string, type?: string, agent?: string}} done
  */
@@ -105,15 +147,23 @@ export function announceDone(pi, done, ctx) {
 	const content = [`${ask} — ${HEAD}${note ? ` ${note}` : ""}`];
 	if (check) content.push(`\`${check}\``);
 	if (output) content.push(output.length > TAIL ? `${output.slice(0, TAIL)}…` : output);
+	const payload = {
+		customType: done.type ?? "done-check",
+		content: content.join("\n\n"),
+		display: true,
+		attribution: "agent",
+		details: { passed: true, ask },
+	};
+	log({ ask, check: check || undefined, agent: done.agent, exit: 0, output: output || undefined });
+	const clear = keepNotice(payload);
 	const post = () => {
-		pi.sendMessage({
-			customType: done.type ?? "done-check",
-			content: content.join("\n\n"),
-			display: true,
-			attribution: "agent",
-			details: { passed: true, ask },
-		});
-		log({ ask, check: check || undefined, agent: done.agent, exit: 0, output: output || undefined });
+		try {
+			pi.sendMessage(payload);
+		} catch {
+			return;
+		}
+		const timer = setTimeout(clear, 5000);
+		timer?.unref?.();
 	};
 	if (!ctx?.isIdle || ctx.isIdle()) {
 		post();
