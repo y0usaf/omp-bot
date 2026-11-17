@@ -84,7 +84,11 @@ function keepNotice(payload) {
 	return () => rmSync(file, { force: true });
 }
 
-function replayNotices(pi) {
+function replayNotices(pi, ctx) {
+	if (ctx?.isIdle && !ctx.isIdle()) {
+		ctx.setTimeout(() => replayNotices(pi, ctx), 500);
+		return;
+	}
 	let names;
 	try {
 		names = readdirSync(noticeDir()).sort();
@@ -117,7 +121,7 @@ export function installQuietDone(pi) {
 	}
 	pi.on("session_start", async (_event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		ctx.setTimeout(() => replayNotices(pi), 1000);
+		ctx.setTimeout(() => replayNotices(pi, ctx), 1000);
 	});
 }
 
@@ -172,9 +176,8 @@ export function announceDone(pi, done, ctx) {
 		post();
 		return;
 	}
-	let tries = 0;
 	const later = () => {
-		if (ctx.isIdle() || ++tries > 100) post();
+		if (ctx.isIdle()) post();
 		else ctx.setTimeout(later, 250);
 	};
 	ctx.setTimeout(later, 250);
