@@ -68,6 +68,21 @@ model=$(field model)
 model=${model:-${OMP_BOT_MODEL:-}}
 [ -z "$model" ] || set -- --model "$model" "$@"
 [ ! -f "$dir/config.yml" ] || set -- --config "$dir/config.yml" "$@"
+post() {
+	while sleep 1; do
+		for out in "$dir/outbox"/*/; do
+			set -- "$out"*.json
+			[ -e "$1" ] || continue
+			to=${out%/}
+			to=${to##*/}
+			jq -e --arg n "$to" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null || continue
+			mkdir -p "$state/bots/$to/inbox/$name" && mv -f "$@" "$state/bots/$to/inbox/$name/" || true
+		done
+	done
+}
+post &
+mailer=$!
+trap 'kill "$mailer" 2>/dev/null' EXIT
 memory=$(field memory)
 memory=${memory:-optchat}
 export OMP_BOT_MEMORY="$memory"
@@ -79,12 +94,12 @@ optchat)
 	set -- -e "$OMP_BOT_OPTCHAT/extension.ts" --config "$root/omp/memory.yml" "$@"
 	"$root/bin/omp-bot-memory" "$name" >>"$dir/optchat/optchatd.log" 2>&1 &
 	summariser=$!
-	trap 'kill "$summariser" 2>/dev/null' EXIT
+	trap 'kill "$summariser" "$mailer" 2>/dev/null' EXIT
 	;;
 none) ;;
 *) echo "omp-bot: $name has unknown memory '$memory' (optchat or none)" >&2; exit 1 ;;
 esac
-set -- -e "$root/omp/core.ts" -e "$root/omp/cwd.ts" -e "$root/omp/done.ts" -e "$root/omp/supervise.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
+set -- -e "$root/omp/core.ts" -e "$root/omp/mail.ts" -e "$root/omp/cwd.ts" -e "$root/omp/done.ts" -e "$root/omp/supervise.ts" --config "$root/omp/demo.yml" --session-dir "$dir/sessions" "$@"
 export OMP_BOT_RELAUNCH="$dir/relaunch.$$"
 rm -f "$OMP_BOT_RELAUNCH"
 starts=0

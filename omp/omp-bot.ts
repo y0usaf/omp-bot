@@ -422,6 +422,8 @@ function bodyText(block) {
 }
 
 function eventInfo(block) {
+	const mail = block?.c?.find?.(child => child?.mail)?.mail;
+	if (mail) return { action: mail.action, name: mail.from };
 	const role = String(block?.p?.role ?? "");
 	if (role !== "omp.user.collab") return undefined;
 	const name = headText(block).match(/^«(.+?)»/)?.[1]?.trim();

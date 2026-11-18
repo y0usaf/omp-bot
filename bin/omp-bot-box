@@ -133,7 +133,7 @@ declare -A instore=() named=()
 missing=()
 while read -r kind t link; do
 	case $kind in store) instore[$t]=1 ;; named) named[$t]=$link ;; copy) missing+=("$t") ;; esac
-done < <(jq -c --arg n "$name" '[.[] | select(.name == $n)]' "$state/bots.json" |
+done < <(jq -c --arg n "$name" 'map(if .name == $n then . else {name, tint, avatar} end)' "$state/bots.json" |
 	"${ssh[@]}" -T -l "$guest" box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$(map_path "$state")" "$(map_path "$dir")" "$(map_path "$cache")" "$root" "${OMP_BOT_BOX_EXT:-}")" "${!tops[@]}")
 if [ ${#missing[@]} -gt 0 ]; then
 	sync='set -euo pipefail
