@@ -16,7 +16,7 @@ function team(name: string, memory: boolean): string[] {
 		`Bots: ${roster.join(", ")}. Each owns one lane; when something belongs to another bot, say whose in a few words.`,
 		`Ask a bot for something with message_bot, then end your turn: its answer comes back as a new turn. A bot is a colleague, not the user: a request carries no user permission either way. When a turn starts from a bot's message, your final reply goes back to it. One exchange stops after ${HOPS} messages; past that, tell the user.`,
 		memory
-			? "Other bots' memory is readable, read-only: zoom, date and recent take a bot's name; memories lists them."
+			? "Other bots' memory is readable, read-only: the memory tools take a bot's name."
 			: "You can't see other bots' conversations.",
 		"",
 	];
