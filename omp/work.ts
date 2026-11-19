@@ -58,7 +58,6 @@ export default function work(pi) {
 	const file = join(dir, "work.txt");
 	const stateFile = join(dir, "work.json");
 	const logFile = join(dir, "done.log");
-	const rule = `\n\n# Open work\n${file} (one line per unfinished ask):\n- \`todo <ask> check: <cmd>\`\n- \`wait <ask> (<helper> | user: "<question>") check: <cmd>\`\n- \`check:\` shell cmd from ~ (${CHECK_SECONDS}s) exiting 0 when live/pushed, or \`check: manual <observable>\`.\nAuto-runs after turns; pass removes line & logs to ${logFile}. Close manual: \`done <ask> build: <rev|path> seen: <obs>\`. Drop: \`drop <ask> (why)\`.`;
 	const read = () => (existsSync(file) ? readFileSync(file, "utf8") : "");
 	const load = () => {
 		try {
@@ -72,15 +71,11 @@ export default function work(pi) {
 	let nudging = false;
 	let calls = 0;
 
-	pi.on("before_agent_start", async (event, c) => {
-		if (c.agent?.kind === "sub") return undefined;
+	pi.on("before_agent_start", async (_event, c) => {
+		if (c.agent?.kind === "sub") return;
 		if (!nudging) nudges = 0;
 		nudging = false;
 		calls = 0;
-		if (!Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const systemPrompt = [...event.systemPrompt];
-		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${rule}`;
-		return { systemPrompt };
 	});
 
 	pi.on("tool_execution_start", async (_event, c) => {

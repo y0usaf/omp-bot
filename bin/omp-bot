@@ -54,8 +54,6 @@ else
 fi
 export OMP_BOT_NAME="$name" OMP_BOT_TINT="$(field tint)" OMP_BOT_STATE="$state" PI_NO_TITLE=1 PI_NOTIFICATIONS=off
 export PATH="$root/tools/$name/bin:$PATH"
-persona=$(field persona)
-[ -z "$persona" ] || export OMP_BOT_PERSONA="$persona"
 [ -z "${OMP_BOT_EXTENSION:-}" ] || set -- -e "$OMP_BOT_EXTENSION" "$@"
 [ -z "${OMP_BOT_CWD_EXTENSION:-}" ] || set -- -e "$OMP_BOT_CWD_EXTENSION" "$@"
 [ -z "${OMP_BOT_SECRETS_EXTENSION:-}" ] || set -- -e "$OMP_BOT_SECRETS_EXTENSION" "$@"
@@ -90,7 +88,7 @@ case $memory in
 optchat)
 	[ -n "${OMP_BOT_OPTCHAT:-}" ] || { echo "omp-bot: $name keeps OptChat memory but OMP_BOT_OPTCHAT, OptChat's directory, is unset; set it, or \"memory\": \"none\" on the bot" >&2; exit 1; }
 	mkdir -p "$dir/optchat"
-	export OPTCHAT_DIR="$dir/optchat" OPTCHAT_BOT="$name" OPTCHAT_RULES="$dir/rules.md" OPTCHAT_BOTS="$state/bots"
+	export OPTCHAT_DIR="$dir/optchat" OPTCHAT_BOT="$name" OPTCHAT_BOTS="$state/bots"
 	set -- -e "$OMP_BOT_OPTCHAT/extension.ts" --config "$root/omp/memory.yml" "$@"
 	"$root/bin/omp-bot-memory" "$name" >>"$dir/optchat/optchatd.log" 2>&1 &
 	summariser=$!
