@@ -161,13 +161,12 @@ export default function (pi) {
 		if (!item) return;
 		item.check = {
 			type: "string",
-			description:
-				"A shell command the helper never sees. When the helper stops it runs in this folder; while it exits non-zero the helper is told the output and carries on, up to the round limit. Leave it out when the work has no check.",
+			description: "Hidden post-stop shell check; non-zero output continues helper.",
 		};
 		pi.registerTool({
 			name: "task",
 			label: "Task",
-			description: `${native.description ?? "Spawn subagents."}\n\n## Done-checks\nAn item's \`check\` runs when the helper stops; while it fails the helper gets the output and keeps working, up to ${ROUNDS} rounds.`,
+			description: `${native.description ?? "Spawn subagents."}\n\`check\`: hidden post-stop shell check (up to ${ROUNDS} rounds).`,
 			parameters: schema,
 			loadMode: "essential",
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -206,11 +205,4 @@ export default function (pi) {
 		});
 	});
 
-	pi.on("before_agent_start", async (event, ctx) => {
-		if (ctx.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return;
-		const rule = `\n\n# Done-checks\nGive every helper whose work can be tested a task \`check\` (up to ${ROUNDS} rounds), e.g. \`"check": "nix flake check"\`, and report its outcome with the helper's result.`;
-		const systemPrompt = [...event.systemPrompt];
-		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${rule}`;
-		return { systemPrompt };
-	});
 }

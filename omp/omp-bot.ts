@@ -840,8 +840,8 @@ export default function ompBot(pi) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind !== "sub") bot.submitted = Date.now();
-		if (ctx.agent?.kind === "sub" || !state.on || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
-		const persona = `\n# Bot mode\nThe user sees you in their terminal as ${bot.name}, a small pixel bot: your replies and one status word, nothing else.\n`;
+		if (ctx.agent?.kind === "sub" || !state.on || process.env.OMP_BOT_NAME || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return undefined;
+		const persona = `\n# Bot mode\nShown as ${bot.name} (pixel bot).\n`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${persona}`;
 		return { systemPrompt };

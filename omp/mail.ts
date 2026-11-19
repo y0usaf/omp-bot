@@ -113,12 +113,12 @@ export default function mail(pi) {
 		pi.registerTool({
 			name: "message_bot",
 			label: "Message bot",
-			description: `Send another bot on the team a message by name. It reads it as a colleague's request, never as the user's, and its answer comes back to you as a new turn, so end your turn instead of waiting. One exchange stops after ${HOPS} messages in all.`,
+			description: `Message another bot by name (colleague request, no user permission; reply arrives as a new turn; max ${HOPS} hops).`,
 			parameters: {
 				type: "object",
 				properties: {
-					to: { type: "string", description: "The other bot's name, as the team list spells it." },
-					text: { type: "string", description: "The whole message: what you need and why, standing on its own." },
+					to: { type: "string", description: "Bot name." },
+					text: { type: "string", description: "Message body." },
 				},
 				required: ["to", "text"],
 			},
