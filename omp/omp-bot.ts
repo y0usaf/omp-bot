@@ -41,6 +41,7 @@ const DOING = {
 const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
+const MAX_STEP = 60;
 let lastCx;
 
 function when(ts, hour12, now = new Date()) {
@@ -129,6 +130,29 @@ function same(a, b) {
 	return a.length === b.length && a.every((item, i) => item === b[i]);
 }
 
+function cleanStep(value) {
+	if (typeof value !== "string") return "";
+	const step = value.replace(/\s+/g, " ").trim();
+	if (!step) return "";
+	return step.length > MAX_STEP ? `${step.slice(0, MAX_STEP - 1).trimEnd()}…` : step;
+}
+
+function taskStep(args) {
+	if (!Array.isArray(args?.tasks)) return "";
+	const names = args.tasks.map(t => (typeof t?.name === "string" ? t.name.trim() : "")).filter(Boolean);
+	if (names.length > 0) return names.join(", ");
+	return typeof args.tasks[0]?.task === "string" ? args.tasks[0].task : "";
+}
+
+function stepOf(event, captured) {
+	const args = event.args && typeof event.args === "object" ? event.args : undefined;
+	for (const value of [event.intent, captured, args?.i, args?.toolSummary, args?.title, event.toolName === "task" ? taskStep(args) : undefined]) {
+		const step = cleanStep(value);
+		if (step) return step;
+	}
+	return "";
+}
+
 class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
@@ -142,6 +166,7 @@ class Bot {
 		this.active = false;
 		this.stopped = false;
 		this.running = new Map();
+		this.intents = new Map();
 		this.tui = undefined;
 		this.clock = undefined;
 		this.boop = undefined;
@@ -856,6 +881,7 @@ export default function ompBot(pi) {
 		bot.active = true;
 		bot.stopped = false;
 		bot.running.clear();
+		bot.intents.clear();
 		if (bot.hero) {
 			bot.hero = false;
 			mount();
@@ -864,28 +890,39 @@ export default function ompBot(pi) {
 	});
 
 	pi.on("message_update", async (event, ctx) => {
-		if (ctx.agent?.kind === "sub" || !bot.active || bot.running.size > 0) return;
-		const kind = event.assistantMessageEvent?.type;
+		if (ctx.agent?.kind === "sub") return;
+		const ae = event.assistantMessageEvent;
+		if (ae?.type === "toolcall_end" && ae.toolCall?.id) {
+			const args = ae.toolCall.arguments;
+			const step = cleanStep(args && typeof args === "object" ? (args.i ?? args.toolSummary) : undefined);
+			if (step) bot.intents.set(ae.toolCall.id, step);
+		}
+		if (!bot.active || bot.running.size > 0) return;
+		const kind = ae?.type;
 		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Writing it up");
 		else if (kind === "thinking_delta" || kind === "thinking_start") bot.set("thinking", bot.mood === "thinking" ? bot.line : pick(THINKING, Date.now()));
 	});
 
 	pi.on("tool_execution_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		const label = DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size);
-		bot.running.set(event.toolCallId, label);
-		bot.set(label === DOING.ask ? "waiting" : "working", label);
+		const captured = bot.intents.get(event.toolCallId);
+		bot.intents.delete(event.toolCallId);
+		const label = stepOf(event, captured) || (DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size));
+		const mood = event.toolName === "ask" ? "waiting" : "working";
+		bot.running.set(event.toolCallId, { mood, label });
+		bot.set(mood, label);
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
 		bot.running.delete(event.toolCallId);
+		bot.intents.delete(event.toolCallId);
 		if (event.isError) {
 			bot.set("error", "A step failed");
 			return;
 		}
 		const left = [...bot.running.values()].at(-1);
-		bot.set(left === undefined ? "thinking" : left === DOING.ask ? "waiting" : "working", left ?? pick(THINKING, Date.now()));
+		bot.set(left ? left.mood : "thinking", left ? left.label : pick(THINKING, Date.now()));
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -896,6 +933,7 @@ export default function ompBot(pi) {
 		}
 		bot.active = false;
 		bot.running.clear();
+		bot.intents.clear();
 		bot.nap();
 		const final = event.messages?.findLast(message => message.role === "assistant");
 		const reason = final?.stopReason;
