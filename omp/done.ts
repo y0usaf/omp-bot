@@ -167,7 +167,7 @@ export default function (pi) {
 		pi.registerTool({
 			name: "task",
 			label: "Task",
-			description: `${native.description ?? "Spawn subagents."}\n\n## Done-checks\nAn item may carry \`check\`: a shell command the helper never sees. When the helper stops the command runs where you started it; while it fails the helper is told the output and keeps working, for up to ${ROUNDS} rounds. You get the result either way, with the check's outcome.`,
+			description: `${native.description ?? "Spawn subagents."}\n\n## Done-checks\nAn item's \`check\` runs when the helper stops; while it fails the helper gets the output and keeps working, up to ${ROUNDS} rounds.`,
 			parameters: schema,
 			loadMode: "essential",
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -208,7 +208,7 @@ export default function (pi) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub" || !Array.isArray(event.systemPrompt) || event.systemPrompt.length === 0) return;
-		const rule = `\n\n# Done-checks\nA helper you start with the task tool may carry a \`check\` in its item: a shell command the helper never sees. When the helper stops the command runs in your folder, and while it exits non-zero the helper is told the output and carries on, up to ${ROUNDS} rounds. Put one on any helper whose work can be tested (\`"check": "nix flake check"\`), and report the outcome with the helper's result.`;
+		const rule = `\n\n# Done-checks\nGive every helper whose work can be tested a task \`check\` (up to ${ROUNDS} rounds), e.g. \`"check": "nix flake check"\`, and report its outcome with the helper's result.`;
 		const systemPrompt = [...event.systemPrompt];
 		systemPrompt[systemPrompt.length - 1] = `${systemPrompt[systemPrompt.length - 1]}${rule}`;
 		return { systemPrompt };
