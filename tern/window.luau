@@ -81,54 +81,123 @@ local function shade(hex: string, factor: number): string
 	return string.format("#%02x%02x%02x", jump(tonumber(hex:sub(2, 3), 16)), jump(tonumber(hex:sub(4, 5), 16)), jump(tonumber(hex:sub(6, 7), 16)))
 end
 
+-- Tern takes an SVG only as a percent-escaped data URL, so every piece is written escaped: passing the sheet through
+-- gsub afterwards costs about a millisecond a kilobyte in a plugin's window half, a fifth of the hook's 50 ms.
+local SVG_OPEN = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E"
+local SVG_SHUT = "%3C/svg%3E"
+local WHITE = "%23fff"
+
 local function rect(parts: { string }, x: number, y: number, w: number, h: number, fill: string)
-	parts[#parts + 1] = "<rect x='" .. x .. "' y='" .. y .. "' width='" .. w .. "' height='" .. h .. "' fill='" .. fill .. "'/>"
+	parts[#parts + 1] = "%3Crect x='" .. x .. "' y='" .. y .. "' width='" .. w .. "' height='" .. h .. "' fill='" .. fill .. "'/%3E"
 end
 
--- A body's rows as one run of pixels per run of a tone: b is the ink, s its shade, l its light.
-local function body_parts(parts: { string }, body: string, ink: string): { string }
-	local tones = { b = AVATAR.inks[ink], s = shade(AVATAR.inks[ink], 0.76), l = shade(AVATAR.inks[ink], 1.22) }
+type Run = { [number]: number }
+
+-- A body's rows as one run of pixels per run of a tone, found once with the pattern engine: b is the ink, s its shade,
+-- l its light. Every skin that body can wear is these same runs in another colour.
+local BODY_RUNS: { [string]: { Run } } = {}
+local function body_runs(body: string): { Run }
+	local got = BODY_RUNS[body]
+	if got then
+		return got
+	end
+	local tone: { [string]: number } = { b = 1, s = 2, l = 3 }
+	local runs = {}
 	for y, line in ipairs(AVATAR.bodies[body].rows) do
-		local x = 1
-		while x <= #line do
-			local tone = line:sub(x, x)
-			if tone == "." then
-				x = x + 1
+		for start, run in line:gmatch("()([bsl]+)") do
+			local tone_char = run:sub(1, 1)
+			if run == string.rep(tone_char, #run) then
+				runs[#runs + 1] = { start - 1, y - 1, #run, tone[tone_char] }
 			else
-				local from = x
-				while x <= #line and line:sub(x, x) == tone do
-					x = x + 1
+				local at = 1
+				while at <= #run do
+					local width = 1
+					while at + width <= #run and run:sub(at + width, at + width) == tone_char do
+						width = width + 1
+					end
+					runs[#runs + 1] = { start + at - 2, y - 1, width, tone[tone_char] }
+					at = at + width
+					tone_char = run:sub(at, at)
 				end
-				rect(parts, from - 1, y - 1, x - from, 1, tones[tone] or AVATAR.inks[ink])
 			end
 		end
+	end
+	BODY_RUNS[body] = runs
+	return runs
+end
+
+-- The ink, shade and light one ink gives every body, escaped once however many skins wear it.
+local INK_TONES: { [string]: { [number]: string } } = {}
+local function ink_tones(ink: string): { [number]: string }
+	local got = INK_TONES[ink]
+	if got then
+		return got
+	end
+	local hex = AVATAR.inks[ink]
+	local function fill(colour: string): string
+		return "%23" .. colour:sub(2)
+	end
+	got = { fill(hex), fill(shade(hex, 0.76)), fill(shade(hex, 1.22)) }
+	INK_TONES[ink] = got
+	return got
+end
+
+local function body_parts(parts: { string }, body: string, ink: string): { string }
+	local tones = ink_tones(ink)
+	for _, run in ipairs(body_runs(body)) do
+		rect(parts, run[1], run[2], run[3], 1, tones[run[4]])
 	end
 	return parts
 end
 
-local function eye_parts(parts: { string }, shape: string, gaze: string, fill: string): { string }
+local function eye_parts(parts: { string }, shape: string, gaze: string): { string }
 	local gx, gy = GAZES[gaze][1], GAZES[gaze][2]
 	local def = SHAPES[shape]
 	for _, eye in ipairs({ { EYES.left, def.left }, { EYES.right, def.right } }) do
 		for _, run in ipairs(eye[2]) do
-			rect(parts, eye[1] + run[1] + gx, EYES.top + run[2] + gy, run[3], run[4], fill)
+			rect(parts, eye[1] + run[1] + gx, EYES.top + run[2] + gy, run[3], run[4], WHITE)
 		end
 	end
 	return parts
 end
 
 local function svg(parts: { string }): string
-	return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'>" .. table.concat(parts) .. "</svg>"
+	return SVG_OPEN .. table.concat(parts) .. SVG_SHUT
 end
 
--- Tern loads an SVG only as a percent-escaped data URL.
-local function image(source: string): string
-	return "url(\"data:image/svg+xml," .. source:gsub("#", "%%23"):gsub("<", "%%3C"):gsub(">", "%%3E") .. "\")"
+-- A data URL of SVG that is already escaped, so it only needs wrapping.
+local function image(escaped: string): string
+	return "url(\"data:image/svg+xml," .. escaped .. "\")"
+end
+
+-- One body in one ink as the rects a skin or a face wears, and a shape's pixels at the gaze a still shows: a face is
+-- the two joined, so a rail of bots draws each body once rather than once per face.
+local BODY_INK: { [string]: string } = {}
+local function body_ink(body: string, ink: string): string
+	local key = body .. "." .. ink
+	local got = BODY_INK[key]
+	if got then
+		return got
+	end
+	got = table.concat(body_parts({}, body, ink))
+	BODY_INK[key] = got
+	return got
+end
+
+local EYES: { [string]: string } = {}
+local function eyes(shape: string): string
+	local got = EYES[shape]
+	if got then
+		return got
+	end
+	got = table.concat(eye_parts({}, shape, "c"))
+	EYES[shape] = got
+	return got
 end
 
 -- One still image for everywhere but a bot chat: the body with one face, since a tab or a card shows a still.
 local function face(body: string, ink: string, shape: string): string
-	return svg(eye_parts(body_parts({}, body, ink), shape, "c", "#fff"))
+	return svg({ body_ink(body, ink), eyes(shape) })
 end
 
 -- The resting face, the same body with its eyes shut, and the open eyes on their own. avatars.css blinks a tab by hiding
@@ -137,7 +206,7 @@ local function avatar(bot: Bot): string
 	local got = look(bot)
 	return "--bot-face: " .. image(face(got.body, got.ink, "open"))
 		.. "; --bot-shut: " .. image(face(got.body, got.ink, "shut"))
-		.. "; --bot-eyes: " .. image(svg(eye_parts({}, "open", "c", "#fff")))
+		.. "; --bot-eyes: " .. image(svg({ eyes("open") }))
 		.. "; --bot-ink: " .. AVATAR.inks[got.ink] .. ";"
 end
 
@@ -157,26 +226,34 @@ local function tempo(name: string): string
 end
 
 -- Every skin and every face frame avatars.css paints: a chat body is a skin under a face, so a blink or a look is an
--- image Tern already has, not a redraw of the pixel grid.
-local ART: string? = nil
-local function art(): string
-	if ART then
-		return ART
-	end
+-- image Tern already has, not a redraw of the pixel grid. The rail and the tabs show none of these, so `paint` draws
+-- them after the first frame and the load hook keeps its budget on a login busy enough to slow every Lua step.
+local function skins(): string
 	local rules = {}
 	for _, body in ipairs(BODY_NAMES) do
 		for _, ink in ipairs(INK_NAMES) do
-			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.skin." .. body .. "." .. ink .. "'] { background-image: " .. image(svg(body_parts({}, body, ink))) .. "; }"
+			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.skin." .. body .. "." .. ink .. "'] { background-image: " .. image(svg({ body_ink(body, ink) })) .. "; }"
 		end
 	end
+	return table.concat(rules, "\n")
+end
+
+local function frames(): string
+	local rules = {}
 	for shape in SHAPES do
 		for _, gaze in ipairs(GAZE_NAMES) do
-			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. shape .. "." .. gaze .. "'] { background-image: " .. image(svg(eye_parts({}, shape, gaze, "#fff"))) .. "; }"
+			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. shape .. "." .. gaze .. "'] { background-image: " .. image(svg(eye_parts({}, shape, gaze))) .. "; }"
 		end
 	end
-	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg(eye_parts({}, "shut", "c", "#fff"))) .. "; }"
-	ART = table.concat(rules, "\n")
-	return ART
+	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg(eye_parts({}, "shut", "c"))) .. "; }"
+	return table.concat(rules, "\n")
+end
+
+local function paint()
+	tern.css("frames", frames())
+	tern.timer(0, function()
+		tern.css("skins", skins())
+	end)
 end
 
 local function quote(s: string): string
@@ -189,7 +266,7 @@ end
 
 -- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
 local function show_avatars(bots: { Bot })
-	local rules = { art(), ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
+	local rules = { ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
 	local tints: { [string]: number } = {}
 	for _, bot in ipairs(bots) do
 		if bot.tint then
@@ -620,6 +697,7 @@ if legacy then
 end
 
 show(roster())
+paint()
 
 for _, event in ipairs({ "focus", "tab_created", "tab_closed", "pane_created", "pane_closed", "agent_state" }) do
 	tern.on(event, function(_ev, cx: WindowCx)
