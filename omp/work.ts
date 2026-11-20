@@ -134,7 +134,7 @@ export default function work(pi) {
 					continue;
 				}
 				if (item.kind === "todo") notes.push(`${line}\n  check exit ${result.exit}: ${result.out.trim().split("\n").slice(-3).join(" | ")}`);
-			} else if (item.kind === "todo") notes.push(line);
+			} else if (item.kind === "todo" && !item.check?.startsWith("manual")) notes.push(line);
 			if (!item.check) notes.push(`No check, add one: ${line}`);
 			const user = /\(user\b[^()]*\)$/.test(item.ask);
 			if (item.kind === "wait" && user && !/\(user: "[^"]+"\)$/.test(item.ask))
