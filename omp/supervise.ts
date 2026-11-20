@@ -150,7 +150,7 @@ export default function supervise(pi) {
 			{
 				customType: "helper-result",
 				content: `<system-notice>\n${found.length === 1 ? "A background job finished" : `${found.length} background jobs finished`} before this session restarted, and ${found.length === 1 ? "its result never reached you" : "their results never reached you"}. Resume your work using ${found.length === 1 ? "it" : "them"} below.\n${blocks.join("\n")}\n</system-notice>`,
-				display: true,
+				display: false,
 				attribution: "agent",
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
