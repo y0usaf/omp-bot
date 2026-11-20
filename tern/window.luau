@@ -264,13 +264,52 @@ local function roster(): { Bot }
 	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
 end
 
--- Per-bot avatar variables for avatars.css, keyed by tint like every bot row; a tint two bots share keeps the default.
+local SAND_ACCENTS: { [string]: { light: string, dark: string } } = {
+	blue = { light = "#126fd4", dark = "#116dd2" },
+	red = { light = "#c82532", dark = "#cf2b35" },
+	orange = { light = "#d2550a", dark = "#cd5309" },
+	yellow = { light = "#c2730b", dark = "#c8770c" },
+	green = { light = "#0d9655", dark = "#0e9f5a" },
+	cyan = { light = "#0d9381", dark = "#0e9886" },
+	teal = { light = "#0d9381", dark = "#0e9886" },
+	purple = { light = "#7442d1", dark = "#7845d7" },
+	magenta = { light = "#c82779", dark = "#cf297e" },
+	pink = { light = "#c82779", dark = "#cf297e" },
+	brown = { light = "#86592e", dark = "#8c5d31" },
+}
+
+local function accent_vars(tint: string?): string?
+	local pair = tint and SAND_ACCENTS[tint] or nil
+	if not pair then
+		return nil
+	end
+	local val = "light-dark(" .. pair.light .. ", " .. pair.dark .. ")"
+	return "--sand-fill-bubble-user: " .. val
+		.. "; --sand-accent: " .. val
+		.. "; --sand-prompt-cta-fill: " .. val
+		.. "; --sand-focus: " .. val .. ";"
+end
+
 local function show_avatars(bots: { Bot })
-	local rules = { ":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }" }
+	local rules = {
+		":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }",
+		":root:not(#bot) #tabbar .tt[data-tc] :is(.tn-ib-pip, .tn-dk-pip) { --sand-accent: light-dark(#1680f3, #4d9bff); --accent: light-dark(#1680f3, #4d9bff); --accent-fill: light-dark(#1680f3, #4d9bff); }",
+	}
 	local tints: { [string]: number } = {}
+	local tint_order: { string } = {}
 	for _, bot in ipairs(bots) do
 		if bot.tint then
+			if not tints[bot.tint] then
+				tint_order[#tint_order + 1] = bot.tint
+			end
 			tints[bot.tint] = (tints[bot.tint] or 0) + 1
+		end
+	end
+	for _, tint in ipairs(tint_order) do
+		local vars = accent_vars(tint)
+		if vars then
+			local own = "[data-role='omp.bot.top." .. tint .. "'], [data-role='omp.bot.chat." .. tint .. "'], [data-role='omp.bot.hero." .. tint .. "']"
+			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), #tabbar .tt[data-tc='" .. tint .. "']) { " .. vars .. " }"
 		end
 	end
 	for _, bot in ipairs(bots) do
@@ -323,12 +362,13 @@ local function show_faces(cx: WindowCx?)
 			owner[tab.id] = bot
 		end
 	end
-	local faces_of, faces_text = {}, {}
+	local faces_of, faces_text, pane_ids = {}, {}, {}
 	for _, pane in ipairs(cx.session:panes()) do
 		local bot = pane.tab and owner[pane.tab]
 		if bot then
 			faces_of[#faces_of + 1] = "#banners .tn-dk-c[data-pane='" .. pane.pane .. "']"
 			faces_text[#faces_text + 1] = bot
+			pane_ids[#pane_ids + 1] = pane.pane
 		end
 	end
 	local rules = {}
@@ -336,6 +376,10 @@ local function show_faces(cx: WindowCx?)
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) center / 32px 32px no-repeat; image-rendering: pixelated; box-shadow: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
 		rules[#rules + 1] = ":root:not(#bot) " .. selector .. "::before, :root:not(#bot) " .. selector .. "::after { content: none; }"
+		local vars = accent_vars(faces_text[index].tint)
+		if vars then
+			rules[#rules + 1] = ":root:not(#bot) .tn-pane[data-pane='" .. pane_ids[index] .. "'] { " .. vars .. " }"
+		end
 	end
 	local text = table.concat(rules, "\n")
 	if text ~= faces then
