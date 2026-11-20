@@ -680,11 +680,11 @@ local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step
 	if kind == "body" then
 		add({ label = "From name", detail = "body and colour picked from the name " .. bot.name, reset = true, current = bot.avatar == nil }, nil)
 		for _, name in ipairs(BODY_NAMES) do
-			add({ label = name, value = name, current = now.body == name }, { body = name })
+			add({ label = name, value = name, current = now.body == name }, { body = name, ink = now.ink })
 		end
 	else
 		for _, name in ipairs(INK_NAMES) do
-			add({ label = name, detail = AVATAR.inks[name], value = name, current = now.ink == name }, { ink = name })
+			add({ label = name, detail = AVATAR.inks[name], value = name, current = now.ink == name }, { body = now.body, ink = name })
 		end
 	end
 	local last = step == #PARTS
