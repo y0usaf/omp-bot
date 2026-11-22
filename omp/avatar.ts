@@ -1,17 +1,31 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { col } from "@oh-my-pi/pi-tui/native/describe";
 
+const AVATARS = JSON.parse(readFileSync(fileURLToPath(new URL("../tern/avatars.json", import.meta.url)), "utf8"));
 const TINTS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
-const AVATARS = JSON.parse(readFileSync(new URL("../tern/avatars.json", import.meta.url), "utf8"));
-const SHAPES = Object.keys(AVATARS.shapes).sort();
-const AUTO_COLORS: string[] = AVATARS.autoColors ?? Object.keys(AVATARS.colors).sort();
 
-function hash(name: string): number {
-	let h = 0x811cb697;
-	for (const byte of new TextEncoder().encode(name)) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
-	h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
-	h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+export function fnv(text: string): number {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+	return h >>> 0;
+}
+
+function mix(text: string): number {
+	let h = fnv(text) | 0;
+	h = Math.imul(h ^ (h >>> 16), 0x045d9f3b);
+	h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
 	return (h ^ (h >>> 16)) >>> 0;
+}
+
+function rng(seed: number): () => number {
+	let t = seed | 0;
+	return () => {
+		t = (t + 0x6d2b79f5) | 0;
+		let e = Math.imul(t ^ (t >>> 15), t | 1);
+		e ^= e + Math.imul(e ^ (e >>> 7), e | 61);
+		return ((e ^ (e >>> 14)) >>> 0) / 4294967296;
+	};
 }
 
 function roster(name: string) {
@@ -23,45 +37,30 @@ function roster(name: string) {
 	}
 }
 
-export interface Look {
+interface Look {
 	shape: string;
 	color: string;
 	tint: string;
 }
 
+function lookOf(name: string, own: { shape?: string; color?: string } = {}, tint?: string): { shape: string; color: string } {
+	const shapes: string[] = AVATARS.shapes;
+	const palette: string[] = AVATARS.palette;
+	const shape = shapes.includes(own.shape ?? "") ? own.shape! : shapes[mix(name) % shapes.length];
+	let color = AVATARS.inks[own.color ?? ""] ? own.color! : palette[Math.floor(rng(fnv(name))() * palette.length)];
+	if (!AVATARS.inks[own.color ?? ""] && AVATARS.identity === "tint" && tint && AVATARS.tints[tint]) color = AVATARS.tints[tint];
+	return { shape, color };
+}
+
 export function avatarOf(name: string, tint?: string): Look {
 	const entry = roster(name);
-	const own = entry.avatar ?? {};
-	let h = hash(name);
-	const shape = AVATARS.shapes[own.shape]
-		? own.shape
-		: AVATARS.bots[name]?.shape ?? SHAPES[h % SHAPES.length];
-	h = Math.floor(h / SHAPES.length);
-	const color = AVATARS.colors[own.color]
-		? own.color
-		: AVATARS.bots[name]?.color ?? AUTO_COLORS[h % AUTO_COLORS.length];
 	const shade = tint ?? entry.tint;
-	return { shape, color, tint: TINTS.includes(shade) ? shade : TINTS[h % TINTS.length] };
+	const look = lookOf(name, entry.avatar ?? {}, shade);
+	return { ...look, tint: TINTS.includes(shade) ? shade : TINTS[fnv(name) % TINTS.length] };
 }
 
-export type Face = "open" | "sleep";
+export type Kind = "live" | "still" | "hero" | "event";
 
-export interface Pose {
-	mood: string;
-	face: Face;
-}
-
-export function poseOf(mood: string): Pose {
-	return { mood, face: mood === "sleep" || mood === "sleeping" ? "sleep" : "open" };
-}
-
-export function drawAvatar(look: Look, pose: Pose) {
-	return col(
-		[
-			col([], { role: `omp.bot.skin.${look.shape}.${look.color}`, gap: "none" }),
-			col([], { role: `omp.bot.face.${pose.face}`, gap: "none" }),
-			col([], { role: "omp.bot.lid", gap: "none" }),
-		],
-		{ role: `omp.bot.avatar.${pose.mood}`, gap: "none", align: "center", actions: { click: "boop" } },
-	);
+export function drawAvatar(kind: Kind, poke = true) {
+	return col([], { role: `omp.bot.mark.${kind}`, gap: "none", align: "center", ...(poke ? { actions: { click: "boop" } } : {}) });
 }

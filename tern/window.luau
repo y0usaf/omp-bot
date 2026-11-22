@@ -5,220 +5,112 @@ local STATE = tern.getenv("OMP_BOT_STATE") or ((tern.getenv("XDG_STATE_HOME") or
 local ROSTER = STATE .. "/bots.json"
 local TINTS = { "purple", "teal", "orange", "pink", "blue", "green", "yellow", "red" }
 local TABS = tern.plugin.data .. "/../agent-tabs/kv.json"
+local AVATAR = tern.json.decode(tern.fs.read(tern.plugin.dir .. "/avatars.json"))
+local PARTS = { "shape", "color" }
+local MARK_MS = 100
 
 local function mul32(a: number, b: number): number
 	return ((a % 65536) * b + (((a // 65536) * (b % 65536)) % 65536) * 65536) % 4294967296
 end
 
-local function hash(name: string): number
-	local h = 0x811cb697
-	for i = 1, #name do
-		h = mul32(bit32.bxor(h, string.byte(name, i)), 0x01000193)
+local function fnv(text: string): number
+	local h = 0x811c9dc5
+	for i = 1, #text do
+		h = mul32(bit32.bxor(h, string.byte(text, i)), 0x01000193)
 	end
-	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x85ebca6b)
+	return h
+end
+
+local function mix(text: string): number
+	local h = fnv(text)
+	h = mul32(bit32.bxor(h, bit32.rshift(h, 16)), 0x045d9f3b)
 	h = mul32(bit32.bxor(h, bit32.rshift(h, 13)), 0xc2b2ae35)
 	return bit32.bxor(h, bit32.rshift(h, 16))
 end
 
-local AVATAR = tern.json.decode(tern.fs.read(tern.plugin.dir .. "/avatars.json"))
-local PARTS = { "shape", "color" }
-local SHAPE_NAMES, COLOR_NAMES = {}, {}
-for name in AVATAR.shapes do
-	SHAPE_NAMES[#SHAPE_NAMES + 1] = name
+local function first_draw(seed: number): number
+	local t = (seed + 0x6d2b79f5) % 4294967296
+	local e = mul32(bit32.bxor(t, bit32.rshift(t, 15)), bit32.bor(t, 1))
+	e = bit32.bxor(e, (e + mul32(bit32.bxor(e, bit32.rshift(e, 7)), bit32.bor(e, 61))) % 4294967296)
+	return bit32.bxor(e, bit32.rshift(e, 14)) / 4294967296
 end
-for name in AVATAR.colors do
-	COLOR_NAMES[#COLOR_NAMES + 1] = name
-end
-table.sort(SHAPE_NAMES)
-table.sort(COLOR_NAMES)
-local AUTO_COLORS = AVATAR.autoColors or COLOR_NAMES
 
 local function look(bot: Bot): { shape: string, color: string }
-	local h = hash(bot.name)
-	local fixed = AVATAR.bots[bot.name]
-	local shape = fixed and fixed.shape or SHAPE_NAMES[h % #SHAPE_NAMES + 1]
-	h = h // #SHAPE_NAMES
-	local color = fixed and fixed.color or AUTO_COLORS[h % #AUTO_COLORS + 1]
 	local own = type(bot.avatar) == "table" and bot.avatar or {}
-	if own.shape ~= nil then
-		if AVATAR.shapes[own.shape] then
-			shape = own.shape
-		else
-			print("omp bots: " .. bot.name .. "'s avatar has no shape " .. tostring(own.shape))
-		end
+	local shape = own.shape
+	if shape ~= nil and not AVATAR.marks[shape] then
+		print("omp bots: " .. bot.name .. "'s avatar has no shape " .. tostring(shape))
+		shape = nil
 	end
-	if own.color ~= nil then
-		if AVATAR.colors[own.color] then
-			color = own.color
-		else
-			print("omp bots: " .. bot.name .. "'s avatar has no colour " .. tostring(own.color))
-		end
+	local color = own.color
+	if color ~= nil and not AVATAR.inks[color] then
+		print("omp bots: " .. bot.name .. "'s avatar has no colour " .. tostring(color))
+		color = nil
 	end
-	return { shape = shape, color = color }
-end
-
-local CX = AVATAR.center or 114.2705
-local SVG_OPEN = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='" .. (AVATAR.viewBox or "-15 -15 259 259") .. "'%3E"
-local SVG_SHUT = "%3C/svg%3E"
-
-local FACES: { [string]: number } = {
-	open = 7,
-	listen = 7,
-	thinking = 7,
-	working = 7,
-	wide = 7,
-	happy = 7,
-	drowsy = 7,
-	sleep = 2,
-	error = 7,
-}
-
-local function hex_esc(hex: string): string
-	return "%23" .. hex:sub(2)
-end
-
-local function svg(parts: { string }): string
-	return SVG_OPEN .. table.concat(parts) .. SVG_SHUT
-end
-
-local function image(escaped: string): string
-	return "url(\"data:image/svg+xml," .. escaped .. "\")"
-end
-
-local SKIN_CACHE: { [string]: string } = {}
-local function skin_parts(shape: string, color: string): string
-	local key = shape .. "." .. color
-	local got = SKIN_CACHE[key]
-	if got then
-		return got
+	if not color and AVATAR.identity == "tint" and bot.tint then
+		color = AVATAR.tints[bot.tint]
 	end
-	local pair = AVATAR.colors[color] or AVATAR.colors.blue
-	local d = AVATAR.shapes[shape] or AVATAR.shapes.blob
-	got = "%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E"
-		.. "%3Cstop offset='0' stop-color='" .. hex_esc(pair.light) .. "'/%3E"
-		.. "%3Cstop offset='1' stop-color='" .. hex_esc(pair.dark) .. "'/%3E"
-		.. "%3C/linearGradient%3E%3C/defs%3E"
-		.. "%3Cpath d='" .. d .. "' fill='url(%23g)'/%3E"
-	SKIN_CACHE[key] = got
-	return got
-end
-
-local function face_parts(pose: string, fill: string): string
-	local ry = string.format("%.2f", FACES[pose] or 7)
-	local lx = string.format("%.2f", CX - 29)
-	local rx = string.format("%.2f", CX + 29)
-	local cy = string.format("%.2f", CX - 8)
-	return "%3Cg fill='" .. fill .. "'%3E"
-		.. "%3Cellipse cx='" .. lx .. "' cy='" .. cy .. "' rx='10' ry='" .. ry .. "'/%3E"
-		.. "%3Cellipse cx='" .. rx .. "' cy='" .. cy .. "' rx='10' ry='" .. ry .. "'/%3E"
-		.. "%3C/g%3E"
-end
-
-local function smile_parts(fill: string): string
-	local x0 = string.format("%.2f", CX - 20)
-	local xm = string.format("%.2f", CX)
-	local x1 = string.format("%.2f", CX + 20)
-	local y0 = string.format("%.2f", CX + 24)
-	local ym = string.format("%.2f", CX + 38)
-	return "%3Cpath d='M" .. x0 .. " " .. y0 .. " Q" .. xm .. " " .. ym .. " " .. x1 .. " " .. y0
-		.. "' fill='none' stroke='" .. fill .. "' stroke-linecap='round' stroke-width='5'/%3E"
-end
-
-local EYE_LIGHT = "%23ffffff"
-local EYE_DARK = "%23161616"
-local EYES_OPEN_LIGHT = image(svg({ face_parts("open", EYE_LIGHT) }))
-local EYES_OPEN_DARK = image(svg({ face_parts("open", EYE_DARK) }))
-
-local function avatar(bot: Bot): string
-	local got = look(bot)
-	local skin = skin_parts(got.shape, got.color)
-	local pair = AVATAR.colors[got.color] or AVATAR.colors.blue
-	return "--bot-face: " .. image(svg({ skin, face_parts("open", EYE_LIGHT) }))
-		.. "; --bot-face-dark: " .. image(svg({ skin, face_parts("open", EYE_DARK) }))
-		.. "; --bot-skin: " .. image(svg({ skin }))
-		.. "; --bot-ink: " .. pair.light .. ";"
-end
-
-local function tempo(name: string): string
-	local h = hash(name)
-	local a, b = h % 256, h // 256 % 256
-	local c, d = h // 65536 % 256, h // 16777216 % 256
-	local blink = 4.6 + a / 255 * 2.8
-	local glance = 10 + c / 255 * 8
-	return string.format(
-		"--bot-blink: %.2fs; --bot-blink-delay: -%.2fs; --bot-glance: %.2fs; --bot-glance-delay: -%.2fs;",
-		blink, blink * b / 255,
-		glance, glance * d / 255
-	)
-end
-
-local function skins(): string
-	local rules = {}
-	for _, shape in ipairs(SHAPE_NAMES) do
-		for _, color in ipairs(COLOR_NAMES) do
-			rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.skin." .. shape .. "." .. color .. "'] { background-image: " .. image(svg({ skin_parts(shape, color) })) .. "; }"
-		end
-	end
-	return table.concat(rules, "\n")
-end
-
-local function frames(): string
-	local rules = {
-		":root:not(#bot) { --bot-eyes: " .. EYES_OPEN_LIGHT .. "; --bot-eyes-sleep: " .. image(svg({ face_parts("sleep", EYE_LIGHT) })) .. "; }",
-		":root[data-theme='dark']:not(#bot) { --bot-eyes: " .. EYES_OPEN_DARK .. "; --bot-eyes-sleep: " .. image(svg({ face_parts("sleep", EYE_DARK) })) .. "; }",
+	return {
+		shape = shape or AVATAR.shapes[mix(bot.name) % #AVATAR.shapes + 1],
+		color = color or AVATAR.palette[math.floor(first_draw(fnv(bot.name)) * #AVATAR.palette) + 1],
 	}
-	for pose in FACES do
-		rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. pose .. "'] { background-image: " .. image(svg({ face_parts(pose, EYE_LIGHT) })) .. "; }"
-		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) [data-role='omp.bot.face." .. pose .. "'] { background-image: " .. image(svg({ face_parts(pose, EYE_DARK) })) .. "; }"
+end
+
+local function num(n: number): string
+	return string.format("%.6g", n)
+end
+
+local function paths(frame: string, ink: string): string
+	local out = {}
+	for layer in string.gmatch(frame, "[^;]+") do
+		local op, body = string.match(layer, "^([^~]*)~(.*)$")
+		local d = {}
+		for ring in string.gmatch(body :: string, "[^|]+") do
+			local x, y, rest = string.match(ring, "^(%S+) (%S+) ?(.*)$")
+			d[#d + 1] = "M" .. x .. " " .. y .. (rest ~= "" and ("l" .. rest) or "") .. "z"
+		end
+		out[#out + 1] = "<path fill='" .. ink .. "' fill-rule='evenodd'" .. (op ~= "" and (" fill-opacity='" .. op .. "'") or "") .. " d='" .. table.concat(d) .. "'/>"
 	end
-	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ smile_parts(EYE_LIGHT) })) .. "; }"
-	rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ smile_parts(EYE_DARK) })) .. "; }"
-	return table.concat(rules, "\n")
+	return table.concat(out)
 end
 
-local EMPHASIS = "filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));"
-local EMPHATIC: { [string]: boolean } = {}
-for _, name in ipairs(AVATAR.emphasis or {}) do
-	EMPHATIC[name] = true
+local function url(svg: string): string
+	local esc = svg:gsub("%%", "%%25")
+	esc = esc:gsub("<", "%%3C")
+	esc = esc:gsub(">", "%%3E")
+	esc = esc:gsub("#", "%%23")
+	return "url(\"data:image/svg+xml," .. esc .. "\")"
 end
 
-local function grok_state(mood: string): string
-	local moods = AVATAR.moods or {}
-	local state = moods[mood] or mood
-	return AVATAR.motion[state] and state or "idle"
-end
-
-local function motion_vars(state: string): string
-	local m = AVATAR.motion[state] or AVATAR.motion.idle
-	local vars = string.format(
-		"--bot-amp: %.3f%%; --bot-period: %dms; --bot-tilt: %gdeg; --bot-eye: %g;",
-		m.amplitude / 259 * 100, m.period, m.tilt, m.eye
-	)
-	return EMPHATIC[state] and vars .. " " .. EMPHASIS or vars
-end
-
-local function motion(): string
-	local rules = {}
-	local names = {}
-	for name in AVATAR.motion do
-		names[#names + 1] = name
+local function placed(frame: string, ink: string, units: number, q: number, size: number): string
+	local canvas = size * 0.92 / 0.6
+	local pitch = math.ceil(canvas)
+	if (pitch - size) % 2 == 1 then
+		pitch += 1
 	end
-	for name in AVATAR.moods or {} do
-		names[#names + 1] = name
-	end
-	table.sort(names)
-	for _, name in ipairs(names) do
-		rules[#rules + 1] = ":root:not(#bot):not(#motion) [data-role='omp.bot.avatar." .. name .. "'] { " .. motion_vars(grok_state(name)) .. " }"
-	end
-	return table.concat(rules, "\n")
+	local offset = num((pitch - canvas) / 2)
+	local p = num(pitch)
+	return url("<svg xmlns='http://www.w3.org/2000/svg' width='" .. p .. "' height='" .. p .. "' viewBox='0 0 " .. p .. " " .. p .. "'><g transform='translate(" .. offset .. " " .. offset .. ") scale(" .. num(canvas / (units * q)) .. ")'>" .. paths(frame, ink) .. "</g></svg>")
 end
 
-local function paint()
-	tern.css("frames", frames())
-	tern.css("motion", motion())
-	tern.timer(0, function()
-		tern.css("skins", skins())
-	end)
+local function still(mark: any, ink: string): string
+	local b = mark.still.box
+	return url("<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='" .. num(b[1]) .. " " .. num(b[2]) .. " " .. num(b[3]) .. " " .. num(b[4]) .. "'><g transform='scale(" .. num(1 / mark.q) .. ")'>" .. paths(mark.still.frame, ink) .. "</g></svg>")
+end
+
+local function inks(color: string): { light: string, dark: string }
+	return AVATAR.inks[color] or AVATAR.inks.gray
+end
+
+local function face(bot: Bot, theme: string): string
+	local got = look(bot)
+	return still(AVATAR.marks[got.shape], (inks(got.color) :: any)[theme])
+end
+
+local function hero(bot: Bot, theme: string): string
+	local got = look(bot)
+	local mark = AVATAR.marks[got.shape]
+	return placed(mark.hero.frame, (inks(got.color) :: any)[theme], mark.hero.canvas, mark.q, 72)
 end
 
 local function quote(s: string): string
@@ -254,12 +146,57 @@ local function accent_vars(tint: string?): string?
 		.. "; --sand-prompt-cta-fill: " .. val
 		.. "; --sand-focus: " .. val .. ";"
 end
+local current: { Bot } = {}
+local banners: { [string]: { number } } = {}
+local installed: { [string]: string } = {}
+local faces = ""
+
+local function unique(bots: { Bot }): { Bot }
+	local count: { [string]: number } = {}
+	for _, bot in ipairs(bots) do
+		if bot.tint then
+			count[bot.tint] = (count[bot.tint] or 0) + 1
+		end
+	end
+	local out = {}
+	for _, bot in ipairs(bots) do
+		if bot.tint and count[bot.tint] == 1 then
+			out[#out + 1] = bot
+		end
+	end
+	return out
+end
+
+local function live_targets(bot: Bot): string
+	local parts = {
+		"#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c",
+		"[data-role^='omp.bot.chat." .. bot.tint .. "'] [data-role='omp.bot.mark.live']",
+	}
+	for _, pane in ipairs(banners[bot.name] or {}) do
+		parts[#parts + 1] = "#banners .tn-dk-c[data-pane='" .. pane .. "']"
+	end
+	return ":is(" .. table.concat(parts, ", ") .. ")"
+end
+
+local keyframes: { [string]: boolean } = {}
 
 local function show_avatars(bots: { Bot })
+	local shapes: { [string]: boolean } = {}
+	local fallback = AVATAR.inks[AVATAR.fallback.color]
 	local rules = {
-		":root { " .. avatar({ name = "", avatar = AVATAR.default } :: any) .. " }",
 		":root:not(#bot) #tabbar .tt[data-tc] :is(.tn-ib-pip, .tn-dk-pip) { --sand-accent: light-dark(#1680f3, #4d9bff); --accent: light-dark(#1680f3, #4d9bff); --accent-fill: light-dark(#1680f3, #4d9bff); }",
+		":root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c { --mk-ink: " .. fallback.light .. "; }",
+		":root[data-theme='dark']:not(#bot) #tabbar .tt[data-tc] .tn-dk-c { --mk-ink: " .. fallback.dark .. "; }",
+		":root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before { background-image: url(\"marks/" .. AVATAR.fallback.shape .. "/rest.svgz\"); }",
+		":root:not(#bot):not(#mk) [data-role='omp.bot.mark.live']::before { background-image: url(\"marks/" .. AVATAR.fallback.shape .. "/rest.svgz\"); }",
 	}
+	local nobody = { name = "", avatar = AVATAR.fallback } :: any
+	for _, theme in ipairs({ "light", "dark" }) do
+		local root = theme == "dark" and ":root[data-theme='dark']:not(#bot):not(#mk) " or ":root:not(#bot):not(#mk) "
+		rules[#rules + 1] = root .. "[data-role='omp.bot.mark.live'] { --mk-ink: " .. (fallback :: any)[theme] .. "; }"
+		rules[#rules + 1] = root .. ":is([data-role='omp.bot.mark.still'], [data-role='omp.bot.mark.event']) { background-image: " .. face(nobody, theme) .. "; }"
+		rules[#rules + 1] = root .. "[data-role='omp.bot.mark.hero']::before { background-image: " .. hero(nobody, theme) .. "; }"
+	end
 	local tints: { [string]: number } = {}
 	local tint_order: { string } = {}
 	for _, bot in ipairs(bots) do
@@ -277,16 +214,60 @@ local function show_avatars(bots: { Bot })
 			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), #tabbar .tt[data-tc='" .. tint .. "']) { " .. vars .. " }"
 		end
 	end
-	for _, bot in ipairs(bots) do
-		if bot.tint and tints[bot.tint] == 1 then
-			rules[#rules + 1] = ":root:not(#bot) :is([data-role^='omp.bot.'][data-role$='." .. bot.tint .. "'], #tabbar .tt[data-tc='" .. bot.tint .. "']) { " .. avatar(bot) .. " " .. tempo(bot.name) .. " }"
+	for _, bot in ipairs(unique(bots)) do
+		local t = bot.tint :: string
+		local still_sel = ":is([data-role^='omp.bot.top." .. t .. "'] [data-role='omp.bot.mark.still'], [data-role^='omp.bot.eventbox." .. t .. "'] [data-role='omp.bot.mark.event'])"
+		local hero_sel = "[data-role^='omp.bot.hero." .. t .. "'] [data-role='omp.bot.mark.hero']::before"
+		local live_sel = live_targets(bot)
+		local got = look(bot)
+		shapes[got.shape] = true
+		rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. live_sel .. "::before { background-image: url(\"marks/" .. got.shape .. "/rest.svgz\"); }"
+		for _, theme in ipairs({ "light", "dark" }) do
+			local root = theme == "dark" and ":root[data-theme='dark']:not(#bot):not(#mk) " or ":root:not(#bot):not(#mk) "
+			rules[#rules + 1] = root .. still_sel .. " { background-image: " .. face(bot, theme) .. "; }"
+			rules[#rules + 1] = root .. hero_sel .. " { background-image: " .. hero(bot, theme) .. "; }"
+			rules[#rules + 1] = root .. live_sel .. " { --mk-ink: " .. (inks(got.color) :: any)[theme] .. "; }"
+		end
+	end
+	for shape in shapes do
+		if not keyframes[shape] then
+			keyframes[shape] = true
+			tern.css("marks-" .. shape, tern.fs.read(tern.plugin.dir .. "/marks/" .. shape .. ".css"))
 		end
 	end
 	tern.css("avatars", table.concat(rules, "\n"))
 end
 
-local current: { Bot } = {}
-local faces = ""
+local function show_marks()
+	local seen: { [string]: boolean } = {}
+	for _, bot in ipairs(unique(current)) do
+		seen[bot.name] = true
+		local dir = STATE .. "/bots/" .. bot.name
+		local mood = tern.fs.exists(dir .. "/mood") and tern.fs.read(dir .. "/mood") or nil
+		if mood and mood:match("^%S+%s+%S+%s+(%S+)") ~= look(bot).shape then
+			mood = nil
+		end
+		local target = live_targets(bot)
+		local key = (mood or "") .. "|" .. target
+		if key ~= installed[bot.name] then
+			installed[bot.name] = key
+			local css = mood and tern.fs.exists(dir .. "/mark.css") and tern.fs.read(dir .. "/mark.css") or ""
+			css = css:gsub("%%MARK%%", target)
+			tern.css("mark-" .. bot.name, css)
+		end
+	end
+	for name in installed do
+		if not seen[name] then
+			installed[name] = nil
+			tern.css("mark-" .. name, "")
+		end
+	end
+end
+
+local function watch_marks()
+	tern.timer(MARK_MS, watch_marks)
+	pcall(show_marks)
+end
 
 local function ensure_colors(cx: WindowCx)
 	local by_name: { [string]: Bot } = {}
@@ -326,69 +307,50 @@ local function show_faces(cx: WindowCx?)
 			owner[tab.id] = bot
 		end
 	end
-	local faces_of, faces_text, pane_ids = {}, {}, {}
+	local panes: { [string]: { number } } = {}
+	local rules = {}
 	for _, pane in ipairs(cx.session:panes()) do
 		local bot = pane.tab and owner[pane.tab]
 		if bot then
-			faces_of[#faces_of + 1] = "#banners .tn-dk-c[data-pane='" .. pane.pane .. "']"
-			faces_text[#faces_text + 1] = bot
-			pane_ids[#pane_ids + 1] = pane.pane
-		end
-	end
-	local rules = {}
-	for index, selector in ipairs(faces_of) do
-		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { " .. avatar(faces_text[index]) .. " left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: var(--bot-face) center / 28px 28px no-repeat; box-shadow: none; }"
-		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) " .. selector .. " { background-image: var(--bot-face-dark); }"
-		rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
-		rules[#rules + 1] = ":root:not(#bot) " .. selector .. "::before, :root:not(#bot) " .. selector .. "::after { content: none; }"
-		local vars = accent_vars(faces_text[index].tint)
-		if vars then
-			rules[#rules + 1] = ":root:not(#bot) .tn-pane[data-pane='" .. pane_ids[index] .. "'] { " .. vars .. " }"
-		end
-	end
-	local text = table.concat(rules, "\n")
-	if text ~= faces then
-		faces = text
-		tern.css("faces", text)
-	end
-end
-
-local moods = ""
-
-local function show_moods()
-	local tints: { [string]: number } = {}
-	for _, bot in ipairs(current) do
-		if bot.tint then
-			tints[bot.tint] = (tints[bot.tint] or 0) + 1
-		end
-	end
-	local rules = {}
-	for _, bot in ipairs(current) do
-		if bot.tint and tints[bot.tint] == 1 then
-			local file = STATE .. "/bots/" .. bot.name .. "/mood"
-			local mood = tern.fs.exists(file) and tern.fs.read(file):match("^%s*([%w_-]+)") or nil
-			if mood then
-				local state = grok_state(mood)
-				local dock = ":root:not(#bot):not(#motion) #tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
-				rules[#rules + 1] = dock .. " { " .. motion_vars(state) .. " }"
-				if state == "sleeping" or state == "drowsy" then
-					rules[#rules + 1] = dock .. "::before { animation: none;" .. (state == "sleeping" and " background-image: var(--bot-eyes-sleep);" or "") .. " }"
-				end
+			panes[bot.name] = panes[bot.name] or {}
+			table.insert(panes[bot.name], pane.pane)
+			local selector = "#banners .tn-dk-c[data-pane='" .. pane.pane .. "']"
+			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. " { left: calc(50% - 36px) !important; top: calc(50% - 36px) !important; width: 72px !important; height: 72px !important; overflow: hidden !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }"
+			local got = look(bot)
+			rules[#rules + 1] = ":root:not(#bot) " .. selector .. " { --mk-ink: " .. inks(got.color).light .. "; }"
+			rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) " .. selector .. " { --mk-ink: " .. inks(got.color).dark .. "; }"
+			rules[#rules + 1] = ":root:not(#bot) " .. selector .. " > * { display: none; }"
+			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::before { background-image: url(\"marks/" .. got.shape .. "/rest.svgz\"); }"
+			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::before, :root:not(#bot):not(#mk) " .. selector .. "::after { content: ''; position: absolute; left: -1000px; top: 0; width: 1em; height: 1em; font-size: 72px; background-repeat: no-repeat; background-size: 1em 1em; background-position: 0 0; filter: drop-shadow(1000px 0 0 var(--mk-ink, transparent)); pointer-events: none; }"
+			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::before { display: block; }"
+			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::after { display: none; }"
+			local vars = accent_vars(bot.tint)
+			if vars then
+				rules[#rules + 1] = ":root:not(#bot) .tn-pane[data-pane='" .. pane.pane .. "'] { " .. vars .. " }"
 			end
 		end
 	end
 	local text = table.concat(rules, "\n")
-	if text ~= moods then
-		moods = text
-		tern.css("moods", text)
+	local function sig(map: { [string]: { number } }): string
+		local keys = {}
+		for name, ids in map do
+			local sorted = table.clone(ids)
+			table.sort(sorted)
+			keys[#keys + 1] = name .. "=" .. table.concat(sorted, ",")
+		end
+		table.sort(keys)
+		return table.concat(keys, ";")
 	end
-end
-
-local MOOD_MS = 300
-
-local function watch_moods()
-	tern.timer(MOOD_MS, watch_moods)
-	pcall(show_moods)
+	local moved = sig(panes) ~= sig(banners)
+	banners = panes
+	if text ~= faces then
+		faces = text
+		tern.css("faces", text)
+	end
+	if moved then
+		show_avatars(current)
+		pcall(show_marks)
+	end
 end
 
 local function open_names(cx: WindowCx): { [string]: number }
@@ -428,10 +390,14 @@ local function register(bots: { Bot })
 	end
 end
 
+local shown = ""
+
 local function show(bots: { Bot })
 	current = bots
+	shown = tern.json.encode(bots)
 	show_avatars(bots)
 	register(bots)
+	pcall(show_marks)
 end
 
 local function open(cx: WindowCx, bot: Bot, new: boolean?)
@@ -630,18 +596,15 @@ local function state_env(): { [string]: string }
 	end
 	return env
 end
-
-local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
+local function pick_faces(cx: WindowCx, opts: any, faces: { Bot }): any
 	local n = #faces
 	local rules = {}
-	for i, face in ipairs(faces) do
-		local row = ":root:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item)"
-		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 28px; height: 28px; background: var(--bot-face) center / 100% 100% no-repeat; }"
-		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item) .ck-ic { background-image: var(--bot-face-dark); }"
-		rules[#rules + 1] = row .. " .ck-ic > .ico { display: none; }"
-		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { --bot-amp: 1.158%; --bot-tilt: 0deg; animation: bot-bob 2500ms linear infinite; }"
+	for i, bot in ipairs(faces) do
+		local row = "#pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item)"
+		rules[#rules + 1] = ":root:not(#bot) " .. row .. " .ck-ic { width: 28px; height: 28px; background: " .. face(bot, "light") .. " center / 28px 28px no-repeat; }"
+		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) " .. row .. " .ck-ic { background-image: " .. face(bot, "dark") .. "; }"
+		rules[#rules + 1] = ":root:not(#bot) " .. row .. " .ck-ic > .ico { display: none; }"
 	end
-	rules[#rules + 1] = "@media (prefers-reduced-motion: reduce) { :root:not(#bot) #pick .ck-item .ck-ic { animation: none !important; } }"
 	tern.css("pick", table.concat(rules, "\n"))
 	return cx:pick(opts)
 end
@@ -667,23 +630,31 @@ end
 
 local KIND_NAMES: { [string]: string } = { shape = "shape", color = "colour" }
 
+local function colors(): { string }
+	local out = { "black" }
+	for _, name in ipairs(AVATAR.palette) do
+		out[#out + 1] = name
+	end
+	return out
+end
+
 local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step: number)
 	local kind = PARTS[step]
-	local now = look({ name = bot.name, avatar = own } :: any)
+	local now = look({ name = bot.name, tint = bot.tint, avatar = own } :: any)
 	local items, faces = {}, {}
 	local function add(item: any, try: { [string]: string }?)
 		item.icon = "sparkle"
 		items[#items + 1] = item
-		faces[#faces + 1] = avatar({ name = bot.name, avatar = try } :: any)
+		faces[#faces + 1] = { name = bot.name, tint = bot.tint, avatar = try } :: any
 	end
 	if kind == "shape" then
 		add({ label = "From name", detail = "shape and colour picked from the name " .. bot.name, reset = true, current = bot.avatar == nil }, nil)
-		for _, name in ipairs(SHAPE_NAMES) do
+		for _, name in ipairs(AVATAR.shapes) do
 			add({ label = name, value = name, current = now.shape == name }, { shape = name, color = now.color })
 		end
 	else
-		for _, name in ipairs(COLOR_NAMES) do
-			add({ label = name, detail = AVATAR.colors[name].light, value = name, current = now.color == name }, { shape = now.shape, color = name })
+		for _, name in ipairs(colors()) do
+			add({ label = name, detail = inks(name).light, value = name, current = now.color == name }, { shape = now.shape, color = name })
 		end
 	end
 	local last = step == #PARTS
@@ -707,12 +678,11 @@ end
 
 local function change_avatar(cx: WindowCx)
 	local bots = roster()
-	local items, faces = {}, {}
+	local items = {}
 	for _, bot in ipairs(bots) do
 		items[#items + 1] = { label = bot.name, icon = "sparkle", bot = bot }
-		faces[#faces + 1] = avatar(bot)
 	end
-	pick_faces(cx, { items = items, placeholder = "Change whose avatar?", icon = "sparkle", action = "next" }, faces):next(function(item, _, cx2)
+	pick_faces(cx, { items = items, placeholder = "Change whose avatar?", icon = "sparkle", action = "next" }, bots):next(function(item, _, cx2)
 		tern.css("pick", "")
 		if item and cx2 then
 			pick_part(cx2, item.bot, look(item.bot), 1)
@@ -740,14 +710,18 @@ if legacy then
 end
 
 show(roster())
-paint()
 
 for _, event in ipairs({ "focus", "tab_created", "tab_closed", "pane_created", "pane_closed", "agent_state" }) do
 	tern.on(event, function(_ev, cx: WindowCx)
-		register(roster())
+		local bots = roster()
+		if tern.json.encode(bots) ~= shown then
+			show(bots)
+		else
+			register(bots)
+		end
 		show_faces(cx)
 	end)
 end
 
 tern.timer(0, show_faces)
-tern.timer(0, watch_moods)
+tern.timer(0, watch_marks)

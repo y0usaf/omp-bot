@@ -6,8 +6,9 @@ import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { avatarOf, drawAvatar, poseOf } from "./avatar.ts";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { avatarOf, drawAvatar } from "./avatar.ts";
+import { Mark } from "./marks.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
@@ -40,21 +41,27 @@ const DOING = {
 	ask: "Needs your input",
 };
 const TOOL_MOOD = {
-	ask: "waiting",
+	ask: "blocked",
 	web_search: "searching",
-	web_fetch: "searching",
-	fetch: "searching",
-	browser: "searching",
-	read: "searching",
-	grep: "searching",
-	glob: "searching",
-	find: "searching",
-	ast_grep: "searching",
-	task: "orbit",
-	wait: "orbit",
+	edit: "writing",
+	write: "writing",
+	ast_edit: "writing",
+	wait: "waiting",
 	message_helper: "sending",
 	mail: "sending",
 };
+const MARK_STATE = {
+	thinking: "thinking",
+	talking: "streaming",
+	working: "working",
+	searching: "searching",
+	writing: "writing",
+	waiting: "waiting",
+	sending: "sending",
+	blocked: "blocked",
+	error: "thinking",
+};
+const SETTLE_MS = 8000;
 const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
@@ -175,6 +182,8 @@ class Bot {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
 		this.look = avatarOf(this.name, process.env.OMP_BOT_TINT);
 		this.tint = this.look.tint;
+		this.mark = undefined;
+		this.markGen = -1;
 		this.mood = "idle";
 		this.line = pick(IDLE, Date.now());
 		this.hero = true;
@@ -189,20 +198,19 @@ class Bot {
 		this.boop = undefined;
 		this.published = undefined;
 		this.live = false;
-		this.spin = false;
 		this.boops = 0;
-		this.typing = false;
+		this.moodAt = 0;
 		this.awake = ["idle", this.line];
 		this.timers = {};
 	}
 
 	rename(name) {
 		this.name = name;
-		this.look = avatarOf(name, this.tint);
 	}
 
 	set(mood, line) {
 		if (this.mood === mood && this.line === line) return;
+		if (this.mood !== mood || mood === "error" || mood === "happy") this.moodAt = Date.now();
 		this.mood = mood;
 		if (line !== undefined) this.line = line;
 		this.render();
@@ -219,15 +227,36 @@ class Bot {
 		return state && name ? `${state}/bots/${name}` : undefined;
 	}
 
-	publish() {
+	markState() {
+		if (this.active) return MARK_STATE[this.mood] ?? "working";
+		if (Date.now() - this.moodAt >= SETTLE_MS) return "idle";
+		return this.mood === "happy" ? "finished" : this.mood === "error" ? "failed" : "idle";
+	}
+
+	publish(poke = false) {
 		if (!this.live) return;
 		const dir = this.moodFile();
-		const face = this.face();
-		if (!dir || face === this.published) return;
+		if (!dir) return;
 		try {
+			const id = process.env.OMP_BOT_NAME || this.name;
+			const look = avatarOf(id, this.tint);
+			if (look.shape !== this.mark?.shape) {
+				this.look = look;
+				this.mark = new Mark(id, look.shape);
+				this.markGen = -1;
+			}
+			this.mark.enter(this.markState());
+			if (poke) this.mark.poke();
+			if (this.mark.gen === this.markGen) return;
+			const left = this.mark.expires();
+			if (left !== null) this.after("mark", Math.max(1000, left), () => this.mark?.renew() && this.publish());
 			mkdirSync(dir, { recursive: true });
-			writeFileSync(`${dir}/mood`, `${face}\n`);
-			this.published = face;
+			writeFileSync(`${dir}/mark.css.tmp`, this.mark.css());
+			renameSync(`${dir}/mark.css.tmp`, `${dir}/mark.css`);
+			writeFileSync(`${dir}/mood.tmp`, `${this.mark.state} ${this.mark.gen} ${this.mark.shape}\n`);
+			renameSync(`${dir}/mood.tmp`, `${dir}/mood`);
+			this.markGen = this.mark.gen;
+			this.published = this.mark.state;
 		} catch {}
 	}
 
@@ -260,7 +289,7 @@ class Bot {
 	nap() {
 		this.after("nap", NAP_MS, () => {
 			if (this.active || this.mood === "sleep" || this.mood === "drowsy") return;
-			this.awake = [this.mood === "happy" ? "idle" : this.mood, this.line];
+			this.awake = [this.mood === "happy" ? "idle" : this.mood, this.line, this.moodAt];
 			this.set("drowsy");
 			this.after("nap", 12000, () => {
 				if (!this.active && this.mood === "drowsy") this.set("sleep", "Napping. Boop to wake.");
@@ -269,18 +298,22 @@ class Bot {
 	}
 
 	wake() {
-		if (this.mood === "sleep" || this.mood === "drowsy") this.set(...this.awake);
+		if (this.mood !== "sleep" && this.mood !== "drowsy") return;
+		const [mood, line, at] = this.awake;
+		this.mood = mood;
+		this.line = line;
+		this.moodAt = at ?? Date.now();
+		this.render();
 	}
 
 	poke() {
 		const count = this.boops++;
 		this.boop = BOOPS[count % BOOPS.length];
-		this.spin = count % 4 === 3;
 		this.wake();
+		this.publish(true);
 		this.render();
 		this.after("boop", 1200, () => {
 			this.boop = undefined;
-			this.spin = false;
 			this.render();
 		});
 		if (!this.active) this.nap();
@@ -288,33 +321,13 @@ class Bot {
 
 	type() {
 		this.wake();
-		if (!this.typing) {
-			this.typing = true;
-			this.render();
-		}
-		this.after("typing", 1400, () => {
-			this.typing = false;
-			this.render();
-		});
 		if (!this.active) this.nap();
-	}
-
-	face() {
-		return this.boop ? (this.spin ? "spin" : "boop") : this.typing && !this.active ? "listen" : this.mood;
-	}
-
-	avatar() {
-		return drawAvatar(this.look, poseOf(this.face()));
 	}
 }
 
 class BotHero {
 	constructor(bot) {
 		this.bot = bot;
-	}
-
-	handleNativeEvent(event) {
-		if (event?.type === "action" && event.act === "boop") this.bot.poke();
 	}
 
 	invalidate() {}
@@ -329,7 +342,7 @@ class BotHero {
 		if (!b.hero) return col([], { role: "omp.bot.none" });
 		return col(
 			[
-				b.avatar(),
+				drawAvatar("hero", false),
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
@@ -352,7 +365,6 @@ class BotTop {
 	handleNativeEvent(event) {
 		if (event?.type !== "action") return;
 		if (event.act === "interrupt") this.stop();
-		else if (event.act === "boop") this.bot.poke();
 	}
 
 	invalidate() {}
@@ -365,7 +377,7 @@ class BotTop {
 		const b = this.bot;
 		return row(
 			[
-				b.avatar(),
+				drawAvatar("still", false),
 				text(b.name, { role: "omp.bot.name", wrap: "none" }),
 				b.active
 					? row([text("Stop", { wrap: "none" }), node("kbd", { keys: ["escape"] })], {
@@ -400,12 +412,12 @@ class BotStatus {
 	describe() {
 		const b = this.bot;
 		const failed = !b.active && b.mood === "error";
-		const asking = b.active && b.mood === "waiting" && b.running.size > 0;
+		const asking = b.active && b.mood === "blocked" && b.running.size > 0;
 		const busy = b.active && !b.boop && !asking && !failed;
 		const status = b.boop ?? b.line;
 		return row(
 			[
-				b.avatar(),
+				drawAvatar("live"),
 				busy
 					? node("shimmer", {
 							spans: [{ t: status, s: "muted" }],
@@ -563,7 +575,7 @@ class BotEvent {
 				row(
 					[
 						text(label, { role: "omp.bot.event.action", wrap: "none" }),
-						col([drawAvatar(this.look, poseOf("idle"))], { role: "omp.bot.event.avatar" }),
+						col([drawAvatar("event", false)], { role: "omp.bot.event.avatar" }),
 						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
 						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
 					],
@@ -998,7 +1010,7 @@ export default function ompBot(pi) {
 			return;
 		}
 		bot.set("happy", "Done");
-		bot.after("settle", 4000, () => bot.mood === "happy" && bot.set("idle", "Ready"));
+		bot.after("settle", SETTLE_MS, () => bot.mood === "happy" && bot.set("idle", "Ready"));
 	});
 }
 
