@@ -48,7 +48,7 @@
 	pointer-events: none;
 }
 :root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role^='omp.bot.face.'] {
-	transform-origin: 50% 46.82%;
+	transform-origin: 50% 5.792%;
 	scale: 1 var(--bot-eye, 1);
 	transition: scale 220ms cubic-bezier(0.22, 1, 0.36, 1);
 	animation: bot-eye-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
@@ -126,7 +126,7 @@
 	background-position: center;
 	background-repeat: no-repeat;
 	background-size: 100% 100%;
-	transform-origin: 50% 46.82%;
+	transform-origin: 50% 5.792%;
 	scale: 1 var(--bot-eye, 1);
 	transition: scale 220ms cubic-bezier(0.22, 1, 0.36, 1);
 	animation: bot-eye-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
@@ -157,6 +157,8 @@
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c::before,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.'] > [data-role] {
 	animation: none;
+	transition: none;
+	scale: none;
 }
 @media (prefers-reduced-motion: reduce) {
 	:root:not(#bot) [data-role^='omp.bot.avatar.'],
@@ -167,6 +169,7 @@
 	:root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role] {
 		animation: none;
 		transition: none;
+		scale: none;
 	}
 }
 @keyframes bot-bob {
@@ -204,11 +207,11 @@
 }
 @keyframes bot-eye-blink {
 	0%, 91%, 100% {
-		scale: 1 var(--bot-eye, 1);
+		transform: translateY(41.028%) scaleY(1) translateY(-41.028%);
 		animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 	}
 	95.5% {
-		scale: 1 calc(var(--bot-eye, 1) * 0.12);
+		transform: translateY(41.028%) scaleY(0.12) translateY(-41.028%);
 		animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 	}
 }

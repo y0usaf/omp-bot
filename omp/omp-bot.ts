@@ -188,6 +188,7 @@ class Bot {
 		this.clock = undefined;
 		this.boop = undefined;
 		this.published = undefined;
+		this.live = false;
 		this.spin = false;
 		this.boops = 0;
 		this.typing = false;
@@ -214,10 +215,12 @@ class Bot {
 
 	moodFile() {
 		const state = process.env.OMP_BOT_STATE;
-		return state && process.env.OMP_BOT_NAME ? `${state}/bots/${this.name}` : undefined;
+		const name = process.env.OMP_BOT_NAME;
+		return state && name ? `${state}/bots/${name}` : undefined;
 	}
 
 	publish() {
+		if (!this.live) return;
 		const dir = this.moodFile();
 		const face = this.face();
 		if (!dir || face === this.published) return;
@@ -230,8 +233,11 @@ class Bot {
 
 	unpublish() {
 		const dir = this.moodFile();
-		if (dir) rmSync(`${dir}/mood`, { force: true });
+		if (!this.live || !dir || this.published === undefined) return;
 		this.published = undefined;
+		try {
+			rmSync(`${dir}/mood`, { force: true });
+		} catch {}
 	}
 
 	after(key, ms, fn) {
@@ -880,6 +886,7 @@ export default function ompBot(pi) {
 		patchWorkingRow(state);
 		listen();
 		mount();
+		bot.live = true;
 		bot.publish();
 		bot.nap();
 	}
@@ -889,9 +896,9 @@ export default function ompBot(pi) {
 
 	pi.on("session_shutdown", async () => {
 		bot.stopTimers();
-		bot.unpublish();
 		unlisten?.();
 		unlisten = undefined;
+		bot.unpublish();
 	});
 
 	pi.registerCommand("bot", {
