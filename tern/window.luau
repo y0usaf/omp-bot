@@ -61,18 +61,16 @@ local CX = AVATAR.center or 114.2705
 local SVG_OPEN = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='" .. (AVATAR.viewBox or "-15 -15 259 259") .. "'%3E"
 local SVG_SHUT = "%3C/svg%3E"
 
-type FaceSpec = { ry: number, dx: number, dy: number, smile: boolean }
-
-local FACES: { [string]: FaceSpec } = {
-	open = { ry = 7, dx = 0, dy = 0, smile = false },
-	listen = { ry = 7, dx = 0, dy = 3, smile = false },
-	thinking = { ry = 5.25, dx = 3, dy = -3, smile = false },
-	working = { ry = 7, dx = 0, dy = 2, smile = false },
-	wide = { ry = 8.26, dx = 0, dy = -3, smile = false },
-	happy = { ry = 7.56, dx = 0, dy = 0, smile = true },
-	drowsy = { ry = 1.75, dx = 0, dy = 2, smile = false },
-	sleep = { ry = 2, dx = 0, dy = 0, smile = false },
-	error = { ry = 4.55, dx = 0, dy = -2, smile = false },
+local FACES: { [string]: number } = {
+	open = 7,
+	listen = 7,
+	thinking = 7,
+	working = 7,
+	wide = 7,
+	happy = 7,
+	drowsy = 7,
+	sleep = 2,
+	error = 7,
 }
 
 local function hex_esc(hex: string): string
@@ -106,29 +104,28 @@ local function skin_parts(shape: string, color: string): string
 end
 
 local function face_parts(pose: string, fill: string): string
-	local spec = FACES[pose] or FACES.open
-	local lx = string.format("%.2f", CX - 29 + spec.dx)
-	local rx = string.format("%.2f", CX + 29 + spec.dx)
-	local cy = string.format("%.2f", CX - 8 + spec.dy)
-	local ry = string.format("%.2f", spec.ry)
-	local out = "%3Cg fill='" .. fill .. "'%3E"
+	local ry = string.format("%.2f", FACES[pose] or 7)
+	local lx = string.format("%.2f", CX - 29)
+	local rx = string.format("%.2f", CX + 29)
+	local cy = string.format("%.2f", CX - 8)
+	return "%3Cg fill='" .. fill .. "'%3E"
 		.. "%3Cellipse cx='" .. lx .. "' cy='" .. cy .. "' rx='10' ry='" .. ry .. "'/%3E"
 		.. "%3Cellipse cx='" .. rx .. "' cy='" .. cy .. "' rx='10' ry='" .. ry .. "'/%3E"
 		.. "%3C/g%3E"
-	if spec.smile then
-		local x0 = string.format("%.2f", CX - 20 + spec.dx)
-		local xm = string.format("%.2f", CX + spec.dx)
-		local x1 = string.format("%.2f", CX + 20 + spec.dx)
-		local y0 = string.format("%.2f", CX + 24 + spec.dy)
-		local ym = string.format("%.2f", CX + 38 + spec.dy)
-		out = out .. "%3Cpath d='M" .. x0 .. " " .. y0 .. " Q" .. xm .. " " .. ym .. " " .. x1 .. " " .. y0
-			.. "' fill='none' stroke='" .. fill .. "' stroke-linecap='round' stroke-width='5'/%3E"
-	end
-	return out
 end
 
-local EYE_LIGHT = "%23fcfcfc"
-local EYE_DARK = "%23141414"
+local function smile_parts(fill: string): string
+	local x0 = string.format("%.2f", CX - 20)
+	local xm = string.format("%.2f", CX)
+	local x1 = string.format("%.2f", CX + 20)
+	local y0 = string.format("%.2f", CX + 24)
+	local ym = string.format("%.2f", CX + 38)
+	return "%3Cpath d='M" .. x0 .. " " .. y0 .. " Q" .. xm .. " " .. ym .. " " .. x1 .. " " .. y0
+		.. "' fill='none' stroke='" .. fill .. "' stroke-linecap='round' stroke-width='5'/%3E"
+end
+
+local EYE_LIGHT = "%23ffffff"
+local EYE_DARK = "%23161616"
 local EYES_OPEN_LIGHT = image(svg({ face_parts("open", EYE_LIGHT) }))
 local EYES_OPEN_DARK = image(svg({ face_parts("open", EYE_DARK) }))
 
@@ -174,8 +171,8 @@ local function frames(): string
 		rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. pose .. "'] { background-image: " .. image(svg({ face_parts(pose, EYE_LIGHT) })) .. "; }"
 		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) [data-role='omp.bot.face." .. pose .. "'] { background-image: " .. image(svg({ face_parts(pose, EYE_DARK) })) .. "; }"
 	end
-	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ face_parts("sleep", EYE_LIGHT) })) .. "; }"
-	rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ face_parts("sleep", EYE_DARK) })) .. "; }"
+	rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ smile_parts(EYE_LIGHT) })) .. "; }"
+	rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) [data-role='omp.bot.lid'] { background-image: " .. image(svg({ smile_parts(EYE_DARK) })) .. "; }"
 	return table.concat(rules, "\n")
 end
 
@@ -253,7 +250,6 @@ end
 local current: { Bot } = {}
 local faces = ""
 
--- A tab of a bot keeps that bot's tint, also when a reopened tab (or an attach) came back without one.
 local function ensure_colors(cx: WindowCx)
 	local by_name: { [string]: Bot } = {}
 	for _, bot in ipairs(current) do
@@ -550,7 +546,6 @@ local function remove_bot(cx: WindowCx)
 	end)
 end
 
--- The roster's folder, as bin/ scripts read it.
 local function state_env(): { [string]: string }
 	local env = {}
 	local state = tern.getenv("OMP_BOT_STATE")
@@ -560,8 +555,6 @@ local function state_env(): { [string]: string }
 	return env
 end
 
--- Tern's pick items take only an icon name, so a sheet keyed on row position draws each row's face; a row matches
--- only while the list is whole, so a typed filter, which drops rows, falls back to the icons.
 local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
 	local n = #faces
 	local rules = {}
@@ -570,14 +563,13 @@ local function pick_faces(cx: WindowCx, opts: any, faces: { string }): any
 		rules[#rules + 1] = row .. " .ck-ic { " .. face .. " width: 28px; height: 28px; background: var(--bot-face) center / 100% 100% no-repeat; }"
 		rules[#rules + 1] = ":root[data-theme='dark']:not(#bot) #pick .ck-item:nth-child(" .. i .. " of .ck-item):nth-last-child(" .. (n - i + 1) .. " of .ck-item) .ck-ic { background-image: var(--bot-face-dark); }"
 		rules[#rules + 1] = row .. " .ck-ic > .ico { display: none; }"
-		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { animation: bot-happy 1.8s ease-in-out infinite; }"
+		rules[#rules + 1] = row .. "[aria-selected='true'] .ck-ic { --bot-amp: 1.158%; --bot-tilt: 0deg; animation: bot-bob 2500ms linear infinite; }"
 	end
 	rules[#rules + 1] = "@media (prefers-reduced-motion: reduce) { :root:not(#bot) #pick .ck-item .ck-ic { animation: none !important; } }"
 	tern.css("pick", table.concat(rules, "\n"))
 	return cx:pick(opts)
 end
 
--- Writes one bot's "avatar" (nil drops it, back to the parts its name picks) and redraws every avatar in place.
 local function save_avatar(name: string, own: { [string]: string }?)
 	local fields = {}
 	for _, kind in ipairs(PARTS) do
@@ -599,7 +591,6 @@ end
 
 local KIND_NAMES: { [string]: string } = { shape = "shape", color = "colour" }
 
--- One part per pick, in PARTS order, each row drawn as the bot would look with it; "From name" ends the chain.
 local function pick_part(cx: WindowCx, bot: Bot, own: { [string]: string }, step: number)
 	local kind = PARTS[step]
 	local now = look({ name = bot.name, avatar = own } :: any)

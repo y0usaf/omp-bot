@@ -24,6 +24,14 @@
 	background: var(--t, var(--accent-fill));
 	box-shadow: none;
 }
- :root:not(#bot) [data-role='omp.bot.asked.note'] {
+:root:not(#bot) [data-role='omp.bot.asked.note'] {
 	color: var(--t3);
+}
+:root:not(#bot) .sf-chat-reader > [data-role^='omp.bot.top.'] {
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	padding-top: 8px;
+	padding-bottom: 8px;
+	background-color: var(--sand-bg-pane, var(--page, var(--panel)));
 }

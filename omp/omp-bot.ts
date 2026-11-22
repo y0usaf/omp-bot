@@ -38,6 +38,26 @@ const DOING = {
 	wait: "Waiting on results",
 	ask: "Needs your input",
 };
+const TOOL_MOOD = {
+	ask: "waiting",
+	web_search: "searching",
+	web_fetch: "searching",
+	fetch: "searching",
+	browser: "searching",
+	read: "searching",
+	grep: "searching",
+	glob: "searching",
+	find: "searching",
+	ast_grep: "searching",
+	lsp: "searching",
+	edit: "writing",
+	write: "writing",
+	ast_edit: "writing",
+	task: "orbit",
+	wait: "orbit",
+	message_helper: "sending",
+	mail: "sending",
+};
 const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TIMERS = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer) };
 const GAP_MS = 15 * 60 * 1000;
@@ -170,6 +190,7 @@ class Bot {
 		this.tui = undefined;
 		this.clock = undefined;
 		this.boop = undefined;
+		this.spin = false;
 		this.boops = 0;
 		this.typing = false;
 		this.awake = ["idle", this.line];
@@ -223,11 +244,14 @@ class Bot {
 	}
 
 	poke() {
-		this.boop = BOOPS[this.boops++ % BOOPS.length];
+		const count = this.boops++;
+		this.boop = BOOPS[count % BOOPS.length];
+		this.spin = count % 4 === 3;
 		this.wake();
 		this.render();
-		this.after("boop", 1200, () => {
+		this.after("boop", this.spin ? 1000 : 1200, () => {
 			this.boop = undefined;
+			this.spin = false;
 			this.render();
 		});
 		if (!this.active) this.nap();
@@ -247,7 +271,7 @@ class Bot {
 	}
 
 	face() {
-		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
+		return this.boop ? (this.spin ? "spin" : "boop") : this.typing && !this.active ? "listen" : this.mood;
 	}
 
 	avatar() {
@@ -903,7 +927,7 @@ export default function ompBot(pi) {
 		const captured = bot.intents.get(event.toolCallId);
 		bot.intents.delete(event.toolCallId);
 		const label = stepOf(event, captured) || (DOING[event.toolName] ?? pick(WORKING, bot.turnStart + bot.running.size));
-		const mood = event.toolName === "ask" ? "waiting" : "working";
+		const mood = TOOL_MOOD[event.toolName] ?? "working";
 		bot.running.set(event.toolCallId, { mood, label });
 		bot.set(mood, label);
 	});

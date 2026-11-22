@@ -1,21 +1,28 @@
 :root:not(#bot) [data-role^='omp.bot.avatar.'] {
 	--bot-size: 28px;
+	--bot-amp: 0.579%;
+	--bot-period: 9000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
 	position: relative;
 	display: block !important;
 	flex: none;
 	width: var(--bot-size);
 	height: var(--bot-size);
+	min-width: var(--bot-size);
+	min-height: var(--bot-size);
 	padding: 0;
 	overflow: visible;
 	cursor: pointer;
-	transform-origin: 50% 50%;
-	transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	transform-origin: 49.91% 49.91%;
+	transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1), filter 220ms ease-out;
+	animation: bot-bob var(--bot-period, 9000ms) linear infinite;
 }
 :root:not(#bot) [data-role^='omp.bot.hero.'] [data-role^='omp.bot.avatar.'] {
 	--bot-size: 72px;
 }
 :root:not(#bot) [data-role^='omp.bot.top.'] [data-role^='omp.bot.avatar.'] {
-	--bot-size: 22px;
+	--bot-size: 28px;
 }
 :root:not(#bot) [data-role='omp.bot.event.avatar'] {
 	display: flex !important;
@@ -25,7 +32,7 @@
 	padding: 0;
 }
 :root:not(#bot) [data-role='omp.bot.event.avatar'] [data-role^='omp.bot.avatar.'] {
-	--bot-size: 18px;
+	--bot-size: 16px;
 }
 :root:not(#bot) [data-role^='omp.bot.avatar.'] > :is([data-role^='omp.bot.skin.'], [data-role^='omp.bot.face.'], [data-role='omp.bot.lid']) {
 	position: absolute;
@@ -40,33 +47,283 @@
 	box-shadow: none;
 	pointer-events: none;
 }
-:root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role='omp.bot.lid'] {
-	opacity: 0;
-	animation: bot-lid-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
-}
 :root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role^='omp.bot.face.'] {
-	animation: bot-face-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
+	transform-origin: 50% 46.82%;
+	scale: 1 var(--bot-eye, 1);
+	transition: scale 220ms cubic-bezier(0.22, 1, 0.36, 1);
+	animation: bot-eye-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
 }
 :root:not(#bot) [data-role='omp.bot.avatar.idle'] > [data-role^='omp.bot.face.'] {
 	animation:
 		bot-glance var(--bot-glance, 12s) ease-in-out var(--bot-glance-delay, 0s) infinite,
-		bot-face-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
+		bot-eye-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
 }
-:root:not(#bot) [data-role='omp.bot.avatar.idle'] > [data-role='omp.bot.lid'] {
-	animation:
-		bot-glance var(--bot-glance, 12s) ease-in-out var(--bot-glance-delay, 0s) infinite,
-		bot-lid-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.sleep'] > * {
+:root:not(#bot) :is([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping'], [data-role='omp.bot.avatar.drowsy']) > [data-role^='omp.bot.face.'] {
 	animation: none;
 }
-:root:not(#bot) [data-role='omp.bot.avatar.sleep'] > [data-role='omp.bot.lid'] {
+:root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role='omp.bot.face.sleep'] {
+	scale: 1 1;
+	animation: none;
+}
+:root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role='omp.bot.lid'] {
 	opacity: 0;
+	transition: opacity 180ms ease-out;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.happy'], [data-role='omp.bot.avatar.excited'], [data-role='omp.bot.avatar.celebrate']) > [data-role='omp.bot.lid'] {
+	opacity: 1;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping']) {
+	--bot-amp: 0%;
+	--bot-period: 6000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.12;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.waking'] {
+	--bot-amp: 0.772%;
+	--bot-period: 800ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.35;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.idle'] {
+	--bot-amp: 0.579%;
+	--bot-period: 9000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.listen'], [data-role='omp.bot.avatar.listening']) {
+	--bot-amp: 0.695%;
+	--bot-period: 2800ms;
+	--bot-tilt: -2deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.thinking'] {
+	--bot-amp: 0.386%;
+	--bot-period: 2000ms;
+	--bot-tilt: 3deg;
+	--bot-eye: 0.75;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.searching'] {
+	--bot-amp: 0.772%;
+	--bot-period: 1000ms;
+	--bot-tilt: -4deg;
+	--bot-eye: 0.9;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.working'] {
+	--bot-amp: 0.772%;
+	--bot-period: 1800ms;
+	--bot-tilt: -3deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.loading'] {
+	--bot-amp: 0.772%;
+	--bot-period: 6000ms;
+	--bot-tilt: 3deg;
+	--bot-eye: 0.9;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.excited'] {
+	--bot-amp: 1.931%;
+	--bot-period: 1100ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.08;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.surprised'], [data-role='omp.bot.avatar.waiting']) {
+	--bot-amp: 1.158%;
+	--bot-period: 2500ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.18;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.suspicious'] {
+	--bot-amp: 0.386%;
+	--bot-period: 2600ms;
+	--bot-tilt: 7deg;
+	--bot-eye: 0.75;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.angry'], [data-role='omp.bot.avatar.error']) {
+	--bot-amp: 0.386%;
+	--bot-period: 2200ms;
+	--bot-tilt: -7deg;
+	--bot-eye: 0.65;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.drowsy'] {
+	--bot-amp: 0.193%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.25;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.happy'] {
+	--bot-amp: 1.158%;
+	--bot-period: 2500ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.08;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.curious'] {
+	--bot-amp: 0.772%;
+	--bot-period: 1800ms;
+	--bot-tilt: 6deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.confused'] {
+	--bot-amp: 0.386%;
+	--bot-period: 2200ms;
+	--bot-tilt: -5deg;
+	--bot-eye: 0.8;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.bored'] {
+	--bot-amp: 0.154%;
+	--bot-period: 3500ms;
+	--bot-tilt: -8deg;
+	--bot-eye: 0.45;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.proud'] {
+	--bot-amp: 0.772%;
+	--bot-period: 3500ms;
+	--bot-tilt: 4deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.shy'] {
+	--bot-amp: 0.386%;
+	--bot-period: 3000ms;
+	--bot-tilt: -8deg;
+	--bot-eye: 0.55;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.sad'] {
+	--bot-amp: 0.386%;
+	--bot-period: 4000ms;
+	--bot-tilt: -4deg;
+	--bot-eye: 0.6;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.laughing'] {
+	--bot-amp: 1.544%;
+	--bot-period: 1200ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.8;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.scared'] {
+	--bot-amp: 1.158%;
+	--bot-period: 900ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.playful'] {
+	--bot-amp: 1.544%;
+	--bot-period: 1500ms;
+	--bot-tilt: 8deg;
+	--bot-eye: 1.05;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.celebrate'] {
+	--bot-amp: 2.703%;
+	--bot-period: 1400ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.12;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.orbit'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 12deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.radar'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: -12deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.progress'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.spawning'] {
+	--bot-amp: 1.931%;
+	--bot-period: 1200ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.humming'] {
+	--bot-amp: 0.579%;
+	--bot-period: 5000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.9;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.dictating'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.writing'], [data-role='omp.bot.avatar.talking']) {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: -4deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.sending'], [data-role='omp.bot.avatar.receiving'], [data-role='omp.bot.avatar.uploading']) {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.notifying'] {
+	--bot-amp: 1.158%;
+	--bot-period: 1500ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.alerting'] {
+	--bot-amp: 0.772%;
+	--bot-period: 2000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.dragging'] {
+	--bot-amp: 1.158%;
+	--bot-period: 1600ms;
+	--bot-tilt: 5deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.bouncing'] {
+	--bot-amp: 2.703%;
+	--bot-period: 3000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) :is(
+	[data-role='omp.bot.avatar.working'],
+	[data-role='omp.bot.avatar.thinking'],
+	[data-role='omp.bot.avatar.searching'],
+	[data-role='omp.bot.avatar.loading'],
+	[data-role='omp.bot.avatar.writing'],
+	[data-role='omp.bot.avatar.talking'],
+	[data-role='omp.bot.avatar.orbit'],
+	[data-role='omp.bot.avatar.radar'],
+	[data-role='omp.bot.avatar.sending'],
+	[data-role='omp.bot.avatar.waiting'],
+	[data-role='omp.bot.avatar.notifying'],
+	[data-role='omp.bot.avatar.alerting']
+) {
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.boop'], [data-role='omp.bot.avatar.bounce']) {
+	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
+}
+:root:not(#bot) [data-role='omp.bot.avatar.spin'] {
+	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-spin 1000ms linear 1;
+}
+:root:not(#bot) [data-role^='omp.bot.avatar.']:not([data-role='omp.bot.avatar.sleep']):not([data-role='omp.bot.avatar.sleeping']):not([data-role='omp.bot.avatar.spin']):hover {
+	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
+}
+:root:not(#bot) :is([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping']):hover {
+	animation: bot-bob 6000ms linear infinite;
 }
 :root:not(#bot) #tabbar .tt[data-tc] > .tn-dk {
 	--dk: 40px;
 }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c {
+	--bot-amp: 0.579%;
+	--bot-period: 9000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
 	left: 6px;
 	top: 6px;
 	width: 28px;
@@ -78,8 +335,9 @@
 	background-position: center;
 	background-repeat: no-repeat;
 	box-shadow: none;
-	transform-origin: center;
-	transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	transform-origin: 49.91% 49.91%;
+	transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1), filter 220ms ease-out;
+	animation: bot-bob var(--bot-period) linear infinite;
 }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c.out {
 	display: none;
@@ -101,8 +359,10 @@
 	background-position: center;
 	background-repeat: no-repeat;
 	background-size: 100% 100%;
-	transform-origin: 50% 47%;
-	animation: bot-tab-blink var(--bot-blink, 5.4s) ease-in-out var(--bot-blink-delay, 0s) infinite;
+	transform-origin: 50% 46.82%;
+	scale: 1 var(--bot-eye, 1);
+	transition: scale 220ms cubic-bezier(0.22, 1, 0.36, 1);
+	animation: bot-eye-blink var(--bot-blink, 5.4s) linear var(--bot-blink-delay, 0s) infinite;
 }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::after {
 	box-shadow: none;
@@ -110,55 +370,106 @@
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:not([data-st])::after {
 	content: none;
 }
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.idle'] {
-	animation: bot-idle 9s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.listen'] {
-	animation: bot-listen 2.8s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.thinking'] {
-	animation: bot-think 2s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.working'] {
-	animation: bot-work 1.8s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.talking'] {
-	animation: bot-talk 2.2s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.waiting'] {
-	animation: bot-wait 2.5s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.happy'] {
-	animation: bot-happy 2.5s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.drowsy'] {
-	animation: bot-drowsy 4s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.sleep'] {
-	animation: bot-sleep 6s ease-in-out infinite;
-}
-:root:not(#bot) :is([data-role^='omp.bot.chat.'], [data-role^='omp.bot.hero.'], [data-role^='omp.bot.top.']) [data-role='omp.bot.avatar.error'] {
-	animation: bot-error 2.2s ease-in-out infinite;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.boop'] {
-	animation: bot-boop 700ms cubic-bezier(0.22, 1, 0.36, 1) 1;
-}
-:root:not(#bot) [data-role^='omp.bot.avatar.']:not([data-role='omp.bot.avatar.sleep']):hover {
-	animation: bot-boop 700ms cubic-bezier(0.22, 1, 0.36, 1) 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.sleep']:hover {
-	animation: bot-sleep 6s ease-in-out infinite;
-}
-:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c {
-	animation: bot-boop 700ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+:root:not(#bot) #tabbar .tt[data-tc]:is(.on, [aria-selected='true']) .tn-dk-c {
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
 }
 :root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'] {
-	animation: bot-work 1.8s ease-in-out infinite;
+	--bot-amp: 0.772%;
+	--bot-period: 1800ms;
+	--bot-tilt: -3deg;
+	--bot-eye: 1;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='thinking'] {
+	--bot-amp: 0.386%;
+	--bot-period: 2000ms;
+	--bot-tilt: 3deg;
+	--bot-eye: 0.75;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='searching'] {
+	--bot-amp: 0.772%;
+	--bot-period: 1000ms;
+	--bot-tilt: -4deg;
+	--bot-eye: 0.9;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='listening'], [data-st='listen']) {
+	--bot-amp: 0.695%;
+	--bot-period: 2800ms;
+	--bot-tilt: -2deg;
+	--bot-eye: 1;
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='loading'] {
+	--bot-amp: 0.772%;
+	--bot-period: 6000ms;
+	--bot-tilt: 3deg;
+	--bot-eye: 0.9;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='orbit'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 12deg;
+	--bot-eye: 1;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='sending'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='writing'] {
+	--bot-amp: 0.772%;
+	--bot-period: 4000ms;
+	--bot-tilt: -4deg;
+	--bot-eye: 1;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='waiting'] {
+	--bot-amp: 1.158%;
+	--bot-period: 2500ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.18;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='bell'] {
+	--bot-amp: 1.158%;
+	--bot-period: 1500ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 1.1;
+	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='failed'], [data-st='error']) {
+	--bot-amp: 0.386%;
+	--bot-period: 2200ms;
+	--bot-tilt: -7deg;
+	--bot-eye: 0.65;
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='drowsy'] {
+	--bot-amp: 0.193%;
+	--bot-period: 4000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.25;
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='sleep'], [data-st='sleeping']) {
+	--bot-amp: 0%;
+	--bot-period: 6000ms;
+	--bot-tilt: 0deg;
+	--bot-eye: 0.12;
+}
+:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='drowsy'], [data-st='sleep'], [data-st='sleeping'])::before {
+	animation: none;
+}
+:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c {
+	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
 }
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.'],
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.']:hover,
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
-:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c::before,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.'] > * {
 	animation: none;
@@ -166,75 +477,68 @@
 @media (prefers-reduced-motion: reduce) {
 	:root:not(#bot) [data-role^='omp.bot.avatar.'],
 	:root:not(#bot) [data-role^='omp.bot.avatar.']:hover,
+	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c,
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
-	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='working'],
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before,
 	:root:not(#bot) [data-role^='omp.bot.avatar.'] > * {
 		animation: none;
 		transition: none;
 	}
 }
-@keyframes bot-idle {
-	0%, 100% { transform: translateY(0); }
-	50% { transform: translateY(-1.2%); }
+@keyframes bot-bob {
+	0% {
+		transform: translateY(0) rotate(var(--bot-tilt, 0deg));
+		animation-timing-function: cubic-bezier(0.39, 0.575, 0.565, 1);
+	}
+	25% {
+		transform: translateY(calc(var(--bot-amp, 0%) * -1)) rotate(var(--bot-tilt, 0deg));
+		animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+	}
+	75% {
+		transform: translateY(var(--bot-amp, 0%)) rotate(var(--bot-tilt, 0deg));
+		animation-timing-function: cubic-bezier(0.47, 0, 0.745, 0.715);
+	}
+	100% {
+		transform: translateY(0) rotate(var(--bot-tilt, 0deg));
+	}
 }
-@keyframes bot-listen {
-	0%, 100% { transform: translateY(0) rotate(-2deg); }
-	50% { transform: translateY(-1.4%) rotate(-2deg); }
+@keyframes bot-bounce {
+	0% {
+		translate: 0 -3.089%;
+	}
+	100% {
+		translate: 0 0;
+	}
 }
-@keyframes bot-think {
-	0%, 100% { transform: translateY(0) rotate(3deg); }
-	50% { transform: translateY(-0.8%) rotate(3deg); }
+@keyframes bot-spin {
+	0% {
+		rotate: 0deg;
+	}
+	100% {
+		rotate: 360deg;
+	}
 }
-@keyframes bot-work {
-	0%, 100% { transform: translateY(0) rotate(-3deg); }
-	50% { transform: translateY(-1.6%) rotate(-3deg); }
-}
-@keyframes bot-talk {
-	0%, 100% { transform: translateY(0) rotate(-2deg); }
-	50% { transform: translateY(-1.6%) rotate(-2deg); }
-}
-@keyframes bot-wait {
-	0%, 100% { transform: translateY(0); }
-	50% { transform: translateY(-2.4%); }
-}
-@keyframes bot-happy {
-	0%, 100% { transform: translateY(0); }
-	50% { transform: translateY(-2.4%); }
-}
-@keyframes bot-drowsy {
-	0%, 100% { transform: translateY(0); }
-	50% { transform: translateY(-0.4%); }
-}
-@keyframes bot-sleep {
-	0%, 100% { transform: scale(1); opacity: 0.88; }
-	50% { transform: scale(1.03); opacity: 1; }
-}
-@keyframes bot-error {
-	0%, 100% { transform: translateY(0) rotate(-7deg); }
-	50% { transform: translateY(-0.8%) rotate(-7deg); }
-}
-@keyframes bot-boop {
-	0% { transform: translateY(0) scale(1); }
-	28% { transform: translateY(-6%) scale(1.04, 0.96); }
-	60% { transform: translateY(1%) scale(0.98, 1.02); }
-	100% { transform: translateY(0) scale(1); }
-}
-@keyframes bot-face-blink {
-	0%, 92%, 98%, 100% { opacity: 1; }
-	94%, 96% { opacity: 0; }
-}
-@keyframes bot-lid-blink {
-	0%, 92%, 98%, 100% { opacity: 0; }
-	94%, 96% { opacity: 1; }
-}
-@keyframes bot-tab-blink {
-	0%, 92%, 98%, 100% { transform: scaleY(1); }
-	95% { transform: scaleY(0.18); }
+@keyframes bot-eye-blink {
+	0%, 91%, 100% {
+		scale: 1 var(--bot-eye, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+	}
+	95.5% {
+		scale: 1 calc(var(--bot-eye, 1) * 0.12);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+	}
 }
 @keyframes bot-glance {
-	0%, 30%, 50%, 58%, 76%, 84%, 100% { transform: translate(0, 0); }
-	38%, 44% { transform: translate(-1.5%, 0); }
-	64%, 70% { transform: translate(1.5%, 0); }
-	89%, 93% { transform: translate(0, 1.1%); }
+	0%, 28%, 48%, 56%, 76%, 84%, 100% {
+		translate: 0 0;
+	}
+	36%, 42% {
+		translate: -1.544% 0;
+	}
+	64%, 70% {
+		translate: 1.544% 0;
+	}
+	89%, 93% {
+		translate: 0 1.158%;
+	}
 }

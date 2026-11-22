@@ -44,29 +44,15 @@ export function avatarOf(name: string, tint?: string): Look {
 	return { shape, color, tint: TINTS.includes(shade) ? shade : TINTS[h % TINTS.length] };
 }
 
-export type Face = "open" | "listen" | "thinking" | "working" | "wide" | "happy" | "drowsy" | "sleep" | "error";
+export type Face = "open" | "sleep";
 
 export interface Pose {
 	mood: string;
 	face: Face;
 }
 
-const MOODS: Record<string, Face> = {
-	idle: "open",
-	listen: "listen",
-	thinking: "thinking",
-	working: "working",
-	talking: "open",
-	waiting: "wide",
-	boop: "happy",
-	happy: "happy",
-	drowsy: "drowsy",
-	sleep: "sleep",
-	error: "error",
-};
-
 export function poseOf(mood: string): Pose {
-	return { mood, face: MOODS[mood] ?? "open" };
+	return { mood, face: mood === "sleep" || mood === "sleeping" ? "sleep" : "open" };
 }
 
 export function drawAvatar(look: Look, pose: Pose) {
