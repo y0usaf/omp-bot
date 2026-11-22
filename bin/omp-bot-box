@@ -131,10 +131,11 @@ for t in "$@"; do
 done'
 declare -A instore=() named=()
 missing=()
+found=$(jq -c --arg n "$name" 'map(if .name == $n then . else {name, tint, avatar} end)' "$state/bots.json" |
+	"${ssh[@]}" -T -l "$guest" box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$(map_path "$state")" "$(map_path "$dir")" "$(map_path "$cache")" "$root" "${OMP_BOT_BOX_EXT:-}")" "${!tops[@]}")
 while read -r kind t link; do
 	case $kind in store) instore[$t]=1 ;; named) named[$t]=$link ;; copy) missing+=("$t") ;; esac
-done < <(jq -c --arg n "$name" 'map(if .name == $n then . else {name, tint, avatar} end)' "$state/bots.json" |
-	"${ssh[@]}" -T -l "$guest" box "bash -c $(printf %q "$prelude") omp-bot-box $(printf '%q ' "$(map_path "$state")" "$(map_path "$dir")" "$(map_path "$cache")" "$root" "${OMP_BOT_BOX_EXT:-}")" "${!tops[@]}")
+done <<<"$found"
 if [ ${#missing[@]} -gt 0 ]; then
 	sync='set -euo pipefail
 t=$(mktemp -d "$1/.in.XXXXXX")
@@ -142,7 +143,7 @@ tar -xf - -C "$t"
 chmod -R u+w "$t"
 for x in "$t"/*; do [ -e "$1/${x##*/}" ] || mv "$x" "$1/"; done
 rm -rf "$t"'
-	tar -C /nix/store -cf - "${missing[@]}" | "${ssh[@]}" -T -l "$guest" box "bash -c $(printf %q "$sync") omp-bot-box $(printf %q "$(map_path "$cache")")"
+	tar -C /nix/store -cf - "${missing[@]}" | "${ssh[@]}" -T -l "$guest" box "bash -c $(printf %q "$sync") omp-bot-box $(printf %q "$(map_path "$cache")/store")"
 fi
 map() {
 	local v t top

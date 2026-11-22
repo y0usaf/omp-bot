@@ -156,7 +156,6 @@ export default function mail(pi) {
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (ctx.agent?.kind === "sub") return;
-		current ??= readJson(held);
 		if (!current) return;
 		const said = (event.messages?.findLast(message => message.role === "assistant")?.content ?? [])
 			.filter(part => part?.type === "text")

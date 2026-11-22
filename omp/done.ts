@@ -94,7 +94,7 @@ export default function (pi) {
 		const report = lastWords(id);
 		pi.sendMessage(
 			{ customType: "done-check", content: report ? `${text}\n\nHelper's last word: ${report}` : text, display: true, attribution: "agent" },
-			{ deliverAs: "followUp" },
+			{ deliverAs: "followUp", triggerTurn: true },
 		);
 		forget(id);
 	};

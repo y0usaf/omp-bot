@@ -26,8 +26,8 @@ flock -n 9 || { echo "omp-bot-memory: $name's memory is already running ($dir/op
 [ -p "$dir/optchatd.ctl" ] || mkfifo -m 0660 "$dir/optchatd.ctl"
 
 child=
-trap '[ -z "$child" ] || kill "$child" 2>/dev/null' TERM INT
-trap '[ -z "$child" ] || kill "$child" 2>/dev/null; exit 0' EXIT
+trap '[ -z "$child" ] || kill "$child" 2>/dev/null; exit 0' HUP TERM INT
+trap '[ -z "$child" ] || kill "$child" 2>/dev/null' EXIT
 
 # Whether the summariser may have work: a missing state means "run it" rather
 # than "skip it"; otherwise any message log written after the view it last saved
