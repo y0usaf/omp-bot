@@ -151,26 +151,16 @@ local banners: { [string]: { number } } = {}
 local installed: { [string]: string } = {}
 local faces = ""
 
-local function unique(bots: { Bot }): { Bot }
-	local count: { [string]: number } = {}
-	for _, bot in ipairs(bots) do
-		if bot.tint then
-			count[bot.tint] = (count[bot.tint] or 0) + 1
-		end
-	end
-	local out = {}
-	for _, bot in ipairs(bots) do
-		if bot.tint and count[bot.tint] == 1 then
-			out[#out + 1] = bot
-		end
-	end
-	return out
-end
-
 local function live_targets(bot: Bot): string
+	local tab = "#tabbar .tt" .. (bot.tint and ("[data-tc='" .. bot.tint .. "']") or "[data-tc]") .. ":is([title*='" .. bot.name .. "  '], [title*='" .. bot.name .. "\\A '])"
+	for _, other in ipairs(current) do
+		if other.name ~= bot.name and (other.name:sub(-#bot.name) == bot.name or other.name:find(bot.name .. "  ", 1, true)) then
+			tab ..= ":not([title*='" .. other.name .. "  ']):not([title*='" .. other.name .. "\\A '])"
+		end
+	end
 	local parts = {
-		"#tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c",
-		"[data-role^='omp.bot.chat." .. bot.tint .. "'] [data-role='omp.bot.mark.live']",
+		tab .. " .tn-dk-c",
+		"[data-role='omp.bot.mark.live/" .. bot.name .. "']",
 	}
 	for _, pane in ipairs(banners[bot.name] or {}) do
 		parts[#parts + 1] = "#banners .tn-dk-c[data-pane='" .. pane .. "']"
@@ -188,14 +178,14 @@ local function show_avatars(bots: { Bot })
 		":root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c { --mk-ink: " .. fallback.light .. "; }",
 		":root[data-theme='dark']:not(#bot) #tabbar .tt[data-tc] .tn-dk-c { --mk-ink: " .. fallback.dark .. "; }",
 		":root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before { background-image: url(\"marks/" .. AVATAR.fallback.shape .. "/rest.svgz\"); }",
-		":root:not(#bot):not(#mk) [data-role='omp.bot.mark.live']::before { background-image: url(\"marks/" .. AVATAR.fallback.shape .. "/rest.svgz\"); }",
+		":root:not(#bot):not(#mk) [data-role^='omp.bot.mark.live/']::before { background-image: url(\"marks/" .. AVATAR.fallback.shape .. "/rest.svgz\"); }",
 	}
 	local nobody = { name = "", avatar = AVATAR.fallback } :: any
 	for _, theme in ipairs({ "light", "dark" }) do
 		local root = theme == "dark" and ":root[data-theme='dark']:not(#bot):not(#mk) " or ":root:not(#bot):not(#mk) "
-		rules[#rules + 1] = root .. "[data-role='omp.bot.mark.live'] { --mk-ink: " .. (fallback :: any)[theme] .. "; }"
-		rules[#rules + 1] = root .. ":is([data-role='omp.bot.mark.still'], [data-role='omp.bot.mark.event']) { background-image: " .. face(nobody, theme) .. "; }"
-		rules[#rules + 1] = root .. "[data-role='omp.bot.mark.hero']::before { background-image: " .. hero(nobody, theme) .. "; }"
+		rules[#rules + 1] = root .. "[data-role^='omp.bot.mark.live/'] { --mk-ink: " .. (fallback :: any)[theme] .. "; }"
+		rules[#rules + 1] = root .. ":is([data-role^='omp.bot.mark.still/'], [data-role^='omp.bot.mark.event/']) { background-image: " .. face(nobody, theme) .. "; }"
+		rules[#rules + 1] = root .. "[data-role^='omp.bot.mark.hero/']::before { background-image: " .. hero(nobody, theme) .. "; }"
 	end
 	local tints: { [string]: number } = {}
 	local tint_order: { string } = {}
@@ -214,18 +204,18 @@ local function show_avatars(bots: { Bot })
 			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), #tabbar .tt[data-tc='" .. tint .. "']) { " .. vars .. " }"
 		end
 	end
-	for _, bot in ipairs(unique(bots)) do
-		local t = bot.tint :: string
-		local still_sel = ":is([data-role^='omp.bot.top." .. t .. "'] [data-role='omp.bot.mark.still'], [data-role^='omp.bot.eventbox." .. t .. "'] [data-role='omp.bot.mark.event'])"
-		local hero_sel = "[data-role^='omp.bot.hero." .. t .. "'] [data-role='omp.bot.mark.hero']::before"
+	for _, bot in ipairs(bots) do
+		local still_sel = ":is([data-role='omp.bot.mark.still/" .. bot.name .. "'], [data-role='omp.bot.mark.event/" .. bot.name .. "'])"
+		local hero_sel = "[data-role='omp.bot.mark.hero/" .. bot.name .. "']::before"
 		local live_sel = live_targets(bot)
 		local got = look(bot)
 		shapes[got.shape] = true
 		rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. live_sel .. "::before { background-image: url(\"marks/" .. got.shape .. "/rest.svgz\"); }"
 		for _, theme in ipairs({ "light", "dark" }) do
 			local root = theme == "dark" and ":root[data-theme='dark']:not(#bot):not(#mk) " or ":root:not(#bot):not(#mk) "
-			rules[#rules + 1] = root .. still_sel .. " { background-image: " .. face(bot, theme) .. "; }"
-			rules[#rules + 1] = root .. hero_sel .. " { background-image: " .. hero(bot, theme) .. "; }"
+			local own = theme == "dark" and ":root[data-theme='dark']:not(#bot):not(#mk):not(#mk3) " or ":root:not(#bot):not(#mk):not(#mk3) "
+			rules[#rules + 1] = own .. still_sel .. " { background-image: " .. face(bot, theme) .. "; }"
+			rules[#rules + 1] = own .. hero_sel .. " { background-image: " .. hero(bot, theme) .. "; }"
 			rules[#rules + 1] = root .. live_sel .. " { --mk-ink: " .. (inks(got.color) :: any)[theme] .. "; }"
 		end
 	end
@@ -240,7 +230,7 @@ end
 
 local function show_marks()
 	local seen: { [string]: boolean } = {}
-	for _, bot in ipairs(unique(current)) do
+	for _, bot in ipairs(current) do
 		seen[bot.name] = true
 		local dir = STATE .. "/bots/" .. bot.name
 		local mood = tern.fs.exists(dir .. "/mood") and tern.fs.read(dir .. "/mood") or nil

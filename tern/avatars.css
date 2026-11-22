@@ -10,8 +10,8 @@
 	border-radius: 0;
 	box-shadow: none;
 }
-:root:not(#bot):not(#mk) :is([data-role='omp.bot.mark.live'], #tabbar .tt[data-tc] .tn-dk-c)::before,
-:root:not(#bot):not(#mk) :is([data-role='omp.bot.mark.live'], #tabbar .tt[data-tc] .tn-dk-c)::after {
+:root:not(#bot):not(#mk) :is([data-role^='omp.bot.mark.live/'], #tabbar .tt[data-tc] .tn-dk-c)::before,
+:root:not(#bot):not(#mk) :is([data-role^='omp.bot.mark.live/'], #tabbar .tt[data-tc] .tn-dk-c)::after {
 	content: '' !important;
 	display: block;
 	position: absolute !important;
@@ -38,14 +38,14 @@
 	scale: none !important;
 	z-index: auto !important;
 }
-:root:not(#bot):not(#mk) :is([data-role='omp.bot.mark.live'], #tabbar .tt[data-tc] .tn-dk-c)::after {
+:root:not(#bot):not(#mk) :is([data-role^='omp.bot.mark.live/'], #tabbar .tt[data-tc] .tn-dk-c)::after {
 	display: none;
 }
 :root:not(#bot):not(#mk) #tabbar .tt[data-tc] .tn-dk-c::before,
 :root:not(#bot):not(#mk) #tabbar .tt[data-tc] .tn-dk-c::after {
 	font-size: 72px;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.hero']::before {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.hero/']::before {
 	content: '';
 	display: block;
 	position: absolute;
@@ -54,7 +54,7 @@
 	background-position: 0 0;
 	pointer-events: none;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.live'] {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.live/'] {
 	width: 56px;
 	height: 56px;
 	min-width: 56px;
@@ -62,20 +62,20 @@
 	margin: -14px;
 	overflow: hidden;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.hero'] {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.hero/'] {
 	width: 72px;
 	height: 72px;
 	min-width: 72px;
 	min-height: 72px;
 	cursor: default;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.hero']::before {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.hero/']::before {
 	left: -20px;
 	top: -20px;
 	width: 112px;
 	height: 112px;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.still'] {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.still/'] {
 	width: 24px;
 	height: 24px;
 	min-width: 24px;
@@ -92,7 +92,7 @@
 	justify-content: center;
 	padding: 0;
 }
-:root:not(#bot):not(#mk) [data-role='omp.bot.mark.event'] {
+:root:not(#bot):not(#mk) [data-role^='omp.bot.mark.event/'] {
 	width: 16px;
 	height: 16px;
 	min-width: 16px;

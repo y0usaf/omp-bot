@@ -61,6 +61,6 @@ export function avatarOf(name: string, tint?: string): Look {
 
 export type Kind = "live" | "still" | "hero" | "event";
 
-export function drawAvatar(kind: Kind, poke = true) {
-	return col([], { role: `omp.bot.mark.${kind}`, gap: "none", align: "center", ...(poke ? { actions: { click: "boop" } } : {}) });
+export function drawAvatar(kind: Kind, name: string, poke = true) {
+	return col([], { role: `omp.bot.mark.${kind}/${name}`, gap: "none", align: "center", ...(poke ? { actions: { click: "boop" } } : {}) });
 }

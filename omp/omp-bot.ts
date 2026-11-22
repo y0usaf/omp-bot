@@ -227,6 +227,10 @@ class Bot {
 		return state && name ? `${state}/bots/${name}` : undefined;
 	}
 
+	id() {
+		return process.env.OMP_BOT_NAME || this.name;
+	}
+
 	markState() {
 		if (this.active) return MARK_STATE[this.mood] ?? "working";
 		if (Date.now() - this.moodAt >= SETTLE_MS) return "idle";
@@ -238,7 +242,7 @@ class Bot {
 		const dir = this.moodFile();
 		if (!dir) return;
 		try {
-			const id = process.env.OMP_BOT_NAME || this.name;
+			const id = this.id();
 			const look = avatarOf(id, this.tint);
 			if (look.shape !== this.mark?.shape) {
 				this.look = look;
@@ -342,7 +346,7 @@ class BotHero {
 		if (!b.hero) return col([], { role: "omp.bot.none" });
 		return col(
 			[
-				drawAvatar("hero", false),
+				drawAvatar("hero", b.id(), false),
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
@@ -377,7 +381,7 @@ class BotTop {
 		const b = this.bot;
 		return row(
 			[
-				drawAvatar("still", false),
+				drawAvatar("still", b.id(), false),
 				text(b.name, { role: "omp.bot.name", wrap: "none" }),
 				b.active
 					? row([text("Stop", { wrap: "none" }), node("kbd", { keys: ["escape"] })], {
@@ -417,7 +421,7 @@ class BotStatus {
 		const status = b.boop ?? b.line;
 		return row(
 			[
-				drawAvatar("live"),
+				drawAvatar("live", b.id()),
 				busy
 					? node("shimmer", {
 							spans: [{ t: status, s: "muted" }],
@@ -575,7 +579,7 @@ class BotEvent {
 				row(
 					[
 						text(label, { role: "omp.bot.event.action", wrap: "none" }),
-						col([drawAvatar("event", false)], { role: "omp.bot.event.avatar" }),
+						col([drawAvatar("event", this.info.name, false)], { role: "omp.bot.event.avatar" }),
 						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
 						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
 					],
