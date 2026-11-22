@@ -164,8 +164,8 @@ end
 
 local function frames(): string
 	local rules = {
-		":root:not(#bot) { --bot-eyes: " .. EYES_OPEN_LIGHT .. "; }",
-		":root[data-theme='dark']:not(#bot) { --bot-eyes: " .. EYES_OPEN_DARK .. "; }",
+		":root:not(#bot) { --bot-eyes: " .. EYES_OPEN_LIGHT .. "; --bot-eyes-sleep: " .. image(svg({ face_parts("sleep", EYE_LIGHT) })) .. "; }",
+		":root[data-theme='dark']:not(#bot) { --bot-eyes: " .. EYES_OPEN_DARK .. "; --bot-eyes-sleep: " .. image(svg({ face_parts("sleep", EYE_DARK) })) .. "; }",
 	}
 	for pose in FACES do
 		rules[#rules + 1] = ":root:not(#bot) [data-role='omp.bot.face." .. pose .. "'] { background-image: " .. image(svg({ face_parts(pose, EYE_LIGHT) })) .. "; }"
@@ -176,8 +176,46 @@ local function frames(): string
 	return table.concat(rules, "\n")
 end
 
+local EMPHASIS = "filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));"
+local EMPHATIC: { [string]: boolean } = {}
+for _, name in ipairs(AVATAR.emphasis or {}) do
+	EMPHATIC[name] = true
+end
+
+local function grok_state(mood: string): string
+	local moods = AVATAR.moods or {}
+	local state = moods[mood] or mood
+	return AVATAR.motion[state] and state or "idle"
+end
+
+local function motion_vars(state: string): string
+	local m = AVATAR.motion[state] or AVATAR.motion.idle
+	local vars = string.format(
+		"--bot-amp: %.3f%%; --bot-period: %dms; --bot-tilt: %gdeg; --bot-eye: %g;",
+		m.amplitude / 259 * 100, m.period, m.tilt, m.eye
+	)
+	return EMPHATIC[state] and vars .. " " .. EMPHASIS or vars
+end
+
+local function motion(): string
+	local rules = {}
+	local names = {}
+	for name in AVATAR.motion do
+		names[#names + 1] = name
+	end
+	for name in AVATAR.moods or {} do
+		names[#names + 1] = name
+	end
+	table.sort(names)
+	for _, name in ipairs(names) do
+		rules[#rules + 1] = ":root:not(#bot):not(#motion) [data-role='omp.bot.avatar." .. name .. "'] { " .. motion_vars(grok_state(name)) .. " }"
+	end
+	return table.concat(rules, "\n")
+end
+
 local function paint()
 	tern.css("frames", frames())
+	tern.css("motion", motion())
 	tern.timer(0, function()
 		tern.css("skins", skins())
 	end)
@@ -313,6 +351,44 @@ local function show_faces(cx: WindowCx?)
 		faces = text
 		tern.css("faces", text)
 	end
+end
+
+local moods = ""
+
+local function show_moods()
+	local tints: { [string]: number } = {}
+	for _, bot in ipairs(current) do
+		if bot.tint then
+			tints[bot.tint] = (tints[bot.tint] or 0) + 1
+		end
+	end
+	local rules = {}
+	for _, bot in ipairs(current) do
+		if bot.tint and tints[bot.tint] == 1 then
+			local file = STATE .. "/bots/" .. bot.name .. "/mood"
+			local mood = tern.fs.exists(file) and tern.fs.read(file):match("^%s*([%w_-]+)") or nil
+			if mood then
+				local state = grok_state(mood)
+				local dock = ":root:not(#bot):not(#motion) #tabbar .tt[data-tc='" .. bot.tint .. "'] .tn-dk-c"
+				rules[#rules + 1] = dock .. " { " .. motion_vars(state) .. " }"
+				if state == "sleeping" or state == "drowsy" then
+					rules[#rules + 1] = dock .. "::before { animation: none;" .. (state == "sleeping" and " background-image: var(--bot-eyes-sleep);" or "") .. " }"
+				end
+			end
+		end
+	end
+	local text = table.concat(rules, "\n")
+	if text ~= moods then
+		moods = text
+		tern.css("moods", text)
+	end
+end
+
+local MOOD_MS = 300
+
+local function watch_moods()
+	tern.timer(MOOD_MS, watch_moods)
+	pcall(show_moods)
 end
 
 local function open_names(cx: WindowCx): { [string]: number }
@@ -674,4 +750,4 @@ for _, event in ipairs({ "focus", "tab_created", "tab_closed", "pane_created", "
 end
 
 tern.timer(0, show_faces)
-
+tern.timer(0, watch_moods)

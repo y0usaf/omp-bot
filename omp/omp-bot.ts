@@ -6,6 +6,7 @@ import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { avatarOf, drawAvatar, poseOf } from "./avatar.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
@@ -49,10 +50,6 @@ const TOOL_MOOD = {
 	glob: "searching",
 	find: "searching",
 	ast_grep: "searching",
-	lsp: "searching",
-	edit: "writing",
-	write: "writing",
-	ast_edit: "writing",
 	task: "orbit",
 	wait: "orbit",
 	message_helper: "sending",
@@ -190,6 +187,7 @@ class Bot {
 		this.tui = undefined;
 		this.clock = undefined;
 		this.boop = undefined;
+		this.published = undefined;
 		this.spin = false;
 		this.boops = 0;
 		this.typing = false;
@@ -210,7 +208,30 @@ class Bot {
 	}
 
 	render() {
+		this.publish();
 		this.tui?.requestRender?.();
+	}
+
+	moodFile() {
+		const state = process.env.OMP_BOT_STATE;
+		return state && process.env.OMP_BOT_NAME ? `${state}/bots/${this.name}` : undefined;
+	}
+
+	publish() {
+		const dir = this.moodFile();
+		const face = this.face();
+		if (!dir || face === this.published) return;
+		try {
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(`${dir}/mood`, `${face}\n`);
+			this.published = face;
+		} catch {}
+	}
+
+	unpublish() {
+		const dir = this.moodFile();
+		if (dir) rmSync(`${dir}/mood`, { force: true });
+		this.published = undefined;
 	}
 
 	after(key, ms, fn) {
@@ -859,6 +880,7 @@ export default function ompBot(pi) {
 		patchWorkingRow(state);
 		listen();
 		mount();
+		bot.publish();
 		bot.nap();
 	}
 
@@ -867,6 +889,7 @@ export default function ompBot(pi) {
 
 	pi.on("session_shutdown", async () => {
 		bot.stopTimers();
+		bot.unpublish();
 		unlisten?.();
 		unlisten = undefined;
 	});

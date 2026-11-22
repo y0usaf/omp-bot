@@ -62,7 +62,6 @@
 	animation: none;
 }
 :root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role='omp.bot.face.sleep'] {
-	scale: 1 1;
 	animation: none;
 }
 :root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role='omp.bot.lid'] {
@@ -72,245 +71,13 @@
 :root:not(#bot) :is([data-role='omp.bot.avatar.happy'], [data-role='omp.bot.avatar.excited'], [data-role='omp.bot.avatar.celebrate']) > [data-role='omp.bot.lid'] {
 	opacity: 1;
 }
-:root:not(#bot) :is([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping']) {
-	--bot-amp: 0%;
-	--bot-period: 6000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.12;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.waking'] {
-	--bot-amp: 0.772%;
-	--bot-period: 800ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.35;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.idle'] {
-	--bot-amp: 0.579%;
-	--bot-period: 9000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) :is([data-role='omp.bot.avatar.listen'], [data-role='omp.bot.avatar.listening']) {
-	--bot-amp: 0.695%;
-	--bot-period: 2800ms;
-	--bot-tilt: -2deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.thinking'] {
-	--bot-amp: 0.386%;
-	--bot-period: 2000ms;
-	--bot-tilt: 3deg;
-	--bot-eye: 0.75;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.searching'] {
-	--bot-amp: 0.772%;
-	--bot-period: 1000ms;
-	--bot-tilt: -4deg;
-	--bot-eye: 0.9;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.working'] {
-	--bot-amp: 0.772%;
-	--bot-period: 1800ms;
-	--bot-tilt: -3deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.loading'] {
-	--bot-amp: 0.772%;
-	--bot-period: 6000ms;
-	--bot-tilt: 3deg;
-	--bot-eye: 0.9;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.excited'] {
-	--bot-amp: 1.931%;
-	--bot-period: 1100ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.08;
-}
-:root:not(#bot) :is([data-role='omp.bot.avatar.surprised'], [data-role='omp.bot.avatar.waiting']) {
-	--bot-amp: 1.158%;
-	--bot-period: 2500ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.18;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.suspicious'] {
-	--bot-amp: 0.386%;
-	--bot-period: 2600ms;
-	--bot-tilt: 7deg;
-	--bot-eye: 0.75;
-}
-:root:not(#bot) :is([data-role='omp.bot.avatar.angry'], [data-role='omp.bot.avatar.error']) {
-	--bot-amp: 0.386%;
-	--bot-period: 2200ms;
-	--bot-tilt: -7deg;
-	--bot-eye: 0.65;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.drowsy'] {
-	--bot-amp: 0.193%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.25;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.happy'] {
-	--bot-amp: 1.158%;
-	--bot-period: 2500ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.08;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.curious'] {
-	--bot-amp: 0.772%;
-	--bot-period: 1800ms;
-	--bot-tilt: 6deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.confused'] {
-	--bot-amp: 0.386%;
-	--bot-period: 2200ms;
-	--bot-tilt: -5deg;
-	--bot-eye: 0.8;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.bored'] {
-	--bot-amp: 0.154%;
-	--bot-period: 3500ms;
-	--bot-tilt: -8deg;
-	--bot-eye: 0.45;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.proud'] {
-	--bot-amp: 0.772%;
-	--bot-period: 3500ms;
-	--bot-tilt: 4deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.shy'] {
-	--bot-amp: 0.386%;
-	--bot-period: 3000ms;
-	--bot-tilt: -8deg;
-	--bot-eye: 0.55;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.sad'] {
-	--bot-amp: 0.386%;
-	--bot-period: 4000ms;
-	--bot-tilt: -4deg;
-	--bot-eye: 0.6;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.laughing'] {
-	--bot-amp: 1.544%;
-	--bot-period: 1200ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.8;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.scared'] {
-	--bot-amp: 1.158%;
-	--bot-period: 900ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.playful'] {
-	--bot-amp: 1.544%;
-	--bot-period: 1500ms;
-	--bot-tilt: 8deg;
-	--bot-eye: 1.05;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.celebrate'] {
-	--bot-amp: 2.703%;
-	--bot-period: 1400ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.12;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.orbit'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 12deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.radar'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: -12deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.progress'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.spawning'] {
-	--bot-amp: 1.931%;
-	--bot-period: 1200ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.humming'] {
-	--bot-amp: 0.579%;
-	--bot-period: 5000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.9;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.dictating'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) :is([data-role='omp.bot.avatar.writing'], [data-role='omp.bot.avatar.talking']) {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: -4deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) :is([data-role='omp.bot.avatar.sending'], [data-role='omp.bot.avatar.receiving'], [data-role='omp.bot.avatar.uploading']) {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.notifying'] {
-	--bot-amp: 1.158%;
-	--bot-period: 1500ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.alerting'] {
-	--bot-amp: 0.772%;
-	--bot-period: 2000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.dragging'] {
-	--bot-amp: 1.158%;
-	--bot-period: 1600ms;
-	--bot-tilt: 5deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) [data-role='omp.bot.avatar.bouncing'] {
-	--bot-amp: 2.703%;
-	--bot-period: 3000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) :is(
-	[data-role='omp.bot.avatar.working'],
-	[data-role='omp.bot.avatar.thinking'],
-	[data-role='omp.bot.avatar.searching'],
-	[data-role='omp.bot.avatar.loading'],
-	[data-role='omp.bot.avatar.writing'],
-	[data-role='omp.bot.avatar.talking'],
-	[data-role='omp.bot.avatar.orbit'],
-	[data-role='omp.bot.avatar.radar'],
-	[data-role='omp.bot.avatar.sending'],
-	[data-role='omp.bot.avatar.waiting'],
-	[data-role='omp.bot.avatar.notifying'],
-	[data-role='omp.bot.avatar.alerting']
-) {
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
 :root:not(#bot) :is([data-role='omp.bot.avatar.boop'], [data-role='omp.bot.avatar.bounce']) {
 	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
 }
 :root:not(#bot) [data-role='omp.bot.avatar.spin'] {
 	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-spin 1000ms linear 1;
 }
-:root:not(#bot) [data-role^='omp.bot.avatar.']:not([data-role='omp.bot.avatar.sleep']):not([data-role='omp.bot.avatar.sleeping']):not([data-role='omp.bot.avatar.spin']):hover {
+:root:not(#bot) [data-role^='omp.bot.avatar.']:where(:not([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping'], [data-role='omp.bot.avatar.spin'])):hover {
 	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
 }
 :root:not(#bot) :is([data-role='omp.bot.avatar.sleep'], [data-role='omp.bot.avatar.sleeping']):hover {
@@ -380,89 +147,6 @@
 	--bot-eye: 1;
 	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
 }
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='thinking'] {
-	--bot-amp: 0.386%;
-	--bot-period: 2000ms;
-	--bot-tilt: 3deg;
-	--bot-eye: 0.75;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='searching'] {
-	--bot-amp: 0.772%;
-	--bot-period: 1000ms;
-	--bot-tilt: -4deg;
-	--bot-eye: 0.9;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='listening'], [data-st='listen']) {
-	--bot-amp: 0.695%;
-	--bot-period: 2800ms;
-	--bot-tilt: -2deg;
-	--bot-eye: 1;
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='loading'] {
-	--bot-amp: 0.772%;
-	--bot-period: 6000ms;
-	--bot-tilt: 3deg;
-	--bot-eye: 0.9;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='orbit'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 12deg;
-	--bot-eye: 1;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='sending'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='writing'] {
-	--bot-amp: 0.772%;
-	--bot-period: 4000ms;
-	--bot-tilt: -4deg;
-	--bot-eye: 1;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='waiting'] {
-	--bot-amp: 1.158%;
-	--bot-period: 2500ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.18;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='bell'] {
-	--bot-amp: 1.158%;
-	--bot-period: 1500ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 1.1;
-	filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bot-ink, currentColor) 32%, transparent));
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='failed'], [data-st='error']) {
-	--bot-amp: 0.386%;
-	--bot-period: 2200ms;
-	--bot-tilt: -7deg;
-	--bot-eye: 0.65;
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c[data-st='drowsy'] {
-	--bot-amp: 0.193%;
-	--bot-period: 4000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.25;
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='sleep'], [data-st='sleeping']) {
-	--bot-amp: 0%;
-	--bot-period: 6000ms;
-	--bot-tilt: 0deg;
-	--bot-eye: 0.12;
-}
-:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c:is([data-st='drowsy'], [data-st='sleep'], [data-st='sleeping'])::before {
-	animation: none;
-}
 :root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c {
 	animation: bot-bob var(--bot-period, 9000ms) linear infinite, bot-bounce 700ms linear 1;
 }
@@ -471,7 +155,7 @@
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 :root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) #tabbar .tt[data-tc] .tn-dk-c::before,
-:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.'] > * {
+:root:not(#bot) :is(.sf-still, .sf-paused, .sf-covered) [data-role^='omp.bot.avatar.'] > [data-role] {
 	animation: none;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -480,7 +164,7 @@
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c,
 	:root:not(#bot) #tabbar .tt[data-tc]:is(:hover, :focus-visible) .tn-dk-c,
 	:root:not(#bot) #tabbar .tt[data-tc] .tn-dk-c::before,
-	:root:not(#bot) [data-role^='omp.bot.avatar.'] > * {
+	:root:not(#bot) [data-role^='omp.bot.avatar.'] > [data-role] {
 		animation: none;
 		transition: none;
 	}
