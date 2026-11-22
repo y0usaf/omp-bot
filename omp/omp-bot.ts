@@ -233,7 +233,9 @@ class Bot {
 
 	unpublish() {
 		const dir = this.moodFile();
-		if (!this.live || !dir || this.published === undefined) return;
+		if (!this.live) return;
+		this.live = false;
+		if (!dir || this.published === undefined) return;
 		this.published = undefined;
 		try {
 			rmSync(`${dir}/mood`, { force: true });
@@ -276,7 +278,7 @@ class Bot {
 		this.spin = count % 4 === 3;
 		this.wake();
 		this.render();
-		this.after("boop", this.spin ? 1000 : 1200, () => {
+		this.after("boop", 1200, () => {
 			this.boop = undefined;
 			this.spin = false;
 			this.render();
