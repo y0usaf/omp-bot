@@ -6,7 +6,7 @@ import { Loader } from "@oh-my-pi/pi-tui/components/loader";
 import { col, elapsed, node, row, text } from "@oh-my-pi/pi-tui/native/describe";
 import { isNativeSettled, settleNative } from "@oh-my-pi/pi-tui/native/settle";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { chaoOf, drawChao, poseOf } from "./chao.ts";
+import { avatarOf, drawAvatar, poseOf } from "./avatar.ts";
 
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
@@ -156,7 +156,7 @@ function stepOf(event, captured) {
 class Bot {
 	constructor() {
 		this.name = process.env.OMP_BOT_NAME || "Pip";
-		this.look = chaoOf(this.name, process.env.OMP_BOT_TINT);
+		this.look = avatarOf(this.name, process.env.OMP_BOT_TINT);
 		this.tint = this.look.tint;
 		this.mood = "idle";
 		this.line = pick(IDLE, Date.now());
@@ -178,7 +178,7 @@ class Bot {
 
 	rename(name) {
 		this.name = name;
-		this.look = chaoOf(name, this.tint);
+		this.look = avatarOf(name, this.tint);
 	}
 
 	set(mood, line) {
@@ -250,8 +250,8 @@ class Bot {
 		return this.boop ? "boop" : this.typing && !this.active ? "listen" : this.mood;
 	}
 
-	chao() {
-		return drawChao(this.look, poseOf(this.face()));
+	avatar() {
+		return drawAvatar(this.look, poseOf(this.face()));
 	}
 }
 
@@ -276,7 +276,7 @@ class BotHero {
 		if (!b.hero) return col([], { role: "omp.bot.none" });
 		return col(
 			[
-				b.chao(),
+				b.avatar(),
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
@@ -312,7 +312,7 @@ class BotTop {
 		const b = this.bot;
 		return row(
 			[
-				b.chao(),
+				b.avatar(),
 				text(b.name, { role: "omp.bot.name", wrap: "none" }),
 				b.active
 					? row([text("Stop", { wrap: "none" }), node("kbd", { keys: ["escape"] })], {
@@ -352,7 +352,7 @@ class BotStatus {
 		const status = b.boop ?? b.line;
 		return row(
 			[
-				b.chao(),
+				b.avatar(),
 				busy
 					? node("shimmer", {
 							spans: [{ t: status, s: "muted" }],
@@ -461,7 +461,7 @@ class BotEvent {
 		this.block = block;
 		this.info = info;
 		this.bot = state.bot;
-		this.look = chaoOf(info.name);
+		this.look = avatarOf(info.name);
 		this.open = false;
 		this.node = undefined;
 		this.drawn = undefined;
@@ -510,7 +510,7 @@ class BotEvent {
 				row(
 					[
 						text(label, { role: "omp.bot.event.action", wrap: "none" }),
-						col([drawChao(this.look, poseOf("idle"))], { role: "omp.bot.event.avatar" }),
+						col([drawAvatar(this.look, poseOf("idle"))], { role: "omp.bot.event.avatar" }),
 						text(this.info.name, { role: "omp.bot.event.name", truncate: "end", shrink: 1 }),
 						text(this.open ? "⌃" : "›", { role: "omp.bot.event.more", wrap: "none" }),
 					],
