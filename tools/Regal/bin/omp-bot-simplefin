@@ -5,7 +5,7 @@
 # It never moves money: SimpleFIN is read-only, and this only ever POSTs the one-shot claim.
 set -euo pipefail
 usage='usage: omp-bot-simplefin fetch [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--force] | status
-  fetch   SIMPLEFIN=$SECRET_SIMPLEFIN omp-bot-simplefin fetch
+  fetch   secret run SIMPLEFIN -- omp-bot-simplefin fetch
           SIMPLEFIN is an access URL (https://user:pass@host/path) or a SimpleFIN Bridge setup token. A setup token
           is claimed first, once ever (never resent, whatever happened), and the access URL it returns is stored as
           the bot'"'"'s own secret SIMPLEFIN, which wins over a shared one from then on. Then GET /accounts with pending
@@ -24,7 +24,7 @@ now=$(date +%s)
 die() { echo "omp-bot-simplefin: $*" >&2; exit 1; }
 access='^https://[^/@[:space:]]+@[^[:space:]]+$'
 used() { [ -f "$dir/requests.log" ] && awk -v since=$((now - 86400)) '$1 > since' "$dir/requests.log" | wc -l || echo 0; }
-# A secret is stored for the bot this runs in (omp-secret --bot), or shared (your own omp chats) outside a bot.
+# A secret is stored for the bot this runs in (secret --bot), or shared (your own omp chats) outside a bot.
 scope() { if [ -n "${OMP_BOT_NAME:-}" ]; then printf '%s\n' --bot "$OMP_BOT_NAME"; else printf '%s\n' --user; fi; }
 # curl reads the URL and the credentials from stdin, so they never show in a process listing; only https is
 # allowed and certificates are always checked.
@@ -44,11 +44,11 @@ call() {
 
 # Claims setup token $1 and prints the access URL it returns, kept as the bot's own SIMPLEFIN. Runs under the lock.
 claim() {
-	command -v omp-secret >/dev/null || die "omp-secret is not on PATH, so the access URL could not be stored; nothing was claimed"
+	command -v secret >/dev/null || die "secret is not on PATH, so the access URL could not be stored; nothing was claimed"
 	local token=$1 hash url code=000 rc=0
 	hash=$(printf '%s' "$token" | sha256sum | cut -c1-16)
 	if [ -f "$dir/claims.log" ] && grep -q "^$hash " "$dir/claims.log"; then
-		die "SIMPLEFIN is a setup token that was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: ask y0usaf for a new setup token from SimpleFIN Bridge (forget SIMPLEFIN with the secret tool and request a new one, so the masked box opens in your chat) and, if the old one shows as claimed, to disable that connection."
+		die "SIMPLEFIN is a setup token that was already sent to its claim URL ($(grep "^$hash " "$dir/claims.log" | tail -n 1 | cut -d' ' -f2-)). A claim works once and is never retried: ask y0usaf for a new setup token from SimpleFIN Bridge (they run: secret forget SIMPLEFIN $(scope | paste -sd' '), then secret SIMPLEFIN $(scope | paste -sd' ')) and, if the old one shows as claimed, to disable that connection."
 	fi
 	url=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "SIMPLEFIN is neither an access URL (https://user:pass@…) nor a base64 setup token; nothing was claimed"
 	[[ $url == https://* ]] || die "SIMPLEFIN is neither an access URL nor a setup token that decodes to an https claim URL; nothing was claimed"
@@ -69,7 +69,7 @@ claim() {
 		printf '%s failed http %s %s\n' "$hash" "$code" "$(date -Is)" >>"$dir/claims.log"
 		die "the claim answered HTTP $code without an access URL. It is not retried: make a new setup token in SimpleFIN Bridge, and disable the old one if it shows as claimed."
 	fi
-	if ! tr -d '\n' <"$body" | omp-secret SIMPLEFIN $(scope) --ttl never >/dev/null 2>&1; then
+	if ! tr -d '\n' <"$body" | secret SIMPLEFIN $(scope) --ttl never >/dev/null 2>&1; then
 		printf '%s claimed-unsaved %s\n' "$hash" "$(date -Is)" >>"$dir/claims.log"
 		die "SimpleFIN gave an access URL but storing it as a secret failed, so it was discarded. Disable that connection in SimpleFIN Bridge and make a new setup token."
 	fi
@@ -90,7 +90,8 @@ fetch() {
 		*) die "$usage" ;;
 		esac
 	done
-	[ -n "${SIMPLEFIN:-}" ] || die "SIMPLEFIN is unset; run it as SIMPLEFIN=\$SECRET_SIMPLEFIN omp-bot-simplefin fetch"
+	SIMPLEFIN=${SECRET_SIMPLEFIN:-${SIMPLEFIN:-}}
+	[ -n "$SIMPLEFIN" ] || die "SIMPLEFIN is unset; run it as: secret run SIMPLEFIN -- omp-bot-simplefin fetch"
 	exec 9>"$dir/.lock"
 	flock 9
 	local secret base last
@@ -121,7 +122,7 @@ fetch() {
 	case $code in
 	200) ;;
 	402) rm -f "$out"; die "SimpleFIN answered 402 Payment required: the SimpleFIN Bridge subscription needs paying" ;;
-	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Ask y0usaf for a new setup token from SimpleFIN Bridge: forget SIMPLEFIN with the secret tool and request a new one, so the masked box opens in your chat" ;;
+	403) rm -f "$out"; die "SimpleFIN answered 403: access was revoked or the access URL is wrong. Ask y0usaf for a new setup token from SimpleFIN Bridge: they run: secret forget SIMPLEFIN $(scope | paste -sd' '), then secret SIMPLEFIN $(scope | paste -sd' ')" ;;
 	*) rm -f "$out"; die "SimpleFIN answered HTTP $code; the cache is unchanged" ;;
 	esac
 	jq -e '.accounts | arrays' "$out" >/dev/null 2>&1 || { rm -f "$out"; die "SimpleFIN's answer is not an account set; the cache is unchanged"; }

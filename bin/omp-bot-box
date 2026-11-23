@@ -75,7 +75,7 @@ while IFS= read -r folder; do
 done <<<"$folders"
 
 # The secrets shared with this bot reach it as a copy of the ones its roster entry allows, sealed with its own key.
-if command -v omp-secret >/dev/null && ! omp-secret sync --bot "$name" >&2; then
+if command -v secret >/dev/null && ! secret sync --bot "$name" >&2; then
 	echo "omp-bot-box: could not copy $name's allowed shared secrets into its store; it reads only its own" >&2
 fi
 
