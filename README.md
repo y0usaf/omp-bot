@@ -40,7 +40,7 @@ omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh
 | `name` | Letters, digits, space, `.`, `_`, `-`; up to 40 characters. |
 | `tint` | red, orange, yellow, green, teal, blue, purple or pink. |
 | `cwd` | Where the bot starts. `/move DIR` in the bot updates it. |
-| `persona` | Extra instructions: the bot's voice and lane. |
+| `persona` | The bot's voice and lane, for your reference. Not given to the model. |
 | `model` | Model for this bot (else `OMP_BOT_MODEL`, else omp's default). |
 | `extensions` | `true` loads the extensions your omp config lists. |
 | `memory` | `optchat` (default) or `none` for omp's own compaction. |
@@ -51,7 +51,7 @@ omp, jq and flock on `PATH`, and Tern for tabs. A boxed bot also needs bash, ssh
 | `avatar` | Shape and colour overriding the ones the name picks: `{"shape": "hex", "color": "violet"}`. |
 | | Shape and colour names are in `tern/avatars.json`. **Bots: Change avatar** in Tern's palette writes this field, a pick part at a time, with the bot redrawn straight away; its **From name** row deletes it. |
 
-A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. `bots/NAME/rules.md` holds standing rules given to the bot word for word; its `pin_rule` tool appends to it. `tools/NAME/bin/` goes on that bot's `PATH` only.
+A bot's own `bots/NAME/config.yml`, if present, is layered over `omp/demo.yml`. `bots/NAME/rules.md` holds standing rules. It is not given to the model, so a bot reads it itself. `tools/NAME/bin/` goes on that bot's `PATH` only.
 
 ## Environment
 
@@ -76,7 +76,7 @@ Boxed bots also read `OMP_BOT_BOX_SSH_CONFIG`, `OMP_BOT_BOX_STATUS`, `OMP_BOT_BO
 - **One process per bot.** `bots/NAME/lock` keeps a bot from running twice. A bot runs while its tab is open and stops when the tab closes.
 - **One conversation.** Each start resumes the bot's latest session, and `--restore` goes on with the helpers it was running: an interrupted helper finishes its job and its result arrives as the ordinary background-job result. The bot exits with code 76 to restart; finix's Agent Tabs plugin reopens it in the same tab.
 - **Helpers rarely die.** `omp/supervise.ts` records every helper under `bots/NAME/helpers/`. A helper that finished while the process was down or mid-turn, so its result was never delivered, is handed to the bot on the next start as a `<task-result recovered="restart">` notice; it is offered again on every start until an answered turn follows the notice, so a crash in between cannot strand the result.
-- **Memory.** The model never gets the whole transcript. It gets the pinned rules, an OptChat summary tree of the conversation, and the latest turns raw. `zoom`, `date` and `recent` read any part back, also for another bot's memory, read-only.
+- **Memory.** The model never gets the whole transcript. It gets an OptChat summary tree of the conversation and the latest turns raw. `zoom` reads any part back, also for another bot's memory, read-only.
 - **Done-checks.** A bot can add `check` to a helper it starts: a shell command the helper never sees. When the helper stops, `omp/done.ts` runs it in the bot's folder; while it exits non-zero the helper is told the output and carries on, up to `OMP_BOT_CHECK_ROUNDS` rounds. Check results are hidden from the chat: a pass reaches the bot's next turn and `bots/NAME/done.log` without waking it, and a check that fails every round starts the bot's turn with the full report.
 - **Bots message each other.** `message_bot` (`omp/mail.ts`) sends another bot a message by name. The bot writes it to its own `bots/NAME/outbox/TO/`, the only folder a boxed bot can reach, and its launcher on the host moves it to `bots/TO/inbox/NAME/` once a second, so the sender's name is the launcher's word, not the message's. The recipient takes the oldest one only when idle, keeps it in `bots/TO/mail.json` until that turn ends (a restart hands it over again), and gets it as a turn of its own, framed as a colleague's request that grants none of the user's permission; its final reply goes back the same way and reaches the sender as a turn. Both chats show it as a "Message from" or "Reply from" row with the other bot's body, never as something the user typed. Each message counts one more than the one whose turn sent it, and an exchange stops at 4: a bot can't send past that and is told to tell the user instead.
 - **Avatar.** Each bot looks and moves like an agent in Grok Bot. Without an `avatar` the name picks its shape and colour the way Grok Bot hashes an agent id (`"identity": "tint"` in `tern/avatars.json` takes the colour from the tint instead). The motion in `tern/marks/` was measured from Grok Bot's own renders: one flipbook per clip, bridge and morph for each shape, drawn in black and inked by Tern with a drop shadow. `omp/marks.ts` maps the turn (thinking, working, writing, searching, waiting, streaming, blocked on a question, finished or failed) to the program Grok Bot would play, picks working and streaming clips with its shuffle, and writes `bots/NAME/mark.css`; the tab and the working row play it, at rest when idle. The header and messages show the still, the hero the rest pose. Clicking the working row spins, bounces or nods the bot while it rests. `/bot` toggles bot mode, `/bot name NAME` renames it.
