@@ -19,18 +19,21 @@ const at = (n: string) => {
 	return join(home, n);
 };
 const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
-const alive = (pid: number) => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
+const boot = () => read("/proc/sys/kernel/random/boot_id");
+const started = (pid: number) => {
+	const stat = read(`/proc/${pid}/stat`);
+	return stat ? stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] : "";
+};
+const identity = (pid: number) => `${pid} ${boot()} ${started(pid)}`;
+const live = (h: string) => {
+	const [pid, id, start] = read(join(h, "pid")).split(" ");
+	const n = Number(pid);
+	return Number.isInteger(n) && n > 0 && !!id && id === boot() && !!start && start === started(n) ? n : 0;
 };
 const state = (h: string) => {
 	const rc = read(join(h, "rc"));
 	if (rc) return rc === "0" ? "done" : rc === "killed" ? "stopped by kill" : rc === "lost" ? "lost (killed by a reboot or crash before it finished)" : `failed (exit ${rc})`;
-	return alive(Number(read(join(h, "pid")))) ? "running" : "lost (no exit recorded; killed by a reboot or crash)";
+	return live(h) ? "running" : "lost (no exit recorded; killed by a reboot or crash)";
 };
 
 function report(h: string) {
@@ -43,14 +46,14 @@ function report(h: string) {
 if (cmd === "start") {
 	if (!name) fail(usage);
 	const h = at(name);
-	if (existsSync(join(h, "pid")) && state(h) === "running") fail(`${name} is already running`);
+	if (live(h)) fail(`${name} is already running`);
 	const task = (words.length ? words.join(" ") : await Bun.stdin.text()).trim() || fail("the task is empty");
 	mkdirSync(h, { recursive: true });
-	for (const f of ["rc", "out", "err"]) writeFileSync(join(h, f), "");
+	for (const f of ["rc", "out", "err", "pid"]) writeFileSync(join(h, f), "");
 	writeFileSync(join(h, "task"), task);
 	const script = 'omp -p "$(cat "$2/task")" >"$2/out" 2>"$2/err"; echo $? >"$2/rc"; exec "$0" report "$1"';
 	const child = spawn("sh", ["-c", script, process.argv[1], name, h], { cwd: process.cwd(), detached: true, stdio: ["ignore", openSync(join(h, "log"), "a"), openSync(join(h, "log"), "a")] });
-	writeFileSync(join(h, "pid"), String(child.pid));
+	writeFileSync(join(h, "pid"), child.pid ? identity(child.pid) : "");
 	writeFileSync(join(h, "cwd"), process.cwd());
 	child.unref();
 	console.log(`Started ${name} (pid ${child.pid}). Its result arrives as a note to yourself; end this turn instead of waiting.`);
@@ -59,7 +62,7 @@ if (cmd === "start") {
 } else if (cmd === "reap") {
 	for (const n of existsSync(home) ? readdirSync(home) : []) {
 		const h = join(home, n);
-		if (!read(join(h, "rc")) && !alive(Number(read(join(h, "pid"))))) {
+		if (!read(join(h, "rc")) && !live(h)) {
 			writeFileSync(join(h, "rc"), "lost");
 			report(h);
 		}
@@ -74,11 +77,10 @@ if (cmd === "start") {
 } else if (cmd === "kill") {
 	if (!name) fail(usage);
 	const h = at(name);
-	if (state(h) !== "running") fail(`${name} is not running`);
-	const pid = Number(read(join(h, "pid")));
+	const pid = live(h) || fail(`${name} is not running`);
 	process.kill(-pid, "SIGTERM");
-	for (let i = 0; i < 50 && alive(pid); i++) await Bun.sleep(100);
-	if (alive(pid)) process.kill(-pid, "SIGKILL");
+	for (let i = 0; i < 50 && live(h); i++) await Bun.sleep(100);
+	if (live(h)) process.kill(-pid, "SIGKILL");
 	if (!read(join(h, "rc"))) {
 		writeFileSync(join(h, "rc"), "killed");
 		report(h);
