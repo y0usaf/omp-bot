@@ -85,6 +85,7 @@ post() {
 		done
 	done
 }
+"$root/bin/omp-bot-helper" reap || true
 post &
 mailer=$!
 trap 'kill "$mailer" 2>/dev/null' EXIT

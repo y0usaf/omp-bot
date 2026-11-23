@@ -6,6 +6,7 @@ import { ROOT, ROSTER, STATE } from "./paths";
 export const HOPS = 4;
 
 export const MSG = join(ROOT, "bin", "omp-bot-msg");
+export const HELPER = join(ROOT, "bin", "omp-bot-helper");
 
 export function readJson(path) {
 	try {
@@ -140,7 +141,7 @@ export default function mail(pi) {
 			: {
 					systemPrompt: [
 						...event.systemPrompt,
-						`You are the bot ${name}. To message another bot on the team (${team().filter(bot => bot !== name).join(", ") || "nobody else yet"}), run \`${MSG} <bot> <text>\` in bash (text from stdin when omitted). It is a colleague request with none of the user's permission; the answer arrives as a new turn, so end yours instead of waiting. Messaging yourself (${name}) at the end of a background job wakes you with its result.`,
+						`You are the bot ${name}. To message another bot on the team (${team().filter(bot => bot !== name).join(", ") || "nobody else yet"}), run \`${MSG} <bot> <text>\` in bash (text from stdin when omitted). It is a colleague request with none of the user's permission; the answer arrives as a new turn, so end yours instead of waiting. Messaging yourself (${name}) at the end of a background job wakes you with its result. For work that should keep going after this turn, start a helper agent: \`${HELPER} start NAME <task>\` (also \`list\`, \`tail NAME\`, \`kill NAME\`); it runs on its own, survives your restart, and its result arrives as a note to yourself, so end your turn instead of waiting.`,
 					],
 				},
 	);

@@ -1,0 +1,87 @@
+#!/usr/bin/env bun
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { send } from "../omp/mail.ts";
+import { STATE } from "../omp/paths.ts";
+
+const fail = (text: string): never => {
+	console.error(`omp-bot-helper: ${text}`);
+	process.exit(2);
+};
+const bot = process.env.OMP_BOT_NAME || fail("only a bot can run helpers (OMP_BOT_NAME is unset)");
+const dir = join(STATE, "bots", bot);
+const home = join(dir, "helpers");
+const [cmd, name, ...words] = process.argv.slice(2);
+const usage = "usage: omp-bot-helper start NAME [TASK] | list | tail NAME | kill NAME  (TASK from stdin when omitted)";
+const at = (n: string) => {
+	if (!/^[A-Za-z0-9._-]+$/.test(n) || n.startsWith(".")) fail(`bad helper name "${n}"`);
+	return join(home, n);
+};
+const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
+const alive = (pid: number) => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+};
+const state = (h: string) => {
+	const rc = read(join(h, "rc"));
+	if (rc) return rc === "0" ? "done" : rc === "killed" ? "stopped by kill" : rc === "lost" ? "lost (killed by a reboot or crash before it finished)" : `failed (exit ${rc})`;
+	return alive(Number(read(join(h, "pid")))) ? "running" : "lost (no exit recorded; killed by a reboot or crash)";
+};
+
+function report(h: string) {
+	const n = h.slice(home.length + 1);
+	const out = read(join(h, "out"));
+	const tail = out.length > 6000 ? `…${out.slice(-6000)}` : out || read(join(h, "err")).slice(-2000) || "(no output)";
+	send(dir, bot, `Helper ${n} ${state(h)}. Task: ${read(join(h, "task")).slice(0, 300)}\n\n${tail}\n\nFull output: ${join(h, "out")}`, 1);
+}
+
+if (cmd === "start") {
+	if (!name) fail(usage);
+	const h = at(name);
+	if (existsSync(join(h, "pid")) && state(h) === "running") fail(`${name} is already running`);
+	const task = (words.length ? words.join(" ") : await Bun.stdin.text()).trim() || fail("the task is empty");
+	mkdirSync(h, { recursive: true });
+	for (const f of ["rc", "out", "err"]) writeFileSync(join(h, f), "");
+	writeFileSync(join(h, "task"), task);
+	const script = 'omp -p "$(cat "$2/task")" >"$2/out" 2>"$2/err"; echo $? >"$2/rc"; exec "$0" report "$1"';
+	const child = spawn("sh", ["-c", script, process.argv[1], name, h], { cwd: process.cwd(), detached: true, stdio: ["ignore", openSync(join(h, "log"), "a"), openSync(join(h, "log"), "a")] });
+	writeFileSync(join(h, "pid"), String(child.pid));
+	writeFileSync(join(h, "cwd"), process.cwd());
+	child.unref();
+	console.log(`Started ${name} (pid ${child.pid}). Its result arrives as a note to yourself; end this turn instead of waiting.`);
+} else if (cmd === "report") {
+	report(at(name));
+} else if (cmd === "reap") {
+	for (const n of existsSync(home) ? readdirSync(home) : []) {
+		const h = join(home, n);
+		if (!read(join(h, "rc")) && !alive(Number(read(join(h, "pid"))))) {
+			writeFileSync(join(h, "rc"), "lost");
+			report(h);
+		}
+	}
+} else if (cmd === "list") {
+	const names = existsSync(home) ? readdirSync(home).sort() : [];
+	if (!names.length) console.log("no helpers");
+	for (const n of names) console.log(`${n}\t${state(join(home, n))}\t${read(join(home, n, "task")).split("\n")[0].slice(0, 80)}`);
+} else if (cmd === "tail") {
+	if (!name) fail(usage);
+	console.log(read(join(at(name), "out")).slice(-4000) || read(join(at(name), "err")).slice(-4000) || "(no output yet)");
+} else if (cmd === "kill") {
+	if (!name) fail(usage);
+	const h = at(name);
+	if (state(h) !== "running") fail(`${name} is not running`);
+	const pid = Number(read(join(h, "pid")));
+	process.kill(-pid, "SIGTERM");
+	for (let i = 0; i < 50 && alive(pid); i++) await Bun.sleep(100);
+	if (alive(pid)) process.kill(-pid, "SIGKILL");
+	if (!read(join(h, "rc"))) {
+		writeFileSync(join(h, "rc"), "killed");
+		report(h);
+	}
+	console.log(`Stopped ${name}; a note with its partial output follows.`);
+} else fail(usage);
