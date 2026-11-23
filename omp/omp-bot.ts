@@ -13,7 +13,6 @@ import { Mark } from "./marks.ts";
 const PATCHED = Symbol.for("omp-bot.transcript");
 const HUD_PATCHED = Symbol.for("omp-bot.hud");
 const NONE = col([], { role: "omp.bot.none" });
-const BOOPS = ["boop.", "hey!", "hehe", "…again?"];
 const NAP_MS = Number(process.env.OMP_BOT_NAP_MS) || 45000;
 const HISTORY_CHUNK = 40;
 const IDLE = ["Ready when you are.", "What are we building?", "Standing by.", "Ask me anything."];
@@ -196,10 +195,8 @@ class Bot {
 		this.intents = new Map();
 		this.tui = undefined;
 		this.clock = undefined;
-		this.boop = undefined;
 		this.published = undefined;
 		this.live = false;
-		this.boops = 0;
 		this.moodAt = 0;
 		this.awake = ["idle", this.line];
 		this.timers = {};
@@ -312,15 +309,9 @@ class Bot {
 	}
 
 	poke() {
-		const count = this.boops++;
-		this.boop = BOOPS[count % BOOPS.length];
 		this.wake();
 		this.publish(true);
 		this.render();
-		this.after("boop", 1200, () => {
-			this.boop = undefined;
-			this.render();
-		});
 		if (!this.active) this.nap();
 	}
 
@@ -339,7 +330,7 @@ class BotHero {
 
 	render(width) {
 		const b = this.bot;
-		return [truncateToWidth(replaceTabs(` ◉ ${b.name} · ${b.boop ?? b.line}`), width)];
+		return [truncateToWidth(replaceTabs(` ◉ ${b.name} · ${b.line}`), width)];
 	}
 
 	describe() {
@@ -351,7 +342,7 @@ class BotHero {
 				col(
 					[
 						text(`Hi, I'm ${b.name}.`, { role: "omp.bot.hello", wrap: "none" }),
-						text(b.boop ?? b.line, { role: "omp.bot.say", wrap: "none" }),
+						text(b.line, { role: "omp.bot.say", wrap: "none" }),
 					],
 					{ role: "omp.bot.words", align: "center", gap: "xs" },
 				),
@@ -418,8 +409,8 @@ class BotStatus {
 		const b = this.bot;
 		const failed = !b.active && b.mood === "error";
 		const asking = b.active && b.mood === "blocked" && b.running.size > 0;
-		const busy = b.active && !b.boop && !asking && !failed;
-		const status = b.boop ?? b.line;
+		const busy = b.active && !asking && !failed;
+		const status = b.line;
 		return row(
 			[
 				drawAvatar("live", b.id()),
