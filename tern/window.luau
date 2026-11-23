@@ -121,43 +121,66 @@ local function roster(): { Bot }
 	return tern.json.decode(tern.fs.read(tern.fs.exists(ROSTER) and ROSTER or ROOT .. "/bots.json"))
 end
 
-local SAND_ACCENTS: { [string]: { light: string, dark: string } } = {
-	blue = { light = "#126fd4", dark = "#116dd2" },
-	red = { light = "#c82532", dark = "#cf2b35" },
-	orange = { light = "#d2550a", dark = "#cd5309" },
-	yellow = { light = "#c2730b", dark = "#c8770c" },
-	green = { light = "#0d9655", dark = "#0e9f5a" },
-	cyan = { light = "#0d9381", dark = "#0e9886" },
-	teal = { light = "#0d9381", dark = "#0e9886" },
-	purple = { light = "#7442d1", dark = "#7845d7" },
-	magenta = { light = "#c82779", dark = "#cf297e" },
-	pink = { light = "#c82779", dark = "#cf297e" },
-	brown = { light = "#86592e", dark = "#8c5d31" },
+local HUES: { [string]: { bubble: { string }, primary: { string }, hover: { string }, text: { string } } } = {
+	brown = { bubble = { "#86592e", "#8c5d31" }, primary = { "#9d6937", "#8c5d31" }, hover = { "#86592e", "#aa723d" }, text = { "#996b42", "#c59e7d" } },
+	red = { bubble = { "#c82532", "#cf2b35" }, primary = { "#e72e3b", "#cf2b35" }, hover = { "#c82532", "#f73643" }, text = { "#cd2834", "#ff6463" } },
+	orange = { bubble = { "#d2550a", "#cd5309" }, primary = { "#ee620d", "#cd5309" }, hover = { "#d2550a", "#f4650e" }, text = { "#c14c00", "#fe6600" } },
+	yellow = { bubble = { "#c2730b", "#c8770c" }, primary = { "#da830e", "#c8770c" }, hover = { "#c2730b", "#ea8c10" }, text = { "#aa6300", "#e28600" } },
+	green = { bubble = { "#0d9655", "#0e9f5a" }, primary = { "#10ab61", "#0e9f5a" }, hover = { "#0d9655", "#13bb6b" }, text = { "#00854a", "#00ba69" } },
+	cyan = { bubble = { "#0d9381", "#0e9886" }, primary = { "#10a693", "#0e9886" }, hover = { "#0d9381", "#12b39f" }, text = { "#008273", "#00b7a2" } },
+	blue = { bubble = { "#126fd4", "#116dd2" }, primary = { "#1680f3", "#116dd2" }, hover = { "#126fd4", "#1784fb" }, text = { "#0b6dd3", "#4d9bff" } },
+	violet = { bubble = { "#7442d1", "#7845d7" }, primary = { "#8351e4", "#7845d7" }, hover = { "#7442d1", "#8e59f8" }, text = { "#7547d0", "#a582ff" } },
+	magenta = { bubble = { "#c82779", "#cf297e" }, primary = { "#e52f8b", "#cf297e" }, hover = { "#c82779", "#f63397" }, text = { "#c62378", "#ff55a4" } },
+}
+local NEUTRAL = {
+	bubble = { "#1c1c1c", "#f5f5f52e" },
+	ink = { "#ffffff", "#f5f5f5" },
+	cta = { "#1c1c1c", "#f5f5f5" },
+	cta_ink = { "#fcfcfc", "#121212" },
 }
 
-local function accent_vars(tint: string?): string?
-	local pair = tint and SAND_ACCENTS[tint] or nil
-	if not pair then
+local function pair(p: { string }): string
+	return "light-dark(" .. p[1] .. ", " .. p[2] .. ")"
+end
+
+local function accent_vars(color: string?): string?
+	if not color then
 		return nil
 	end
-	local val = "light-dark(" .. pair.light .. ", " .. pair.dark .. ")"
-	return "--sand-fill-bubble-user: " .. val
-		.. "; --sand-accent: " .. val
-		.. "; --sand-prompt-cta-fill: " .. val
-		.. "; --sand-focus: " .. val .. ";"
+	local hue = HUES[color]
+	if not hue then
+		return "--sand-fill-bubble-user: " .. pair(NEUTRAL.bubble)
+			.. "; --sand-transcript-bubble-user-text: " .. pair(NEUTRAL.ink)
+			.. "; --sand-prompt-cta-fill: " .. pair(NEUTRAL.cta)
+			.. "; --sand-prompt-cta-text: " .. pair(NEUTRAL.cta_ink) .. ";"
+	end
+	return "--sand-fill-bubble-user: " .. pair(hue.bubble)
+		.. "; --sand-transcript-bubble-user-text: light-dark(#ffffff, #f5f5f5)"
+		.. "; --sand-accent: " .. pair(hue.bubble)
+		.. "; --sand-bg-accent-primary: " .. pair(hue.primary)
+		.. "; --sand-bg-accent-primary-hover: " .. pair(hue.hover)
+		.. "; --sand-text-accent-primary: " .. pair(hue.text)
+		.. "; --sand-prompt-cta-fill: " .. pair(hue.primary)
+		.. "; --sand-prompt-cta-text: light-dark(#ffffff, #f5f5f5)"
+		.. "; --sand-focus: " .. pair(hue.bubble) .. ";"
 end
 local current: { Bot } = {}
 local banners: { [string]: { number } } = {}
 local installed: { [string]: string } = {}
 local faces = ""
 
-local function live_targets(bot: Bot): string
+local function tab_of(bot: Bot): string
 	local tab = "#tabbar .tt" .. (bot.tint and ("[data-tc='" .. bot.tint .. "']") or "[data-tc]") .. ":is([title*='" .. bot.name .. "  '], [title*='" .. bot.name .. "\\A '])"
 	for _, other in ipairs(current) do
 		if other.name ~= bot.name and (other.name:sub(-#bot.name) == bot.name or other.name:find(bot.name .. "  ", 1, true)) then
 			tab ..= ":not([title*='" .. other.name .. "  ']):not([title*='" .. other.name .. "\\A '])"
 		end
 	end
+	return tab
+end
+
+local function live_targets(bot: Bot): string
+	local tab = tab_of(bot)
 	local parts = {
 		tab .. " .tn-dk-c",
 		"[data-role='omp.bot.mark.live/" .. bot.name .. "']",
@@ -187,21 +210,11 @@ local function show_avatars(bots: { Bot })
 		rules[#rules + 1] = root .. ":is([data-role^='omp.bot.mark.still/'], [data-role^='omp.bot.mark.event/']) { background-image: " .. face(nobody, theme) .. "; }"
 		rules[#rules + 1] = root .. "[data-role^='omp.bot.mark.hero/']::before { background-image: " .. hero(nobody, theme) .. "; }"
 	end
-	local tints: { [string]: number } = {}
-	local tint_order: { string } = {}
 	for _, bot in ipairs(bots) do
-		if bot.tint then
-			if not tints[bot.tint] then
-				tint_order[#tint_order + 1] = bot.tint
-			end
-			tints[bot.tint] = (tints[bot.tint] or 0) + 1
-		end
-	end
-	for _, tint in ipairs(tint_order) do
-		local vars = accent_vars(tint)
+		local vars = accent_vars(look(bot).color)
 		if vars then
-			local own = "[data-role='omp.bot.top." .. tint .. "'], [data-role='omp.bot.chat." .. tint .. "'], [data-role='omp.bot.hero." .. tint .. "']"
-			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), #tabbar .tt[data-tc='" .. tint .. "']) { " .. vars .. " }"
+			local own = "[data-role='omp.bot.mark.still/" .. bot.name .. "'], [data-role='omp.bot.mark.hero/" .. bot.name .. "'], [data-role='omp.bot.mark.live/" .. bot.name .. "']"
+			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), " .. tab_of(bot) .. ") { " .. vars .. " }"
 		end
 	end
 	for _, bot in ipairs(bots) do
@@ -314,7 +327,7 @@ local function show_faces(cx: WindowCx?)
 			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::before, :root:not(#bot):not(#mk) " .. selector .. "::after { content: ''; position: absolute; left: -1000px; top: 0; width: 1em; height: 1em; font-size: 72px; background-repeat: no-repeat; background-size: 1em 1em; background-position: 0 0; filter: drop-shadow(1000px 0 0 var(--mk-ink, transparent)); pointer-events: none; }"
 			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::before { display: block; }"
 			rules[#rules + 1] = ":root:not(#bot):not(#mk) " .. selector .. "::after { display: none; }"
-			local vars = accent_vars(bot.tint)
+			local vars = accent_vars(got.color)
 			if vars then
 				rules[#rules + 1] = ":root:not(#bot) .tn-pane[data-pane='" .. pane.pane .. "'] { " .. vars .. " }"
 			end

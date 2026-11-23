@@ -32,11 +32,12 @@ const DOING = {
 	edit: "Jotting it down",
 	write: "Jotting it down",
 	ast_edit: "Jotting it down",
-	web_search: "Doing some reading",
+	web_search: "Digging around",
 	web_fetch: "Doing some reading",
 	fetch: "Doing some reading",
 	browser: "Clicking through pages",
-	task: "Checking with helpers",
+	message_helper: "Checking with another Bot",
+	mail: "Checking with another Bot",
 	wait: "Waiting on results",
 	ask: "Needs your input",
 };
@@ -974,7 +975,7 @@ export default function ompBot(pi) {
 		}
 		if (!bot.active || bot.running.size > 0) return;
 		const kind = ae?.type;
-		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Writing it up");
+		if (kind === "text_delta" || kind === "text_start") bot.set("talking", "Typing…");
 		else if (kind === "thinking_delta" || kind === "thinking_start") bot.set("thinking", bot.mood === "thinking" ? bot.line : pick(THINKING, Date.now()));
 	});
 
