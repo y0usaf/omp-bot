@@ -11,7 +11,7 @@ const fail = (text: string): never => {
 };
 const bot = process.env.OMP_BOT_NAME || fail("only a bot can run helpers (OMP_BOT_NAME is unset)");
 const dir = join(STATE, "bots", bot);
-const home = join(dir, "helpers");
+const home = join(dir, "helper-jobs");
 const [cmd, name, ...words] = process.argv.slice(2);
 const usage = "usage: omp-bot-helper start NAME [TASK] | list | tail NAME | kill NAME  (TASK from stdin when omitted)";
 const at = (n: string) => {
@@ -25,6 +25,7 @@ const started = (pid: number) => {
 	return stat ? stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] : "";
 };
 const identity = (pid: number) => `${pid} ${boot()} ${started(pid)}`;
+const jobs = () => (existsSync(home) ? readdirSync(home, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []);
 const live = (h: string) => {
 	const [pid, id, start] = read(join(h, "pid")).split(" ");
 	const n = Number(pid);
@@ -60,7 +61,7 @@ if (cmd === "start") {
 } else if (cmd === "report") {
 	report(at(name));
 } else if (cmd === "reap") {
-	for (const n of existsSync(home) ? readdirSync(home) : []) {
+	for (const n of jobs()) {
 		const h = join(home, n);
 		if (!read(join(h, "rc")) && !live(h)) {
 			writeFileSync(join(h, "rc"), "lost");
@@ -68,7 +69,7 @@ if (cmd === "start") {
 		}
 	}
 } else if (cmd === "list") {
-	const names = existsSync(home) ? readdirSync(home).sort() : [];
+	const names = jobs();
 	if (!names.length) console.log("no helpers");
 	for (const n of names) console.log(`${n}\t${state(join(home, n))}\t${read(join(home, n, "task")).split("\n")[0].slice(0, 80)}`);
 } else if (cmd === "tail") {
