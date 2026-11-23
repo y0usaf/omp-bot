@@ -47,6 +47,7 @@ if bot=$(jq -ce --arg n "$name" '.[] | select(.name == $n)' "$state/bots.json");
 		mv -f "$tmp" "$state/bots.json"
 	) 9>"$state/bots.lock"
 	[ "$(printf '%s' "$bot" | jq -r '.box // false')" != true ] || ungrant "$(printf '%s\n' "$dir"; printf '%s' "$bot" | persisted)"
+	for job in "$dir"/helper-jobs/*/; do [ -d "$job" ] && OMP_BOT_NAME=$name OMP_BOT_STATE=$state "$root/bin/omp-bot-helper" kill "$(basename "$job")" >/dev/null 2>&1 || true; done
 	archive=$state/archive/$name-$(date +%Y%m%d-%H%M%S)
 	mkdir -p "$state/archive"
 	if [ -d "$dir" ]; then mv "$dir" "$archive"; else mkdir "$archive"; fi
