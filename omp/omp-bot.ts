@@ -500,6 +500,12 @@ class Marked {
 	}
 }
 
+function hidden(item) {
+	if (item instanceof BotReply) return !item.shows();
+	const node = item.describe?.(lastCx);
+	return !!node && (node.p?.hidden === true || (node.k === "col" && (node.c?.length ?? 0) === 0));
+}
+
 function headText(block) {
 	return (block?.p?.head ?? []).map(part => part?.t ?? "").join("").trim();
 }
@@ -813,7 +819,9 @@ function patchTranscript(state) {
 			if (!item) continue;
 			const visible = item instanceof BotReply ? item.shows() : item instanceof Marked || item instanceof BotEvent || item instanceof BotAnswer;
 			if (!visible) {
+				if (hidden(item)) continue;
 				shownBlocks.push(item);
+				previous = item;
 				continue;
 			}
 			const ts = stamp(item);
