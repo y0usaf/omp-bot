@@ -154,7 +154,7 @@ export function announceDone(pi, done, ctx) {
 	const payload = {
 		customType: done.type ?? "done-check",
 		content: content.join("\n\n"),
-		display: true,
+		display: done.type === "work",
 		attribution: "agent",
 		details: { passed: true, ask },
 	};

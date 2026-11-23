@@ -93,7 +93,7 @@ export default function (pi) {
 	const fail = (id, text) => {
 		const report = lastWords(id);
 		pi.sendMessage(
-			{ customType: "done-check", content: report ? `${text}\n\nHelper's last word: ${report}` : text, display: true, attribution: "agent" },
+			{ customType: "done-check", content: report ? `${text}\n\nHelper's last word: ${report}` : text, display: false },
 			{ deliverAs: "followUp", triggerTurn: true },
 		);
 		forget(id);
