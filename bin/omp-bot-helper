@@ -52,7 +52,7 @@ if (cmd === "start") {
 	mkdirSync(h, { recursive: true });
 	for (const f of ["pid", "rc", "out", "err"]) writeFileSync(join(h, f), "");
 	writeFileSync(join(h, "task"), task);
-	const script = 'env -u OMP_BOT_MEMORY -u OPTCHAT_DIR -u OPTCHAT_BOT -u OPTCHAT_BOTS omp ${OMP_BOT_HELPER_MODEL:+--model "$OMP_BOT_HELPER_MODEL"} -p "$(cat "$2/task")" >"$2/out" 2>"$2/err"; echo $? >"$2/rc"; exec "$0" report "$1"';
+	const script = 'env -u OMP_BOT_MEMORY -u OPTCHAT_DIR -u OPTCHAT_BOT -u OPTCHAT_BOTS omp ${OMP_BOT_HELPER_MODEL:+--model "$OMP_BOT_HELPER_MODEL"} $( [ -f "${OMP_BOT_HELPER_CONFIG:-}" ] && printf %s "--config=$OMP_BOT_HELPER_CONFIG") -p "$(cat "$2/task")" >"$2/out" 2>"$2/err"; echo $? >"$2/rc"; exec "$0" report "$1"';
 	const child = spawn("sh", ["-c", script, process.argv[1], name, h], { cwd: process.cwd(), detached: true, stdio: ["ignore", openSync(join(h, "log"), "a"), openSync(join(h, "log"), "a")] });
 	writeFileSync(join(h, "pid"), child.pid ? identity(child.pid) : "");
 	writeFileSync(join(h, "cwd"), process.cwd());
