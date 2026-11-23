@@ -1,0 +1,22 @@
+#!/usr/bin/env bun
+import { join } from "node:path";
+import { HOPS, readJson, send, team } from "../omp/mail.ts";
+import { STATE } from "../omp/paths.ts";
+
+const fail = (text: string): never => {
+	console.error(`omp-bot-msg: ${text}`);
+	process.exit(2);
+};
+const name = process.env.OMP_BOT_NAME;
+if (!name) fail("only a bot can send bot messages (OMP_BOT_NAME is unset)");
+const [to, ...words] = process.argv.slice(2);
+if (!to) fail("usage: omp-bot-msg BOT [TEXT]  (TEXT from stdin when omitted)");
+const bots = team().filter((bot: string) => bot !== name);
+if (!bots.includes(to)) fail(`no other bot is named "${to}". The team: ${bots.join(", ") || "nobody else"}.`);
+const text = (words.length ? words.join(" ") : await Bun.stdin.text()).trim();
+if (!text) fail("the message is empty");
+const dir = join(STATE, "bots", name as string);
+const hop = (Number(readJson(join(dir, "mail.json"))?.hop) || 0) + 1;
+if (hop > HOPS) fail(`this exchange has reached its limit of ${HOPS} messages, so nothing was sent. Tell the user instead.`);
+send(dir, to, text, hop);
+console.log(`Sent to ${to}. Its answer arrives as a new turn; end this one instead of waiting.`);
