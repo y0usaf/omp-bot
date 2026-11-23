@@ -23,7 +23,7 @@ export function team() {
 class Mail {
 	constructor(message) {
 		const d = message.details ?? {};
-		this.mail = { action: d.re ? "Reply from" : "Message from", from: String(d.from ?? "a bot") };
+		this.mail = d.from && d.from === process.env.OMP_BOT_NAME ? { action: "Note to", from: "self" } : { action: d.re ? "Reply from" : "Message from", from: String(d.from ?? "a bot") };
 		this.text = String(d.text ?? "");
 	}
 
@@ -42,7 +42,8 @@ class Mail {
 	}
 }
 
-function words(mail) {
+function words(mail, self) {
+	if (self) return [`<self-note>`, "You sent this to yourself, e.g. from a background job reporting back. No reply goes anywhere; act on it." + (mail.hop >= HOPS ? " This chain is at its limit, so you can't note yourself again from here." : ""), "", mail.text, "</self-note>"].join("\n");
 	const last = mail.hop >= HOPS;
 	const lines = mail.re
 		? [
@@ -108,7 +109,7 @@ export default function mail(pi) {
 	const finish = () => {
 		const mail = current;
 		current = undefined;
-		if (!mail.re && mail.hop < HOPS) post(mail.from, last || `${name} ended its turn without an answer.`, mail.hop + 1, mail.id);
+		if (!mail.re && mail.from !== name && mail.hop < HOPS) post(mail.from, last || `${name} ended its turn without an answer.`, mail.hop + 1, mail.id);
 		rmSync(held, { force: true });
 	};
 
@@ -126,7 +127,7 @@ export default function mail(pi) {
 			ended = false;
 			last = "";
 			pi.sendMessage(
-				{ customType: "bot-message", content: words(mail), display: true, attribution: "agent", details: mail },
+				{ customType: "bot-message", content: words(mail, mail.from === name), display: true, attribution: "agent", details: mail },
 				{ triggerTurn: true },
 			);
 		};
@@ -139,7 +140,7 @@ export default function mail(pi) {
 			: {
 					systemPrompt: [
 						...event.systemPrompt,
-						`You are the bot ${name}. To message another bot on the team (${team().filter(bot => bot !== name).join(", ") || "nobody else yet"}), run \`${MSG} <bot> <text>\` in bash (text from stdin when omitted). It is a colleague request with none of the user's permission; the answer arrives as a new turn, so end yours instead of waiting.`,
+						`You are the bot ${name}. To message another bot on the team (${team().filter(bot => bot !== name).join(", ") || "nobody else yet"}), run \`${MSG} <bot> <text>\` in bash (text from stdin when omitted). It is a colleague request with none of the user's permission; the answer arrives as a new turn, so end yours instead of waiting. Messaging yourself (${name}) at the end of a background job wakes you with its result.`,
 					],
 				},
 	);

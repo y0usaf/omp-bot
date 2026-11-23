@@ -73,7 +73,14 @@ post() {
 			[ -e "$1" ] || continue
 			to=${out%/}
 			to=${to##*/}
-			jq -e --arg n "$to" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null || continue
+			if jq -e --arg n "$to" 'any(.[]; .name == $n)' "$state/bots.json" >/dev/null; then
+				:
+			else
+				[ $? -eq 1 ] || continue
+				echo "omp-bot: dropped $# message(s) to unknown bot $to" >&2
+				rm -f "$@"
+				continue
+			fi
 			mkdir -p "$state/bots/$to/inbox/$name" && mv -f "$@" "$state/bots/$to/inbox/$name/" || true
 		done
 	done
