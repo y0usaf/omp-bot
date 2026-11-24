@@ -213,7 +213,8 @@ local function show_avatars(bots: { Bot })
 	for _, bot in ipairs(bots) do
 		local vars = accent_vars(look(bot).color)
 		if vars then
-			local own = "[data-role='omp.bot.mark.still/" .. bot.name .. "'], [data-role='omp.bot.mark.hero/" .. bot.name .. "'], [data-role='omp.bot.mark.live/" .. bot.name .. "']"
+			local own = "[data-role='omp.bot.mark.still/" .. bot.name .. "'], [data-role='omp.bot.mark.hero/" .. bot.name .. "'], [data-role='omp.bot.mark.live/" .. bot.name .. "'], [data-role='omp.bot.dock/" .. bot.name .. "']"
+			rules[#rules + 1] = ":root:not(#bot):where(:has(" .. tab_of(bot) .. ".on)) .tn-pane { " .. vars .. " }"
 			rules[#rules + 1] = ":root:not(#bot) :is(.sf-chat-reader:has(" .. own .. "), .tn-pane:has(" .. own .. "), " .. tab_of(bot) .. ") { " .. vars .. " }"
 		end
 	end

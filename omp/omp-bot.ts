@@ -335,7 +335,7 @@ class BotHero {
 
 	describe() {
 		const b = this.bot;
-		if (!b.hero) return col([], { role: "omp.bot.none" });
+		if (!b.hero) return col([], { role: `omp.bot.dock/${b.id()}` });
 		return col(
 			[
 				drawAvatar("hero", b.id(), false),
