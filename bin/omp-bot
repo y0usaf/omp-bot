@@ -134,6 +134,7 @@ while :; do
 	if [ -n "${boxed:-}" ] && ! why=$("$root/bin/omp-bot-health"); then
 		echo "omp-bot: $name lost its box ($why); it carries on here once the box answers again…" >&2
 		until "$root/bin/omp-bot-health" >/dev/null; do sleep 5; done
+		[ -z "${TERN_PANE:-}" ] || exit 76
 		continue
 	fi
 	case $starts in
